@@ -9,7 +9,6 @@ node_modules/
 .DS_Store
 
 # Only push the two app folders; everything else is local
-R1.pdf
 companion_docs/
 outputs/
 transcript files/
