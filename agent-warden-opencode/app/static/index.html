@@ -1,0 +1,1888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notes Studio — Transcript Notes Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #e6eaef;
+    --paper-2: #dce2e9;
+    --ink: #12181f;
+    --ink-soft: #3d4a57;
+    --muted: #6b7785;
+    --line: #c2cad4;
+    --line-strong: #12181f;
+    --surface: #f3f5f8;
+    --surface-2: #fbfcfd;
+    --signal: #2458d0;
+    --signal-ink: #f4f7ff;
+    --accent: #e11d74;
+    --teal: #0f6e6a;
+    --teal-soft: #d7efed;
+    --amber: #b56a00;
+    --amber-soft: #fff0d4;
+    --red: #b42318;
+    --red-soft: #fdecea;
+    --green: #1f6b3a;
+    --green-soft: #e3f5ea;
+    --blue: #2458d0;
+    --blue-soft: #e4eefc;
+    --violet: #5b4bb7;
+    --shadow: 4px 4px 0 rgba(18, 24, 31, 0.88);
+    --radius: 0;
+    --font: "Public Sans", "Segoe UI", sans-serif;
+    --display: "Bricolage Grotesque", "Public Sans", sans-serif;
+    --mono: "IBM Plex Mono", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; overflow-x: hidden; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    overflow-x: hidden;
+    color: var(--ink);
+    font: 14.5px/1.55 var(--font);
+    background:
+      radial-gradient(ellipse 80% 50% at 100% -10%, rgba(36, 88, 208, 0.12), transparent 52%),
+      radial-gradient(ellipse 55% 40% at 0% 0%, rgba(225, 29, 116, 0.07), transparent 48%),
+      linear-gradient(170deg, #eef1f5 0%, var(--paper) 42%, var(--paper-2) 100%);
+    background-attachment: fixed;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    z-index: 0;
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 8px;
+    background: repeating-linear-gradient(
+      180deg,
+      var(--accent) 0 10px,
+      var(--ink) 10px 20px,
+      transparent 20px 36px
+    );
+    opacity: 0.55;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .shell {
+    position: relative;
+    z-index: 1;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 36px 28px 80px;
+  }
+
+  /* —— brand masthead —— */
+  .masthead {
+    display: grid;
+    grid-template-columns: 1fr minmax(200px, 260px);
+    gap: 28px;
+    align-items: end;
+    margin-bottom: 36px;
+    padding-bottom: 28px;
+    border-bottom: 2px solid var(--ink);
+    animation: rise 0.55s ease-out both;
+  }
+  .brand {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .brand-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .stamp {
+    width: 36px;
+    height: 36px;
+    background: var(--ink);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: 15px;
+    letter-spacing: -0.04em;
+    border: 2px solid var(--ink);
+    box-shadow: 3px 3px 0 var(--accent);
+    transform: rotate(-4deg);
+  }
+  .brand h1 {
+    margin: 0;
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: clamp(2.75rem, 7vw, 4.25rem);
+    line-height: 0.88;
+    letter-spacing: -0.05em;
+    text-transform: uppercase;
+  }
+  .brand h1 span {
+    color: var(--accent);
+  }
+  .tagline {
+    margin: 0;
+    max-width: 36rem;
+    color: var(--ink-soft);
+    font-size: 15.5px;
+    line-height: 1.45;
+  }
+  .meta-panel {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--muted);
+    padding: 14px 14px 12px;
+    background: var(--surface-2);
+    border: 2px solid var(--ink);
+    box-shadow: var(--shadow);
+    max-width: 100%;
+    overflow: hidden;
+    animation: rise 0.55s ease-out 0.08s both;
+  }
+  .meta-panel strong {
+    display: block;
+    color: var(--ink);
+    font-weight: 500;
+    margin-bottom: 6px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-size: 10px;
+  }
+  .meta-panel .path {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* —— job ticket / setup —— */
+  .ticket {
+    background: var(--surface-2);
+    border: 2px solid var(--ink);
+    box-shadow: var(--shadow);
+    margin-bottom: 40px;
+    position: relative;
+    animation: rise 0.6s ease-out 0.12s both;
+  }
+  .ticket::before,
+  .ticket::after {
+    content: "";
+    position: absolute;
+    top: 48px;
+    width: 14px;
+    height: 14px;
+    background: var(--paper);
+    border: 2px solid var(--ink);
+    border-radius: 50%;
+    z-index: 2;
+  }
+  .ticket::before { left: -9px; }
+  .ticket::after { right: -9px; }
+  .ticket-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 20px;
+    background: var(--ink);
+    color: #f3f5f8;
+  }
+  .ticket-bar h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .ticket-bar .chip {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #9ec0ff;
+    border: 1px solid rgba(158, 192, 255, 0.4);
+    padding: 4px 9px;
+  }
+  .ticket-body { padding: 24px 22px 22px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 18px;
+  }
+  @media (max-width: 860px) {
+    .masthead { grid-template-columns: 1fr; }
+    .meta-panel { text-align: left; min-width: 0; }
+    .grid { grid-template-columns: 1fr; }
+  }
+
+  label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  select, input[type="text"] {
+    width: 100%;
+    background: var(--surface);
+    color: var(--ink);
+    border: 2px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    font: 500 14px/1.3 var(--font);
+    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  }
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2312181f' d='M6 8.5L1.5 4h9z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+  select:hover, input[type="text"]:hover {
+    border-color: color-mix(in srgb, var(--ink) 45%, var(--line));
+  }
+  select:focus, input[type="text"]:focus {
+    outline: none;
+    border-color: var(--ink);
+    background: #fff;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 28%, transparent);
+  }
+
+  .hint {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 7px;
+  }
+  .muted { color: var(--muted); }
+  .field-block { margin-top: 16px; }
+
+  .btn {
+    border: 2px solid var(--ink);
+    border-radius: var(--radius);
+    padding: 11px 18px;
+    font: 600 13.5px/1 var(--font);
+    cursor: pointer;
+    background: var(--surface);
+    color: var(--ink);
+    transition: transform 0.12s, box-shadow 0.12s, background 0.12s;
+  }
+  .btn:hover:not(:disabled) {
+    transform: translate(-1px, -1px);
+    box-shadow: 2px 2px 0 var(--ink);
+  }
+  .btn:active:not(:disabled) {
+    transform: translate(1px, 1px);
+    box-shadow: none;
+  }
+  .btn.primary {
+    background: var(--signal);
+    color: var(--signal-ink);
+    border-color: var(--ink);
+  }
+  .btn.primary:hover:not(:disabled) {
+    background: #1d4bb8;
+  }
+  .btn.danger {
+    background: var(--red-soft);
+    color: var(--red);
+    border-color: var(--red);
+  }
+  .btn.ghost {
+    background: transparent;
+  }
+  .btn.small {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  .btnrow {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .spacer { flex: 1; }
+
+  #addsubj-form {
+    display: none;
+    margin-top: 10px;
+    padding: 12px;
+    background: var(--paper);
+    border: 1.5px dashed var(--line-strong);
+    flex-direction: column;
+    gap: 8px;
+  }
+  #addsubj-form.open { display: flex; }
+
+  .tlist {
+    background: var(--surface);
+    border: 2px solid var(--line);
+    border-radius: var(--radius);
+    padding: 6px;
+    max-height: 210px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .tlist label {
+    margin: 0;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    color: var(--ink);
+    font-size: 13.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    cursor: pointer;
+    padding: 7px 8px;
+    border-radius: var(--radius);
+  }
+  .tlist label:hover { background: var(--paper); }
+  .tlist input { width: auto; accent-color: var(--teal); }
+  .tlist .tsize {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    margin-left: auto;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .chips label {
+    margin: 0;
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    padding: 9px 13px;
+    background: var(--surface);
+    border: 2px solid var(--line);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  }
+  .chips label:has(input:checked) {
+    border-color: var(--ink);
+    background: color-mix(in srgb, var(--signal) 14%, white);
+    box-shadow: inset 0 -3px 0 var(--accent);
+  }
+  .chips input { accent-color: var(--ink); }
+
+  .status-line { margin-top: 14px; font-size: 13.5px; min-height: 1.2em; }
+  .error { color: var(--red); }
+  .ok { color: var(--green); }
+  .warn { color: var(--amber); }
+  .status-line .muted { color: var(--muted); }
+
+  /* —— runs section —— */
+  .runs-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 8px 0 14px;
+    animation: rise 0.55s ease-out 0.2s both;
+  }
+  .runs-head h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    text-transform: uppercase;
+  }
+  .runs-head p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+
+  #runs:empty::after {
+    content: "No runs yet — pick transcripts and press Run.";
+    display: block;
+    padding: 36px 20px;
+    color: var(--muted);
+    border: 2px dashed var(--line);
+    background:
+      repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 8px,
+        rgba(18, 24, 31, 0.02) 8px,
+        rgba(18, 24, 31, 0.02) 16px
+      );
+    text-align: center;
+    font-size: 14px;
+  }
+
+  .runcard {
+    background: var(--surface-2);
+    border: 2px solid var(--ink);
+    box-shadow: var(--shadow);
+    margin-bottom: 18px;
+    overflow: hidden;
+    animation: slideIn 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .runhead {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 2px solid var(--ink);
+    background: var(--surface);
+    flex-wrap: wrap;
+  }
+  .runhead .rtitle {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: -0.02em;
+  }
+  .runhead .rsub {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .runhead .rstatus {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    border: 1px solid currentColor;
+  }
+  .runhead .rstatus.running { color: var(--amber); background: var(--amber-soft); }
+  .runhead .rstatus.done { color: var(--green); background: var(--green-soft); }
+  .runhead .rstatus.error { color: var(--red); background: var(--red-soft); }
+  .runhead .rstatus.stopped { color: var(--muted); background: var(--paper-2); }
+  .runhead .elapsed {
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .runcard .phases {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+  }
+  @media (max-width: 900px) {
+    .runcard .phases { grid-template-columns: 1fr; }
+  }
+  .phase {
+    padding: 14px 15px;
+    border-right: 1.5px solid var(--line);
+    background: var(--surface-2);
+    min-width: 0;
+  }
+  .phase:last-child { border-right: 0; }
+  @media (max-width: 900px) {
+    .phase { border-right: 0; border-bottom: 1.5px solid var(--line); }
+    .phase:last-child { border-bottom: 0; }
+  }
+  .phase .name {
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+    font-family: var(--display);
+    letter-spacing: -0.01em;
+  }
+  .phase .desc {
+    color: var(--muted);
+    font-size: 11.5px;
+    margin: 4px 0 0 17px;
+  }
+
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--line);
+    display: inline-block;
+    flex-shrink: 0;
+    border: 1.5px solid var(--ink);
+  }
+  .dot.pending { background: #fff; }
+  .dot.running {
+    background: var(--amber);
+    animation: blink 1s steps(2, end) infinite;
+  }
+  .dot.passed { background: var(--green); }
+  .dot.failed { background: var(--red); }
+  .dot.stopped { background: var(--muted); }
+
+  .log {
+    margin-top: 10px;
+    background: #10161d;
+    border: 2px solid var(--ink);
+    border-radius: var(--radius);
+    padding: 9px 11px;
+    max-height: 300px;
+    overflow: auto;
+    font: 11px/1.45 var(--mono);
+    color: #9fb0c3;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .log .rawline { color: #9fb0c3; white-space: pre-wrap; }
+  .log .cmd { color: #c4b5fd; }
+  .gate {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--line);
+  }
+  .gate:last-child { border-bottom: 0; }
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border: 1px solid currentColor;
+  }
+  .badge.pass { background: var(--green-soft); color: var(--green); }
+  .badge.fail { background: var(--red-soft); color: var(--red); }
+  .badge.warn { background: var(--amber-soft); color: var(--amber); }
+  .findings { font-size: 11px; color: var(--muted); margin-left: 4px; }
+
+  .transcript { display: flex; flex-direction: column; gap: 6px; }
+  .tstep {
+    color: #7d8fa3;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-top: 1px dashed #2a3644;
+    padding-top: 5px;
+    margin-top: 2px;
+  }
+  .tmsg { color: #d5deea; white-space: pre-wrap; }
+  .thinking {
+    border-left: 2px solid #8b7cf0;
+    padding: 2px 8px;
+    background: #161322;
+    border-radius: 2px;
+  }
+  .thinking summary {
+    color: #b5a9ff;
+    cursor: pointer;
+    font-size: 10.5px;
+    user-select: none;
+  }
+  .thinking pre {
+    margin: 6px 0 2px;
+    color: #a89cd8;
+    font: 10.5px/1.4 var(--mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow: auto;
+  }
+  .tool {
+    border-left: 2px solid #5b9dff;
+    background: #121820;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .tool summary {
+    cursor: pointer;
+    padding: 3px 8px;
+    color: #9db8dd;
+    font-size: 11px;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .tool summary::-webkit-details-marker { display: none; }
+  .tool summary .tname { color: #7eb0ff; font-weight: 600; }
+  .tool summary .tstatus {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .tool summary .tstatus.running { color: #f0b429; }
+  .tool summary .tstatus.completed { color: #4ade80; }
+  .tool summary .tstatus.error { color: #f87171; }
+  .tool .tbody { padding: 4px 8px 8px; border-top: 1px solid #2a3644; }
+  .tool .tlabel {
+    color: #7d8fa3;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 6px 0 2px;
+  }
+  .tool pre {
+    margin: 0;
+    color: #aab8cf;
+    font: 10.5px/1.4 var(--mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow: auto;
+  }
+  .tool pre.out { color: #7fd0a0; }
+  .tmeta { color: var(--muted); font-size: 10px; }
+
+  .files {
+    padding: 12px 16px;
+    border-top: 2px solid var(--ink);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    font-size: 12.5px;
+    background: var(--surface);
+  }
+  a.file {
+    color: var(--blue);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  a.file:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+  .resume-banner {
+    display: none;
+    margin-top: 16px;
+    padding: 12px 14px;
+    border: 2px solid var(--ink);
+    background: color-mix(in srgb, var(--signal) 8%, white);
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .resume-banner.show { display: flex; }
+  .resume-banner .rb-text { flex: 1; min-width: 200px; font-size: 13.5px; }
+  .resume-banner .rb-text strong { font-family: var(--display); }
+  .resume-banner .arts {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px;
+  }
+  .resume-banner .art {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+    text-transform: uppercase; padding: 2px 7px; border: 1px solid var(--line);
+  }
+  .resume-banner .art.ok { border-color: var(--green); color: var(--green); background: var(--green-soft); }
+  .resume-banner .art.miss { color: var(--muted); }
+
+  .rollup {
+    padding: 10px 16px;
+    border-top: 2px solid var(--ink);
+    background: var(--surface);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    display: flex; flex-wrap: wrap; gap: 6px 16px;
+  }
+  .rollup .total { color: var(--ink); font-weight: 500; }
+  .rollup .ph { color: var(--muted); }
+
+  .history-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+  .history-list:empty::after {
+    content: "No past runs yet — finished jobs will land here.";
+    display: block; padding: 28px 20px; color: var(--muted);
+    border: 2px dashed var(--line); text-align: center; font-size: 14px;
+  }
+  .hcard {
+    background: var(--surface-2);
+    border: 2px solid var(--ink);
+    box-shadow: 2px 2px 0 rgba(18, 24, 31, 0.55);
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px 16px;
+    align-items: center;
+    animation: rise 0.4s ease-out both;
+  }
+  .hcard .htop { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
+  .hcard .htitle { font-family: var(--display); font-weight: 700; font-size: 14.5px; }
+  .hcard .hprefix { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .hcard .hmeta { font-size: 12.5px; color: var(--ink-soft); }
+  .hcard .hactions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .guess-hint {
+    margin-top: 8px; font-size: 12.5px; color: var(--ink-soft);
+    min-height: 1.2em;
+  }
+  .guess-hint em { font-style: normal; color: var(--signal); font-weight: 600; }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(14px) scale(0.99); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes blink {
+    50% { opacity: 0.25; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="masthead">
+    <div class="brand">
+      <div class="brand-mark">
+        <div class="stamp" aria-hidden="true">NS</div>
+      </div>
+      <h1>Notes <span>Studio</span></h1>
+      <p class="tagline">Transcript → dense draft → enriched notes → final HTML. Three agents on a drafting bench — live tools, gates, and outputs.</p>
+    </div>
+    <div class="meta-panel" id="meta">
+      <strong>Workspace</strong>
+      loading…
+    </div>
+  </header>
+
+  <section class="ticket" aria-labelledby="ticket-title">
+    <div class="ticket-bar">
+      <h2 id="ticket-title">New job ticket</h2>
+      <span class="chip">3-agent pipeline</span>
+    </div>
+    <div class="ticket-body">
+      <div class="grid">
+        <div>
+          <label for="subject">Subject</label>
+          <select id="subject"></select>
+          <div class="hint">
+            <button class="btn small ghost" id="addsubj" type="button">+ add subject</button>
+          </div>
+          <div id="addsubj-form">
+            <input id="new-abbr" type="text" placeholder="Abbreviation, e.g. CV" maxlength="8" spellcheck="false">
+            <input id="new-name" type="text" placeholder="Full name, e.g. Computer Vision" spellcheck="false">
+            <div class="btnrow" style="margin-top:0;">
+              <button class="btn small primary" id="addsubj-save" type="button">Create</button>
+              <button class="btn small" id="addsubj-cancel" type="button">Cancel</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <label for="docs">Companion docs for Agent 2 (enricher)</label>
+          <select id="docs"></select>
+        </div>
+        <div>
+          <label for="model">Model</label>
+          <select id="model"></select>
+          <div class="hint">
+            <button class="btn small ghost" id="refresh-models" type="button">↻ refresh models</button>
+            <span class="muted" id="models-hint"></span>
+          </div>
+        </div>
+        <div>
+          <label for="variant">Reasoning effort</label>
+          <select id="variant"></select>
+        </div>
+        <div>
+          <label for="prefix">Lecture prefix <span class="muted">(optional when running multiple)</span></label>
+          <input id="prefix" type="text" placeholder="e.g. NLP_Lecture_9" spellcheck="false">
+        </div>
+        <div>
+          <label for="lecture">Lecture number <span class="muted">(optional; auto-detects)</span></label>
+          <input id="lecture" type="text" placeholder="auto-detect" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="field-block">
+        <label>Transcript files <span class="muted">(select one or more — each runs in parallel)</span></label>
+        <div class="tlist" id="tlist"></div>
+        <div class="hint">
+          <button class="btn small" id="tall" type="button">select all</button>
+          <button class="btn small" id="tnone" type="button">clear</button>
+        </div>
+      </div>
+
+      <div class="chips" id="phase-chips">
+        <label><input type="checkbox" id="p1" checked> Agent 1 — Extractor</label>
+        <label><input type="checkbox" id="p2" checked> Agent 2 — Enricher</label>
+        <label><input type="checkbox" id="p3" checked> Agent 3 — Formatter</label>
+      </div>
+
+      <div class="guess-hint" id="guess-hint"></div>
+      <div class="resume-banner" id="resume-banner">
+        <div class="rb-text">
+          <strong id="resume-label">Resume available</strong>
+          <div class="arts" id="resume-arts"></div>
+        </div>
+        <button class="btn small primary" id="resume-btn" type="button">Resume</button>
+        <button class="btn small" id="retry-btn" type="button" style="display:none;">Retry failed</button>
+      </div>
+
+      <div class="btnrow">
+        <button class="btn primary" id="run">Run pipeline(s)</button>
+        <button class="btn danger" id="stop" disabled>Stop all</button>
+        <span class="spacer"></span>
+        <span class="muted" id="runstate"></span>
+      </div>
+      <div class="status-line" id="status"></div>
+    </div>
+  </section>
+
+  <div class="runs-head">
+    <h2>Past runs</h2>
+    <p>Survives refresh — resume, retry, or open notes.</p>
+  </div>
+  <div class="history-list" id="history"></div>
+
+  <div class="runs-head">
+    <h2>Live runs</h2>
+    <p>Phase logs, tool calls, and gate results stream here.</p>
+  </div>
+  <div id="runs"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = {
+  abbr: "", subjectName: "",
+  runs: {},
+  tools: {},
+  stopped: {},
+  done: {},
+  transcripts: [],
+  subjects: [],
+  docs: [],
+  docsByAbbr: {},
+  models: [],
+  defaultModel: "opencode-go/deepseek-v4-flash",
+  defaultVariant: "max",
+  artifactInfo: null,
+  applyingGuess: false,
+  replaying: false,
+};
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  return r.json();
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+function fmtBytes(b) {
+  return b > 1048576 ? (b/1048576).toFixed(1) + " MB" : (b/1024).toFixed(0) + " KB";
+}
+
+function fmtDur(secs) {
+  secs = Math.max(0, Math.round(Number(secs) || 0));
+  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+function fmtCost(n) {
+  const v = Number(n) || 0;
+  if (v <= 0) return "$0";
+  if (v < 0.01) return "$" + v.toFixed(4);
+  return "$" + v.toFixed(3);
+}
+
+function fmtTok(t) {
+  t = t || {};
+  const in_ = t.input || 0, out = t.output || 0, reason = t.reasoning || 0;
+  const total = in_ + out + reason;
+  if (!total) return "0 tok";
+  const k = n => n >= 1000 ? (n/1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
+  return `${k(total)} tok`;
+}
+
+function setPhases(phases) {
+  $("p1").checked = phases.includes(1);
+  $("p2").checked = phases.includes(2);
+  $("p3").checked = phases.includes(3);
+}
+
+function selectedPhases() {
+  const phases = [];
+  if ($("p1").checked) phases.push(1);
+  if ($("p2").checked) phases.push(2);
+  if ($("p3").checked) phases.push(3);
+  return phases;
+}
+
+function emptyStats() {
+  return {
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0 },
+    phases: { extractor: null, enricher: null, formatter: null },
+  };
+}
+
+function ensureRollup(card) {
+  let el = card.el.querySelector(".rollup");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "rollup";
+    card.el.insertBefore(el, card.filesEl);
+    card.rollupEl = el;
+  }
+  return el;
+}
+
+function renderRollup(card) {
+  const el = ensureRollup(card);
+  const st = card.stats || emptyStats();
+  const parts = [];
+  for (const [name, label] of [["extractor","A1"],["enricher","A2"],["formatter","A3"]]) {
+    const p = st.phases[name];
+    if (!p) continue;
+    parts.push(`<span class="ph">${label} ${fmtDur(p.seconds)} · ${fmtCost(p.cost)}</span>`);
+  }
+  el.innerHTML =
+    `<span class="total">total ${fmtDur(st.seconds || ((Date.now()-card.startedAt)/1000))} · ${fmtCost(st.cost)} · ${fmtTok(st.tokens)}</span>` +
+    parts.join("");
+}
+
+function accumulateStep(card, phase, ev) {
+  if (!card.stats) card.stats = emptyStats();
+  if (ev.type !== "step_finish") return;
+  const part = ev.part || {};
+  const toks = part.tokens || {};
+  const cost = Number(part.cost) || 0;
+  card.stats.cost += cost;
+  for (const k of ["input", "output", "reasoning"]) {
+    card.stats.tokens[k] += Number(toks[k]) || 0;
+  }
+  if (!card.stats.phases[phase] || typeof card.stats.phases[phase] !== "object") {
+    card.stats.phases[phase] = { seconds: 0, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 } };
+  }
+  const bucket = card.stats.phases[phase];
+  bucket.cost += cost;
+  for (const k of ["input", "output", "reasoning"]) {
+    bucket.tokens[k] += Number(toks[k]) || 0;
+  }
+  renderRollup(card);
+}
+
+// ------------------------------------------------------------- run cards
+function ensureRunCard(ev) {
+  const rid = ev.run_id;
+  let card = state.runs[rid];
+  if (card) return card;
+  const host = $("runs");
+  const el = document.createElement("div");
+  el.className = "runcard";
+  el.dataset.run = rid;
+  const modelBit = ev.model
+    ? `${esc(ev.model)}${ev.variant ? " · " + esc(ev.variant) : ""}`
+    : "";
+  el.innerHTML = `
+    <div class="runhead">
+      <span class="dot"></span>
+      <span class="rtitle">${esc(ev.subject)}</span>
+      <span class="rsub">${esc(ev.prefix)}${modelBit ? " · " + modelBit : ""}</span>
+      <span class="elapsed">0:00</span>
+      <span class="rstatus running">starting…</span>
+      <span class="spacer"></span>
+      <button class="btn danger small runstop">Stop</button>
+    </div>
+    <div class="phases">
+      <div class="phase" data-phase="extractor">
+        <div class="name"><span class="dot pending"></span> Agent 1 · Extractor</div>
+        <div class="desc">Transcript → dense draft + extraction manifest</div>
+        <div class="log">waiting…</div>
+      </div>
+      <div class="phase" data-phase="enricher">
+        <div class="name"><span class="dot pending"></span> Agent 2 · Enricher</div>
+        <div class="desc">Dense draft + docs → enriched draft + topic mapping</div>
+        <div class="log">waiting…</div>
+      </div>
+      <div class="phase" data-phase="formatter">
+        <div class="name"><span class="dot pending"></span> Agent 3 · Formatter</div>
+        <div class="desc">Enriched draft → final notes.html</div>
+        <div class="log">waiting…</div>
+      </div>
+    </div>
+    <div class="files"></div>`;
+  host.prepend(el);
+  el.querySelector(".runstop").addEventListener("click", () => {
+    api("/api/stop", { method: "POST", headers: { "Content-Type": "application/json" },
+                       body: JSON.stringify({ run_id: rid }) });
+  });
+  card = {
+    el, rid,
+    subject: ev.subject, prefix: ev.prefix,
+    phaseLogs: {},
+    phaseDots: {},
+    phaseGates: {},
+    startedAt: Date.now(),
+    phase: "extractor",
+    filesEl: el.querySelector(".files"),
+    stats: emptyStats(),
+  };
+  for (const p of ["extractor", "enricher", "formatter"]) {
+    card.phaseLogs[p] = el.querySelector(`.phase[data-phase="${p}"] .log`);
+    card.phaseDots[p] = el.querySelector(`.phase[data-phase="${p}"] .dot`);
+    card.phaseGates[p] = el.querySelector(`.phase[data-phase="${p}"]`);
+  }
+  state.runs[rid] = card;
+  state.tools[rid] = { extractor: {}, enricher: {}, formatter: {} };
+  state.done[rid] = false;
+  renderRollup(card);
+  return card;
+}
+
+function setPhaseDot(rid, phase, cls) {
+  const card = state.runs[rid];
+  if (!card) return;
+  card.phaseDots[phase].className = "dot " + cls;
+}
+
+function appendLog(rid, phase, line) {
+  const card = state.runs[rid];
+  if (!card) return;
+  const el = card.phaseLogs[phase];
+  if (el.textContent === "waiting…") el.textContent = "";
+  el.textContent += line + "\n";
+  if (!state.replaying) el.scrollTop = el.scrollHeight;
+}
+
+function transcriptEl(card, phase) {
+  const el = card.phaseLogs[phase];
+  if (!el.classList.contains("transcript")) {
+    el.classList.add("transcript");
+    el.textContent = "";
+  }
+  return el;
+}
+
+function fmtJson(v) {
+  try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
+
+function renderTool(rid, phase, ev) {
+  const card = state.runs[rid];
+  if (!card) return;
+  const part = ev.part || {};
+  const st = part.state || {};
+  const key = part.callID || part.id || ((part.tool || "tool") + ":" + (part.title || ""));
+  if (state.tools[rid][phase][key]) {
+    const rec = state.tools[rid][phase][key];
+    if (st.status) {
+      rec.statusEl.textContent = st.status;
+      rec.statusEl.className = "tstatus " + st.status;
+      if (rec.det) rec.det.open = st.status === "running";
+    }
+    if (st.output && rec.outEl) rec.outEl.textContent = st.output + (st.output_trimmed ? "\n… [truncated]" : "");
+    return;
+  }
+  const host = transcriptEl(card, phase);
+  const det = document.createElement("details");
+  det.className = "tool";
+  // Collapsed by default; auto-open only while the tool is still running.
+  det.open = (st.status || "running") === "running";
+  const summary = document.createElement("summary");
+  const statusEl = document.createElement("span");
+  const stCls = st.status || "running";
+  statusEl.className = "tstatus " + stCls;
+  statusEl.textContent = stCls;
+  const tname = document.createElement("span");
+  tname.className = "tname";
+  tname.textContent = part.tool || "tool";
+  summary.append(tname, document.createTextNode(" " + esc(part.title || "")), statusEl);
+  det.appendChild(summary);
+  const body = document.createElement("div");
+  body.className = "tbody";
+  if (st.input !== undefined) {
+    const lbl = document.createElement("div"); lbl.className = "tlabel"; lbl.textContent = "input";
+    const pre = document.createElement("pre");
+    pre.textContent = typeof st.input === "string" ? st.input : fmtJson(st.input);
+    body.append(lbl, pre);
+  }
+  let outEl = null;
+  if (st.output !== undefined) {
+    const lbl = document.createElement("div"); lbl.className = "tlabel"; lbl.textContent = "output";
+    outEl = document.createElement("pre"); outEl.className = "out";
+    outEl.textContent = st.output + (st.output_trimmed ? "\n… [truncated]" : "");
+    body.append(lbl, outEl);
+  }
+  det.appendChild(body);
+  host.appendChild(det);
+  state.tools[rid][phase][key] = { statusEl, outEl, det };
+  if (!state.replaying) host.scrollTop = host.scrollHeight;
+}
+
+function renderThinking(rid, phase, ev) {
+  const card = state.runs[rid];
+  if (!card) return;
+  const text = (ev.part || {}).text || "";
+  const host = transcriptEl(card, phase);
+  const det = document.createElement("details");
+  det.className = "thinking";
+  const sum = document.createElement("summary");
+  sum.textContent = "thinking" + (text.length > 300 ? ` · ${(text.length/1000).toFixed(1)}k chars` : "") + " (click to expand)";
+  const pre = document.createElement("pre");
+  pre.textContent = text + ((ev.part || {}).trimmed ? "\n… [truncated]" : "");
+  det.append(sum, pre);
+  host.appendChild(det);
+  host.scrollTop = host.scrollHeight;
+}
+
+function renderStepMeta(rid, phase, ev) {
+  const card = state.runs[rid];
+  if (!card) return;
+  const part = ev.part || {};
+  const host = transcriptEl(card, phase);
+  const div = document.createElement("div");
+  div.className = "tstep";
+  if (ev.type === "step_start") {
+    div.textContent = "step";
+  } else {
+    const t = part.tokens || {};
+    div.textContent = `step done · ${part.reason || ""} · in ${t.input||0} / out ${t.output||0} / reasoning ${t.reasoning||0} tok` + (part.cost ? ` · $${Number(part.cost).toFixed(5)}` : "");
+    accumulateStep(card, phase, ev);
+  }
+  host.appendChild(div);
+  host.scrollTop = host.scrollHeight;
+}
+
+function renderAgentEvent(rid, phase, ev) {
+  if (ev.type === "tool_use") return renderTool(rid, phase, ev);
+  if (ev.type === "reasoning") return renderThinking(rid, phase, ev);
+  if (ev.type === "text") {
+    const card = state.runs[rid];
+    if (!card) return;
+    const host = transcriptEl(card, phase);
+    const div = document.createElement("div");
+    div.className = "tmsg";
+    div.textContent = (ev.part || {}).text || "";
+    host.appendChild(div);
+    host.scrollTop = host.scrollHeight;
+    return;
+  }
+  if (ev.type === "step_start" || ev.type === "step_finish") {
+    return renderStepMeta(rid, phase, ev);
+  }
+}
+
+function renderGate(rid, phase, gate) {
+  const card = state.runs[rid];
+  if (!card) return;
+  let row = card.phaseGates[phase].querySelector(`.gate[data-gate="${gate.gate}"]`);
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "gate";
+    row.dataset.gate = gate.gate;
+    card.phaseGates[phase].appendChild(row);
+  }
+  row.innerHTML = `<span class="badge ${gate.status === 'PASS' ? 'pass' : 'fail'}">${gate.status}</span>` +
+    `<span>${esc(gate.gate)}</span>` +
+    (gate.findings.length
+      ? `<span class="findings">${esc(gate.findings.slice(0, 3).join(" · "))}</span>` : "");
+}
+
+function setRunStatus(rid, cls, text) {
+  const card = state.runs[rid];
+  if (!card) return;
+  const s = card.el.querySelector(".rstatus");
+  s.className = "rstatus " + cls;
+  s.textContent = text;
+}
+
+function refreshFiles(rid) {
+  const card = state.runs[rid];
+  if (!card || !card.prefix) return;
+  api(`/api/outputs?subject=${encodeURIComponent(card.subject)}&prefix=${encodeURIComponent(card.prefix)}`)
+    .then(({ files }) => {
+      if (!card.el.isConnected) return;
+      const el = card.filesEl;
+      if (!files.length) {
+        el.innerHTML = "<span class='muted'>no files yet</span>";
+        return;
+      }
+      const base = `/outputs/${encodeURIComponent(card.subject)}/${encodeURIComponent(card.prefix)}/`;
+      el.innerHTML = files.map(f => {
+        const url = base + f.name.split("/").map(encodeURIComponent).join("/");
+        const isHtml = f.name.endsWith(".html");
+        const view = isHtml ? ` <a class="file" target="_blank" href="${url}">[view]</a>` : "";
+        return `<span><a class="file" href="${url}" target="_blank">${esc(f.name)}</a> <span class="muted">${fmtBytes(f.bytes)}</span>${view}</span>`;
+      }).join("");
+    });
+}
+
+// ------------------------------------------------------------- form / guess
+function prefixToLecture(prefix) {
+  const m = prefix.match(/_(\d+)\s*$/);
+  return m ? m[1] : "";
+}
+
+function checkedTranscripts() {
+  return Array.from(document.querySelectorAll("#tlist input:checked"));
+}
+
+function applyGuessFromSelection() {
+  if (state.applyingGuess) return;
+  const boxes = checkedTranscripts();
+  const hint = $("guess-hint");
+  if (!boxes.length) {
+    hint.textContent = "";
+    refreshArtifacts();
+    return;
+  }
+  const paths = boxes.map(b => b.value);
+  const metas = paths.map(p => state.transcripts.find(t => t.path === p)).filter(Boolean);
+  const guesses = metas.map(t => t.guess || {}).filter(g => g.abbr);
+
+  state.applyingGuess = true;
+  try {
+    if (boxes.length === 1 && guesses[0]) {
+      const g = guesses[0];
+      if (g.abbr) $("subject").value = g.abbr;
+      if (g.prefix && !$("prefix").dataset.manual) $("prefix").value = g.prefix;
+      if (g.lecture_num && !$("lecture").dataset.manual) $("lecture").value = g.lecture_num;
+      autoPickDocs();
+      hint.innerHTML = `Matched <em>${esc(g.abbr)}</em> → ${esc(g.prefix || "(prefix?)")} · lecture ${esc(g.lecture_num || "?")}`;
+    } else if (guesses.length) {
+      const abbrs = [...new Set(guesses.map(g => g.abbr))];
+      if (abbrs.length === 1) {
+        $("subject").value = abbrs[0];
+        autoPickDocs();
+        if (!$("prefix").dataset.manual) $("prefix").value = "";
+        if (!$("lecture").dataset.manual) $("lecture").value = "";
+        hint.innerHTML = `Matched subject <em>${esc(abbrs[0])}</em> for ${boxes.length} files — prefix auto-derived per lecture.`;
+      } else {
+        hint.textContent = `${boxes.length} files across ${abbrs.join(", ")} — set subject carefully; prefixes derive per file.`;
+      }
+    } else {
+      hint.textContent = "No subject match from filename — pick subject and prefix manually.";
+    }
+  } finally {
+    state.applyingGuess = false;
+  }
+  refreshArtifacts();
+}
+
+$("prefix").addEventListener("input", () => {
+  if (state.applyingGuess) return;
+  $("prefix").dataset.manual = "1";
+  const p = $("prefix").value;
+  if (!$("lecture").dataset.manual) $("lecture").value = prefixToLecture(p);
+  refreshArtifacts();
+});
+$("lecture").addEventListener("input", () => {
+  if (state.applyingGuess) return;
+  $("lecture").dataset.manual = "1";
+});
+$("subject").addEventListener("change", () => {
+  autoPickDocs();
+  refreshArtifacts();
+});
+
+function autoPickDocs() {
+  const docsSel = $("docs");
+  if (docsSel.dataset.manual) return;
+  const abbr = $("subject").value;
+  const match = state.docsByAbbr[abbr];
+  if (match && match.path) {
+    docsSel.value = match.path;
+  } else {
+    // Fall back to Default (subject's folder) — server resolves by abbr.
+    docsSel.value = "";
+  }
+}
+
+$("docs").addEventListener("change", () => {
+  if (!state.applyingGuess) $("docs").dataset.manual = "1";
+});
+
+$("tall").addEventListener("click", () => {
+  document.querySelectorAll("#tlist input").forEach(c => c.checked = true);
+  applyGuessFromSelection();
+});
+$("tnone").addEventListener("click", () => {
+  document.querySelectorAll("#tlist input").forEach(c => c.checked = false);
+  applyGuessFromSelection();
+});
+
+function showAddSubject(on) {
+  $("addsubj-form").classList.toggle("open", on);
+  if (on) { $("new-abbr").focus(); }
+}
+$("addsubj").addEventListener("click", () => showAddSubject(true));
+$("addsubj-cancel").addEventListener("click", () => showAddSubject(false));
+$("addsubj-save").addEventListener("click", async () => {
+  const abbr = $("new-abbr").value.trim().toUpperCase();
+  const name = $("new-name").value.trim();
+  if (!abbr || !name) return setStatus("Enter both abbreviation and name.", "error");
+  const res = await api("/api/subjects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ abbr, name }),
+  });
+  if (res.error) return setStatus(res.error, "error");
+  $("new-abbr").value = ""; $("new-name").value = "";
+  showAddSubject(false);
+  const sel = $("subject");
+  sel.innerHTML = res.subjects.map(s =>
+    `<option value="${s.abbr}">${s.abbr} — ${esc(s.subject)}</option>`).join("");
+  sel.value = res.abbr;
+  setStatus(`Subject ${res.abbr} created (companion_docs/${res.abbr} folder ready).`, "ok");
+  refreshConfig();
+});
+
+async function startJobs({ resume = false, retry = false, phases = null,
+                           abbr = null, prefix = null, lectureNum = null,
+                           transcripts = null } = {}) {
+  abbr = abbr || $("subject").value;
+  prefix = prefix != null ? prefix : $("prefix").value.trim();
+  lectureNum = lectureNum != null ? lectureNum : ($("lecture").value.trim() || prefixToLecture(prefix));
+  transcripts = transcripts || Array.from(checkedTranscripts()).map(c => c.value);
+  phases = phases || selectedPhases();
+  if (!resume && !retry && !transcripts.length)
+    return setStatus("Choose at least one transcript file.", "error");
+  if (!resume && !retry && !phases.length)
+    return setStatus("Select at least one agent phase.", "error");
+  $("run").disabled = true;
+  $("runstate").textContent = resume ? "resuming…" : retry ? "retrying…" :
+    ("starting " + Math.max(transcripts.length, 1) + " run(s)…");
+  const docsSel = $("docs");
+  const docs = docsSel.value ? docsSel.value : undefined;
+  const body = {
+    abbr, prefix, lecture_num: lectureNum, docs, resume, retry,
+    model: $("model").value || state.defaultModel,
+    variant: $("variant").disabled ? "" : ($("variant").value || ""),
+  };
+  if (transcripts.length) body.transcripts = transcripts;
+  if (!resume && !retry) body.phases = phases;
+  const res = await api("/api/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  $("run").disabled = false;
+  $("runstate").textContent = "";
+  if (res.error) return setStatus(res.error, "error");
+  const started = (res.jobs || []).map(j => `${j.prefix} [${(j.phases||[]).join(",")}]`).join(", ");
+  setStatus(`Started ${(res.jobs||[]).length} run(s): ${started}`, "ok");
+  if (res.rejected && res.rejected.length) {
+    setStatus(`Started ${(res.jobs||[]).length} · rejected ${res.rejected.length}: ` +
+              res.rejected.map(r => `${r.prefix} (${r.reason})`).join("; "), "warn");
+  }
+  refreshHistory();
+  refreshArtifacts();
+}
+
+$("run").addEventListener("click", () => startJobs());
+$("resume-btn").addEventListener("click", () => {
+  const info = state.artifactInfo;
+  if (!info) return;
+  setPhases(info.resume_phases || []);
+  startJobs({ resume: true, phases: info.resume_phases });
+});
+$("retry-btn").addEventListener("click", () => {
+  const info = state.artifactInfo;
+  if (!info || !info.last_run) return;
+  const phases = info.last_run.retry_phases || info.resume_phases || [];
+  setPhases(phases);
+  startJobs({ retry: true, phases });
+});
+
+$("stop").addEventListener("click", async () => {
+  await api("/api/stop", { method: "POST" });
+  setStatus("Stopping all runs…", "warn");
+});
+
+function setStatus(text, cls) {
+  const el = $("status");
+  el.innerHTML = `<span class="${cls || ''}">${esc(text)}</span>`;
+}
+
+// ------------------------------------------------------------- artifacts / resume
+async function refreshArtifacts() {
+  const abbr = $("subject").value;
+  const subj = (state.subjects.find(s => s.abbr === abbr) || {}).subject;
+  const prefix = $("prefix").value.trim();
+  const banner = $("resume-banner");
+  if (!subj || !prefix) {
+    banner.classList.remove("show");
+    state.artifactInfo = null;
+    return;
+  }
+  const info = await api(`/api/artifacts?subject=${encodeURIComponent(subj)}&prefix=${encodeURIComponent(prefix)}`);
+  if (info.error) {
+    banner.classList.remove("show");
+    return;
+  }
+  state.artifactInfo = info;
+  const arts = info.artifacts || {};
+  const any = arts.extractor || arts.enricher || arts.formatter;
+  if (!any && !(info.last_run && info.last_run.status === "error")) {
+    banner.classList.remove("show");
+    return;
+  }
+  banner.classList.add("show");
+  const label = info.resume_phases && info.resume_phases.length
+    ? info.resume_label
+    : (info.resume_label === "complete" ? "All phases complete" : info.resume_label);
+  $("resume-label").textContent = label;
+  $("resume-arts").innerHTML = ["extractor","enricher","formatter"].map(p =>
+    `<span class="art ${arts[p] ? 'ok' : 'miss'}">${p}${arts[p] ? ' ✓' : ''}</span>`
+  ).join("");
+  $("resume-btn").style.display = (info.resume_phases && info.resume_phases.length) ? "" : "none";
+  const retry = info.last_run && info.last_run.status === "error" && (info.last_run.retry_phases || []).length;
+  $("retry-btn").style.display = retry ? "" : "none";
+  if (retry) {
+    $("retry-btn").textContent = info.last_run.retry_label || "Retry failed";
+  }
+}
+
+// ------------------------------------------------------------- history
+function renderHistory(runs) {
+  const host = $("history");
+  host.innerHTML = "";
+  for (const run of runs) {
+    const el = document.createElement("div");
+    el.className = "hcard";
+    const stCls = run.status === "done" ? "done" : run.status === "error" ? "error" :
+      run.status === "stopped" ? "stopped" : "running";
+    const when = run.ended_at || run.started_at || run.mtime;
+    const whenStr = when ? new Date(when * 1000).toLocaleString() : "";
+    const phaseBits = Object.entries(run.phase_stats || {}).map(([n, p]) => {
+      const short = n === "extractor" ? "A1" : n === "enricher" ? "A2" : "A3";
+      return `${short} ${fmtDur(p.seconds)}`;
+    }).join(" · ");
+    el.innerHTML = `
+      <div>
+        <div class="htop">
+          <span class="htitle">${esc(run.subject || "")}</span>
+          <span class="hprefix">${esc(run.prefix || "")}</span>
+          <span class="rstatus ${stCls}">${esc(run.status || "unknown")}</span>
+        </div>
+        <div class="hmeta">
+          ${esc(whenStr)}
+          ${run.seconds ? ` · ${fmtDur(run.seconds)}` : ""}
+          ${run.cost ? ` · ${fmtCost(run.cost)}` : ""}
+          ${run.tokens ? ` · ${fmtTok(run.tokens)}` : ""}
+          ${run.model ? ` · ${esc(run.model)}${run.variant ? "/" + esc(run.variant) : ""}` : ""}
+          ${phaseBits ? ` · ${esc(phaseBits)}` : ""}
+          ${run.error ? ` · <span class="error">${esc(run.error)}</span>` : ""}
+        </div>
+      </div>
+      <div class="hactions"></div>`;
+    const actions = el.querySelector(".hactions");
+    if (run.html_url) {
+      const a = document.createElement("a");
+      a.className = "btn small"; a.target = "_blank"; a.href = run.html_url; a.textContent = "Open notes";
+      actions.appendChild(a);
+    }
+    if ((run.resume_phases || []).length) {
+      const b = document.createElement("button");
+      b.className = "btn small primary"; b.type = "button";
+      b.textContent = run.resume_label || "Resume";
+      b.addEventListener("click", () => loadAndRun(run, { resume: true }));
+      actions.appendChild(b);
+    }
+    if (run.status === "error" && (run.retry_phases || []).length) {
+      const b = document.createElement("button");
+      b.className = "btn small"; b.type = "button";
+      b.textContent = run.retry_label || "Retry failed";
+      b.addEventListener("click", () => loadAndRun(run, { retry: true }));
+      actions.appendChild(b);
+    }
+    const load = document.createElement("button");
+    load.className = "btn small ghost"; load.type = "button"; load.textContent = "Load";
+    load.addEventListener("click", () => loadIntoForm(run));
+    actions.appendChild(load);
+
+    const arch = document.createElement("button");
+    arch.className = "btn small ghost"; arch.type = "button"; arch.textContent = "Archive";
+    arch.title = "Move outputs to outputs/_archive/";
+    arch.addEventListener("click", () => deletePastRun(run, true));
+    actions.appendChild(arch);
+
+    const del = document.createElement("button");
+    del.className = "btn small danger"; del.type = "button"; del.textContent = "Delete";
+    del.addEventListener("click", () => deletePastRun(run, false));
+    actions.appendChild(del);
+    host.appendChild(el);
+  }
+}
+
+async function deletePastRun(run, archive) {
+  const label = archive ? "Archive" : "Delete";
+  const detail = `${run.subject}/${run.prefix}`;
+  if (!confirm(`${label} ${detail}?\n\n${archive ? "Folder moves to outputs/_archive/." : "This permanently removes the output folder."}`)) {
+    return;
+  }
+  const res = await api("/api/history/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject: run.subject, prefix: run.prefix, archive: !!archive }),
+  });
+  if (res.error) return setStatus(res.error, "error");
+  setStatus(`${label}d ${detail}${res.path ? " → " + res.path : ""}`, "ok");
+  refreshHistory();
+  refreshArtifacts();
+}
+
+function loadIntoForm(run) {
+  if (run.abbr) $("subject").value = run.abbr;
+  autoPickDocs();
+  $("prefix").value = run.prefix || "";
+  $("prefix").dataset.manual = "1";
+  if (run.lecture_num) {
+    $("lecture").value = run.lecture_num;
+    $("lecture").dataset.manual = "1";
+  }
+  if (run.transcript) {
+    document.querySelectorAll("#tlist input").forEach(c => {
+      c.checked = c.value === run.transcript || c.value.replace(/\\/g, "/") === String(run.transcript).replace(/\\/g, "/");
+    });
+  }
+  const phases = run.resume_phases && run.resume_phases.length
+    ? run.resume_phases
+    : (run.phases_requested || [1, 2, 3]);
+  setPhases(phases);
+  $("guess-hint").innerHTML = `Loaded <em>${esc(run.prefix || "")}</em> (${esc(run.status || "")})`;
+  refreshArtifacts();
+  $("subject").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function loadAndRun(run, { resume = false, retry = false } = {}) {
+  loadIntoForm(run);
+  const transcripts = [];
+  if (run.transcript) transcripts.push(run.transcript);
+  else transcripts.push(...checkedTranscripts().map(c => c.value));
+  startJobs({
+    resume, retry,
+    abbr: run.abbr,
+    prefix: run.prefix,
+    lectureNum: run.lecture_num,
+    transcripts,
+    phases: retry ? run.retry_phases : run.resume_phases,
+  });
+}
+
+async function refreshHistory() {
+  const res = await api("/api/history?limit=40");
+  renderHistory(res.runs || []);
+}
+
+// ------------------------------------------------------------- model / effort
+const VARIANT_RANK = ["none", "minimal", "low", "medium", "high", "xhigh",
+                      "thinking", "max"];
+
+function preferredVariant(variants, wanted) {
+  if (!variants || !variants.length) return "";
+  wanted = wanted || state.defaultVariant || "max";
+  if (variants.includes(wanted)) return wanted;
+  let best = variants[0], bestScore = -1;
+  for (const v of variants) {
+    const score = VARIANT_RANK.indexOf(v);
+    if (score > bestScore) { best = v; bestScore = score; }
+  }
+  return best;
+}
+
+function fillModelSelect(prefer) {
+  const sel = $("model");
+  const prev = prefer || sel.value || state.defaultModel;
+  const models = state.models || [];
+  sel.innerHTML = models.map(m => {
+    const label = m.name ? `${m.name}` : m.id;
+    const effort = (m.variants || []).length
+      ? ` · ${(m.variants || []).join("/")}` : "";
+    return `<option value="${esc(m.id)}">${esc(label)}${esc(effort)}</option>`;
+  }).join("");
+  if (!models.length) {
+    sel.innerHTML = `<option value="${esc(state.defaultModel)}">${esc(state.defaultModel)}</option>`;
+  }
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  else if (state.defaultModel && [...sel.options].some(o => o.value === state.defaultModel))
+    sel.value = state.defaultModel;
+  fillVariantSelect();
+}
+
+function fillVariantSelect(prefer) {
+  const modelId = $("model").value;
+  const meta = (state.models || []).find(m => m.id === modelId) || {};
+  const variants = meta.variants || [];
+  const sel = $("variant");
+  const prev = prefer != null ? prefer : sel.value;
+  if (!variants.length) {
+    sel.innerHTML = `<option value="">default (no effort control)</option>`;
+    sel.disabled = true;
+    sel.value = "";
+    return;
+  }
+  sel.disabled = false;
+  sel.innerHTML = variants.map(v =>
+    `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  const pick = (prev && variants.includes(prev))
+    ? prev : preferredVariant(variants, state.defaultVariant);
+  sel.value = pick;
+}
+
+function syncMetaModel() {
+  const model = $("model")?.value || state.defaultModel;
+  const variant = $("variant")?.disabled ? "(default)" : ($("variant")?.value || "—");
+  const meta = $("meta");
+  if (!meta || !meta.dataset.ready) return;
+  const ws = meta.dataset.workspace || "";
+  meta.innerHTML =
+    `<strong>Desk</strong>` +
+    `<span class="path" title="${esc(ws)}">ws · ${esc(ws)}</span>` +
+    `model · ${esc(model)}<br>` +
+    `effort · ${esc(variant)}`;
+}
+
+$("model").addEventListener("change", () => {
+  fillVariantSelect();
+  syncMetaModel();
+});
+$("variant").addEventListener("change", syncMetaModel);
+$("refresh-models").addEventListener("click", () => refreshConfig({ refreshModels: true }));
+
+// ------------------------------------------------------------- events
+async function refreshConfig({ refreshModels = false } = {}) {
+  const cfg = await api("/api/config" + (refreshModels ? "?refresh_models=1" : ""));
+  state.subjects = cfg.subjects || [];
+  state.transcripts = cfg.transcripts || [];
+  state.docs = cfg.docs || [];
+  state.docsByAbbr = cfg.docs_by_abbr || {};
+  state.models = cfg.models || [];
+  state.defaultModel = cfg.model || "opencode-go/deepseek-v4-flash";
+  state.defaultVariant = cfg.variant || "max";
+  const meta = $("meta");
+  meta.dataset.ready = "1";
+  meta.dataset.workspace = cfg.workspace || "";
+  meta.innerHTML =
+    `<strong>Desk</strong>` +
+    `<span class="path" title="${esc(cfg.workspace)}">ws · ${esc(cfg.workspace)}</span>` +
+    `model · ${esc(state.defaultModel)}<br>` +
+    `effort · ${esc(state.defaultVariant)}`;
+  const hint = $("models-hint");
+  if (cfg.models_ok === false && cfg.models_error) {
+    hint.textContent = `fallback · ${cfg.models_error}`;
+  } else {
+    hint.textContent = `${(cfg.models || []).length} opencode-go models`;
+  }
+  const prevModel = $("model").value;
+  const prevVariant = $("variant").value;
+  fillModelSelect(prevModel || state.defaultModel);
+  fillVariantSelect(prevVariant || state.defaultVariant);
+  syncMetaModel();
+  const sel = $("subject");
+  const prev = sel.value;
+  sel.innerHTML = cfg.subjects.map(s =>
+    `<option value="${s.abbr}">${s.abbr} — ${esc(s.subject)}</option>`).join("");
+  if (prev) sel.value = prev;
+  const docsSel = $("docs");
+  const prevDocs = docsSel.value;
+  const wasManual = !!docsSel.dataset.manual;
+  docsSel.innerHTML =
+    `<option value="">Default (subject's folder)</option>` +
+    `<option value="__none__">None — no companion docs</option>` +
+    (cfg.docs || []).map(d => `<option value="${esc(d.path)}">${esc(d.name)}</option>`).join("");
+  if (wasManual && prevDocs) {
+    docsSel.value = prevDocs;
+    docsSel.dataset.manual = "1";
+  } else {
+    delete docsSel.dataset.manual;
+    autoPickDocs();
+  }
+  const tlist = $("tlist");
+  const checked = new Set(checkedTranscripts().map(c => c.value));
+  tlist.innerHTML = cfg.transcripts.map(t =>
+    `<label><input type="checkbox" value="${esc(t.path)}"${checked.has(t.path)?" checked":""}><span>${esc(t.name)}</span><span class="tsize">${fmtBytes(t.bytes)}</span></label>`).join("");
+  tlist.querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("change", applyGuessFromSelection);
+  });
+}
+
+function handleEvent(ev) {
+  if (ev.type === "replay_start") {
+    state.replaying = true;
+    if (ev.count) setStatus(`Replaying ${ev.count} event(s) from in-flight run(s)…`, "muted");
+    return;
+  }
+  if (ev.type === "replay_end") {
+    state.replaying = false;
+    setStatus("Caught up with in-flight run(s).", "ok");
+    for (const rid in state.runs) refreshFiles(rid);
+    $("stop").disabled = !Object.values(state.runs).some(c => {
+      const s = c.el.querySelector(".rstatus");
+      return s && s.classList.contains("running");
+    });
+    return;
+  }
+  if (ev.type === "pipeline_start") {
+    const card = ensureRunCard(ev);
+    card.subject = ev.subject; card.prefix = ev.prefix;
+    if (!ev.replay) {
+      card.stats = emptyStats();
+      card.startedAt = Date.now();
+    }
+    renderRollup(card);
+    setRunStatus(ev.run_id, "running", "running");
+    $("stop").disabled = false;
+  }
+  if (!ev.run_id || !state.runs[ev.run_id]) return;
+  const rid = ev.run_id;
+  if (ev.type === "phase_start") {
+    const card = state.runs[rid];
+    card.phase = ev.phase;
+    const order = ["extractor", "enricher", "formatter"];
+    const idx = order.indexOf(ev.phase);
+    for (let i = 0; i < idx; i++) {
+      if (card.phaseDots[order[i]].classList.contains("pending") ||
+          card.phaseDots[order[i]].classList.contains("running"))
+        setPhaseDot(rid, order[i], "passed");
+    }
+    setPhaseDot(rid, ev.phase, "running");
+    setRunStatus(rid, "running", ev.phase);
+    const el = card.phaseLogs[ev.phase];
+    el.classList.remove("transcript");
+    el.textContent = "waiting…";
+    state.tools[rid][ev.phase] = {};
+    if (!card.stats.phases[ev.phase]) {
+      card.stats.phases[ev.phase] = { seconds: 0, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 } };
+    }
+  }
+  if (ev.type === "phase_end") {
+    setPhaseDot(rid, ev.phase, ev.ok ? "passed" : "failed");
+    setRunStatus(rid, ev.ok ? "running" : "error", ev.ok ? "next…" : "phase failed");
+    const card = state.runs[rid];
+    if (card && ev.stats) {
+      card.stats.phases[ev.phase] = {
+        seconds: ev.stats.seconds || ev.seconds || 0,
+        cost: ev.stats.cost || 0,
+        tokens: ev.stats.tokens || { input: 0, output: 0, reasoning: 0 },
+      };
+      card.stats.cost = 0;
+      card.stats.tokens = { input: 0, output: 0, reasoning: 0 };
+      card.stats.seconds = 0;
+      for (const p of Object.values(card.stats.phases)) {
+        if (!p) continue;
+        card.stats.cost += Number(p.cost) || 0;
+        card.stats.seconds += Number(p.seconds) || 0;
+        for (const k of ["input", "output", "reasoning"])
+          card.stats.tokens[k] += Number((p.tokens || {})[k]) || 0;
+      }
+      renderRollup(card);
+    } else if (card && ev.seconds != null) {
+      if (!card.stats.phases[ev.phase])
+        card.stats.phases[ev.phase] = { seconds: 0, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 } };
+      card.stats.phases[ev.phase].seconds = ev.seconds;
+      renderRollup(card);
+    }
+  }
+  if (ev.type === "log") {
+    appendLog(rid, ev.phase, ev.line || " ");
+  }
+  if (ev.type === "agent_event") {
+    renderAgentEvent(rid, ev.phase, ev.event);
+  }
+  if (ev.type === "gate") {
+    renderGate(rid, ev.phase, ev.result);
+  }
+  if (ev.type === "pipeline_end") {
+    const card = state.runs[rid];
+    if (!card) return;
+    const cls = ev.status === "done" ? "done" : ev.status === "error" ? "error" : "stopped";
+    setRunStatus(rid, cls, ev.status === "done" ? "complete" : ev.status);
+    for (const p of ["extractor", "enricher", "formatter"]) {
+      if (card.phaseDots[p].classList.contains("running")) setPhaseDot(rid, p, cls === "done" ? "passed" : cls);
+    }
+    if (ev.stats) {
+      card.stats.cost = Number(ev.stats.cost) || card.stats.cost;
+      card.stats.tokens = ev.stats.tokens || card.stats.tokens;
+      card.stats.seconds = Number(ev.stats.seconds) || card.stats.seconds;
+      if (ev.stats.phases) {
+        for (const [k, v] of Object.entries(ev.stats.phases)) card.stats.phases[k] = v;
+      }
+      renderRollup(card);
+    }
+    if (ev.status === "error" && !state.replaying) setStatus("Pipeline failed: " + ev.error, "error");
+    state.done[rid] = ev.status === "done";
+    refreshFiles(rid);
+    if (!state.replaying) {
+      refreshHistory();
+      refreshArtifacts();
+    }
+    const anyRunning = Object.values(state.runs).some(c => {
+      const s = c.el.querySelector(".rstatus");
+      return s && s.classList.contains("running");
+    });
+    if (!anyRunning) $("stop").disabled = true;
+  }
+  if (ev.type === "idle") {
+    refreshFiles(rid);
+    if (!state.replaying) refreshHistory();
+  }
+}
+
+const es = new EventSource("/api/events");
+es.onmessage = e => {
+  let ev;
+  try { ev = JSON.parse(e.data); } catch { return; }
+  handleEvent(ev);
+};
+
+setInterval(() => {
+  for (const rid in state.runs) {
+    const card = state.runs[rid];
+    if (!card.el.isConnected) continue;
+    const secs = Math.floor((Date.now() - card.startedAt) / 1000);
+    const mm = Math.floor(secs / 60), ss = secs % 60;
+    card.el.querySelector(".elapsed").textContent = `${mm}:${String(ss).padStart(2, "0")}`;
+    const st = card.el.querySelector(".rstatus");
+    if (st && st.classList.contains("running")) renderRollup(card);
+  }
+}, 1000);
+
+setInterval(() => {
+  for (const rid in state.runs) refreshFiles(rid);
+}, 10000);
+
+refreshConfig().then(async () => {
+  applyGuessFromSelection();
+  autoPickDocs();
+  await refreshHistory();
+});
+</script>
+</body>
+</html>

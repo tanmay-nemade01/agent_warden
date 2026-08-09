@@ -1,0 +1,425 @@
+/* ============================================
+   BitsNotes — Enhancement Reference Stylesheet
+   ============================================
+   Reference styles for Agent 4 interactive widgets.
+   Consumes design tokens exposed by lecture-notes.css & tokens.css.
+   Supports automatic Light & Dark mode adaptation.
+   All classes use the mandatory 'enh-' prefix.
+   ============================================ */
+
+:root {
+  /* Inherit BitsNotes design system tokens with fallback values */
+  --enh-accent: var(--accent, #0F766E);
+  --enh-accent-hover: var(--accent-hover, #115E59);
+  --enh-accent-subtle: var(--accent-subtle, rgba(15, 118, 110, 0.10));
+  
+  --enh-bg: var(--bg-card, var(--bg, #FFFFFF));
+  --enh-bg-subtle: var(--bg-subtle, #F6F8FA);
+  --enh-bg-elevated: var(--bg-elevated, #FFFFFF);
+  
+  --enh-border: var(--border, #D0D7DE);
+  --enh-border-strong: var(--border-strong, #8B949E);
+  
+  --enh-text: var(--text, #1F2328);
+  --enh-text-muted: var(--text-muted, #656D76);
+  --enh-text-faint: var(--text-faint, #8B949E);
+  
+  --enh-radius-sm: var(--r-sm, 6px);
+  --enh-radius-md: var(--r-md, 10px);
+  --enh-radius-lg: var(--r-lg, 14px);
+  
+  --enh-font-body: var(--font-body, 'Inter', system-ui, -apple-system, sans-serif);
+  --enh-font-code: var(--font-code, 'Fira Code', 'JetBrains Mono', monospace);
+  
+  --enh-shadow: var(--shadow-overlay, 0 4px 12px rgba(0, 0, 0, 0.05));
+  --enh-transition: all 180ms cubic-bezier(.2, .8, .2, 1);
+}
+
+/* Base Widget Container */
+.enh-widget {
+  margin: 1.75rem 0;
+  padding: 1.25rem 1.5rem;
+  background-color: var(--enh-bg-subtle);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-md);
+  font-family: var(--enh-font-body);
+  color: var(--enh-text);
+  box-shadow: var(--enh-shadow);
+  transition: var(--enh-transition);
+}
+
+.enh-widget-title {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  font-weight: 650;
+  color: var(--enh-text);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Fallback for JS-disabled environments */
+.enh-fallback {
+  margin: 0.5rem 0 0 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--enh-text-muted);
+  background-color: var(--enh-bg);
+  border-left: 3px solid var(--enh-border-strong);
+  border-radius: var(--enh-radius-sm);
+}
+
+/* --- Type 1: Parameter Playground --- */
+.enh-playground {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.enh-playground-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+  background-color: var(--enh-bg);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-sm);
+}
+
+.enh-slider-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--enh-text);
+}
+
+.enh-slider {
+  accent-color: var(--enh-accent);
+  cursor: pointer;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.enh-slider-value {
+  font-family: var(--enh-font-code);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--enh-accent);
+  background: var(--enh-accent-subtle);
+  padding: 2px 6px;
+  border-radius: var(--enh-radius-sm);
+  display: inline-block;
+  min-width: 2.5rem;
+  text-align: center;
+}
+
+.enh-playground-output {
+  padding: 1rem;
+  background: var(--enh-bg);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-sm);
+  text-align: center;
+}
+
+.enh-formula-display {
+  margin-bottom: 0.75rem;
+  overflow-x: auto;
+}
+
+.enh-result {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--enh-text);
+}
+
+.enh-computed-value {
+  color: var(--enh-accent);
+  font-family: var(--enh-font-code);
+}
+
+.enh-bar-breakdown {
+  margin-top: 1rem;
+  height: 12px;
+  width: 100%;
+  background: var(--enh-bg-subtle);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+}
+
+/* --- Type 2: Algorithm Step-Through --- */
+.enh-stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.enh-stepper-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--enh-bg);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-sm);
+}
+
+.enh-step-prev,
+.enh-step-next {
+  background-color: var(--enh-accent);
+  color: #FFFFFF;
+  border: none;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--enh-radius-sm);
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: var(--enh-transition);
+}
+
+.enh-step-prev:hover:not(:disabled),
+.enh-step-next:hover:not(:disabled) {
+  background-color: var(--enh-accent-hover);
+}
+
+.enh-step-prev:disabled,
+.enh-step-next:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.enh-step-counter {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--enh-text-muted);
+}
+
+.enh-stepper-diagram {
+  padding: 1rem;
+  background: var(--enh-bg);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-sm);
+  display: flex;
+  justify-content: center;
+}
+
+.enh-tree-svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.enh-stepper-narrative {
+  padding: 0.85rem 1rem;
+  background: var(--enh-accent-subtle);
+  border-left: 4px solid var(--enh-accent);
+  border-radius: 0 var(--enh-radius-sm) var(--enh-radius-sm) 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.enh-step-text {
+  margin: 0;
+  color: var(--enh-text);
+}
+
+/* --- Type 3: Concept Check Card --- */
+.enh-concept-check {
+  background: var(--enh-bg);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-sm);
+  overflow: hidden;
+  transition: var(--enh-transition);
+}
+
+.enh-concept-check[open] {
+  border-color: var(--enh-accent);
+}
+
+.enh-check-prompt {
+  padding: 0.85rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  background: var(--enh-bg-subtle);
+  color: var(--enh-text);
+  list-style-type: '🧠 ';
+}
+
+.enh-check-content {
+  padding: 1rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.enh-check-question {
+  margin: 0 0 0.75rem 0;
+  color: var(--enh-text);
+}
+
+.enh-check-divider {
+  border: 0;
+  border-top: 1px dashed var(--enh-border);
+  margin: 0.75rem 0;
+}
+
+.enh-check-answer {
+  margin: 0;
+  color: var(--enh-text);
+}
+
+/* --- Type 4: External Learning Resources --- */
+.enh-resources-panel {
+  background: var(--enh-bg);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-sm);
+  overflow: hidden;
+}
+
+.enh-resources-title {
+  padding: 0.85rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  background: var(--enh-bg-subtle);
+  color: var(--enh-text);
+}
+
+.enh-resources-list {
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.enh-resource-item {
+  padding: 0.6rem 0.8rem;
+  background: var(--enh-bg-subtle);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.enh-resource-link {
+  font-weight: 600;
+  color: var(--enh-accent);
+  text-decoration: none;
+}
+
+.enh-resource-link:hover {
+  text-decoration: underline;
+}
+
+.enh-resource-meta {
+  font-size: 0.8rem;
+  color: var(--enh-text-muted);
+}
+
+.enh-resource-rationale {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.875rem;
+  color: var(--enh-text);
+}
+
+/* --- Type 5: Concept Relationship Map --- */
+.enh-concept-map {
+  padding: 1rem;
+  background: var(--enh-bg);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-sm);
+  overflow-x: auto;
+  text-align: center;
+}
+
+.enh-map-note {
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--enh-text-muted);
+  font-style: italic;
+}
+
+/* --- Type 6: Visual Diagram & Flowchart --- */
+.enh-diagram {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.enh-diagram-canvas {
+  padding: 1.25rem 1rem;
+  background: var(--enh-bg);
+  border: 1px solid var(--enh-border);
+  border-radius: var(--enh-radius-sm);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow-x: auto;
+}
+
+.enh-svg-diagram {
+  max-width: 100%;
+  height: auto;
+  font-family: var(--enh-font-body);
+}
+
+.enh-svg-diagram text {
+  fill: var(--enh-text);
+  font-size: 13px;
+}
+
+.enh-svg-diagram .enh-axis {
+  stroke: var(--enh-border-strong);
+  stroke-width: 1.5;
+}
+
+.enh-svg-diagram .enh-grid {
+  stroke: var(--enh-border);
+  stroke-dasharray: 4 4;
+  opacity: 0.5;
+}
+
+.enh-svg-diagram .enh-curve {
+  stroke: var(--enh-accent);
+  stroke-width: 2.5;
+  fill: none;
+}
+
+.enh-svg-diagram .enh-node {
+  fill: var(--enh-bg-subtle);
+  stroke: var(--enh-accent);
+  stroke-width: 2;
+}
+
+.enh-svg-diagram .enh-node-root {
+  fill: var(--enh-accent-subtle);
+  stroke: var(--enh-accent);
+  stroke-width: 2.5;
+}
+
+.enh-svg-diagram .enh-label {
+  fill: var(--enh-text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.enh-svg-diagram .enh-label-muted {
+  fill: var(--enh-text-muted);
+  font-size: 11px;
+}
+
+.enh-diagram-caption {
+  padding: 0.75rem 1rem;
+  background: var(--enh-accent-subtle);
+  border-left: 4px solid var(--enh-accent);
+  border-radius: 0 var(--enh-radius-sm) var(--enh-radius-sm) 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--enh-text);
+}
+
