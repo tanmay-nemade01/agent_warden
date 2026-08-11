@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,36 +7,68 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<script>
+  // Apply theme before first paint to prevent flash
+  (function(){var t=localStorage.getItem('agent_warden_theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();
+</script>
 <style>
   :root {
-    --paper: #e6eaef;
-    --paper-2: #dce2e9;
-    --ink: #12181f;
-    --ink-soft: #3d4a57;
-    --muted: #6b7785;
-    --line: #c2cad4;
-    --line-strong: #12181f;
-    --surface: #f3f5f8;
-    --surface-2: #fbfcfd;
-    --signal: #2458d0;
-    --signal-ink: #f4f7ff;
-    --accent: #e11d74;
-    --teal: #0f6e6a;
-    --teal-soft: #d7efed;
-    --amber: #b56a00;
-    --amber-soft: #fff0d4;
-    --red: #b42318;
-    --red-soft: #fdecea;
-    --green: #1f6b3a;
-    --green-soft: #e3f5ea;
-    --blue: #2458d0;
-    --blue-soft: #e4eefc;
-    --violet: #5b4bb7;
-    --shadow: 4px 4px 0 rgba(18, 24, 31, 0.88);
+    /* —— BitsNotes Dark Mode (Default) —— */
+    --paper: #161B22;
+    --paper-2: #1C2128;
+    --ink: #E6EDF3;
+    --ink-soft: #8B949E;
+    --muted: #6E7681;
+    --line: #30363D;
+    --line-strong: #484F58;
+    --surface: #21262D;
+    --surface-2: #1C2128;
+    --signal: #2DD4BF;
+    --signal-ink: #06201D;
+    --accent: #2DD4BF;
+    --teal: #2DD4BF;
+    --teal-soft: rgba(45, 212, 191, 0.14);
+    --amber: #FBBF24;
+    --amber-soft: rgba(251, 191, 36, 0.12);
+    --red: #FB7185;
+    --red-soft: rgba(251, 113, 133, 0.12);
+    --green: #34D399;
+    --green-soft: rgba(52, 211, 153, 0.12);
+    --blue: #38BDF8;
+    --blue-soft: rgba(56, 189, 248, 0.12);
+    --violet: #A78BFA;
+    --shadow: 4px 4px 0 rgba(0, 0, 0, 0.88);
     --radius: 0;
     --font: "Public Sans", "Segoe UI", sans-serif;
     --display: "Bricolage Grotesque", "Public Sans", sans-serif;
     --mono: "IBM Plex Mono", Consolas, monospace;
+  }
+  [data-theme="light"] {
+    /* —— BitsNotes Light Mode —— */
+    --paper: #F8FAFC;
+    --paper-2: #FFFFFF;
+    --ink: #0F172A;
+    --ink-soft: #475569;
+    --muted: #64748B;
+    --line: #CBD5E1;
+    --line-strong: #94A3B8;
+    --surface: #FFFFFF;
+    --surface-2: #F1F5F9;
+    --signal: #0D9488;
+    --signal-ink: #FFFFFF;
+    --accent: #0D9488;
+    --teal: #0D9488;
+    --teal-soft: rgba(13, 148, 136, 0.10);
+    --amber: #D97706;
+    --amber-soft: rgba(217, 119, 6, 0.10);
+    --red: #E11D48;
+    --red-soft: rgba(225, 29, 72, 0.10);
+    --green: #16A34A;
+    --green-soft: rgba(22, 163, 74, 0.10);
+    --blue: #2563EB;
+    --blue-soft: rgba(37, 99, 235, 0.10);
+    --violet: #7C3AED;
+    --shadow: 4px 4px 0 rgba(15, 23, 42, 0.12);
   }
 
   * { box-sizing: border-box; }
@@ -48,9 +80,9 @@
     color: var(--ink);
     font: 14.5px/1.55 var(--font);
     background:
-      radial-gradient(ellipse 80% 50% at 100% -10%, rgba(36, 88, 208, 0.12), transparent 52%),
-      radial-gradient(ellipse 55% 40% at 0% 0%, rgba(225, 29, 116, 0.07), transparent 48%),
-      linear-gradient(170deg, #eef1f5 0%, var(--paper) 42%, var(--paper-2) 100%);
+      radial-gradient(ellipse 80% 50% at 100% -10%, rgba(45, 212, 191, 0.08), transparent 52%),
+      radial-gradient(ellipse 55% 40% at 0% 0%, rgba(167, 139, 250, 0.06), transparent 48%),
+      linear-gradient(170deg, var(--surface) 0%, var(--paper) 42%, var(--paper-2) 100%);
     background-attachment: fixed;
   }
   body::before {
@@ -111,7 +143,7 @@
     width: 36px;
     height: 36px;
     background: var(--ink);
-    color: #fff;
+    color: var(--paper);
     display: grid;
     place-items: center;
     font-family: var(--display);
@@ -201,7 +233,7 @@
     gap: 12px;
     padding: 14px 20px;
     background: var(--ink);
-    color: #f3f5f8;
+    color: var(--paper);
   }
   .ticket-bar h2 {
     margin: 0;
@@ -216,8 +248,8 @@
     font-size: 10px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #9ec0ff;
-    border: 1px solid rgba(158, 192, 255, 0.4);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
     padding: 4px 9px;
   }
   .ticket-body { padding: 24px 22px 22px; }
@@ -232,6 +264,25 @@
     .meta-panel { text-align: left; min-width: 0; }
     .grid { grid-template-columns: 1fr; }
   }
+
+  .lbl-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .lbl-row label { margin-bottom: 0; }
+  .reset-auto-btn {
+    background: none;
+    border: none;
+    color: var(--teal);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+  }
+  .reset-auto-btn:hover { color: var(--accent); }
 
   label {
     display: block;
@@ -254,7 +305,7 @@
   }
   select {
     appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2312181f' d='M6 8.5L1.5 4h9z'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23E6EDF3' d='M6 8.5L1.5 4h9z'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 12px center;
     padding-right: 32px;
@@ -264,8 +315,8 @@
   }
   select:focus, input[type="text"]:focus {
     outline: none;
-    border-color: var(--ink);
-    background: #fff;
+    border-color: var(--accent);
+    background: var(--surface);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 28%, transparent);
   }
 
@@ -276,6 +327,25 @@
   }
   .muted { color: var(--muted); }
   .field-block { margin-top: 16px; }
+
+  .tlist-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .tlist-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tfilter-input {
+    padding: 5px 10px !important;
+    font-size: 12px !important;
+    width: 200px !important;
+  }
 
   .btn {
     border: 2px solid var(--ink);
@@ -301,7 +371,7 @@
     border-color: var(--ink);
   }
   .btn.primary:hover:not(:disabled) {
-    background: #1d4bb8;
+    background: color-mix(in srgb, var(--signal) 80%, var(--ink));
   }
   .btn.danger {
     background: var(--red-soft);
@@ -394,8 +464,8 @@
     transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
   }
   .chips label:has(input:checked) {
-    border-color: var(--ink);
-    background: color-mix(in srgb, var(--signal) 14%, white);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--signal) 14%, var(--surface));
     box-shadow: inset 0 -3px 0 var(--accent);
   }
   .chips input { accent-color: var(--ink); }
@@ -440,8 +510,8 @@
         -45deg,
         transparent,
         transparent 8px,
-        rgba(18, 24, 31, 0.02) 8px,
-        rgba(18, 24, 31, 0.02) 16px
+        color-mix(in srgb, var(--ink) 4%, transparent) 8px,
+        color-mix(in srgb, var(--ink) 4%, transparent) 16px
       );
     text-align: center;
     font-size: 14px;
@@ -537,7 +607,7 @@
     flex-shrink: 0;
     border: 1.5px solid var(--ink);
   }
-  .dot.pending { background: #fff; }
+  .dot.pending { background: var(--surface-2); }
   .dot.running {
     background: var(--amber);
     animation: blink 1s steps(2, end) infinite;
@@ -548,19 +618,19 @@
 
   .log {
     margin-top: 10px;
-    background: #10161d;
-    border: 2px solid var(--ink);
+    background: var(--paper-2);
+    border: 2px solid var(--line-strong);
     border-radius: var(--radius);
     padding: 9px 11px;
     max-height: 300px;
     overflow: auto;
     font: 11px/1.45 var(--mono);
-    color: #9fb0c3;
+    color: var(--ink-soft);
     white-space: pre-wrap;
     word-break: break-word;
   }
-  .log .rawline { color: #9fb0c3; white-space: pre-wrap; }
-  .log .cmd { color: #c4b5fd; }
+  .log .rawline { color: var(--ink-soft); white-space: pre-wrap; }
+  .log .cmd { color: var(--violet); }
   .gate {
     display: flex;
     align-items: center;
@@ -584,30 +654,31 @@
 
   .transcript { display: flex; flex-direction: column; gap: 6px; }
   .tstep {
-    color: #7d8fa3;
+    color: var(--muted);
     font-size: 10px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    border-top: 1px dashed #2a3644;
+    border-top: 1px dashed var(--line);
     padding-top: 5px;
     margin-top: 2px;
   }
-  .tmsg { color: #d5deea; white-space: pre-wrap; }
+  .tmsg { color: var(--ink); white-space: pre-wrap; }
   .thinking {
-    border-left: 2px solid #8b7cf0;
+    border-left: 2px solid var(--violet);
     padding: 2px 8px;
-    background: #161322;
+    background: color-mix(in srgb, var(--violet) 10%, var(--surface-2));
     border-radius: 2px;
   }
   .thinking summary {
-    color: #b5a9ff;
+    color: var(--violet);
     cursor: pointer;
     font-size: 10.5px;
     user-select: none;
+    font-weight: 500;
   }
   .thinking pre {
     margin: 6px 0 2px;
-    color: #a89cd8;
+    color: var(--ink-soft);
     font: 10.5px/1.4 var(--mono);
     white-space: pre-wrap;
     word-break: break-word;
@@ -615,15 +686,15 @@
     overflow: auto;
   }
   .tool {
-    border-left: 2px solid #5b9dff;
-    background: #121820;
+    border-left: 2px solid var(--blue);
+    background: color-mix(in srgb, var(--blue) 8%, var(--surface-2));
     border-radius: 2px;
     overflow: hidden;
   }
   .tool summary {
     cursor: pointer;
     padding: 3px 8px;
-    color: #9db8dd;
+    color: var(--ink);
     font-size: 11px;
     user-select: none;
     list-style: none;
@@ -632,18 +703,18 @@
     align-items: baseline;
   }
   .tool summary::-webkit-details-marker { display: none; }
-  .tool summary .tname { color: #7eb0ff; font-weight: 600; }
+  .tool summary .tname { color: var(--blue); font-weight: 600; }
   .tool summary .tstatus {
     font-size: 9.5px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
-  .tool summary .tstatus.running { color: #f0b429; }
-  .tool summary .tstatus.completed { color: #4ade80; }
-  .tool summary .tstatus.error { color: #f87171; }
-  .tool .tbody { padding: 4px 8px 8px; border-top: 1px solid #2a3644; }
+  .tool summary .tstatus.running { color: var(--amber); }
+  .tool summary .tstatus.completed { color: var(--green); }
+  .tool summary .tstatus.error { color: var(--red); }
+  .tool .tbody { padding: 4px 8px 8px; border-top: 1px solid var(--line); }
   .tool .tlabel {
-    color: #7d8fa3;
+    color: var(--muted);
     font-size: 9.5px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -651,14 +722,14 @@
   }
   .tool pre {
     margin: 0;
-    color: #aab8cf;
+    color: var(--ink-soft);
     font: 10.5px/1.4 var(--mono);
     white-space: pre-wrap;
     word-break: break-word;
     max-height: 220px;
     overflow: auto;
   }
-  .tool pre.out { color: #7fd0a0; }
+  .tool pre.out { color: var(--green); }
   .tmeta { color: var(--muted); font-size: 10px; }
 
   .files {
@@ -682,7 +753,7 @@
     margin-top: 16px;
     padding: 12px 14px;
     border: 2px solid var(--ink);
-    background: color-mix(in srgb, var(--signal) 8%, white);
+    background: color-mix(in srgb, var(--signal) 8%, var(--surface));
     gap: 12px;
     align-items: center;
     flex-wrap: wrap;
@@ -721,7 +792,7 @@
   .hcard {
     background: var(--surface-2);
     border: 2px solid var(--ink);
-    box-shadow: 2px 2px 0 rgba(18, 24, 31, 0.55);
+    box-shadow: 2px 2px 0 color-mix(in srgb, var(--ink) 55%, transparent);
     padding: 12px 14px;
     display: grid;
     grid-template-columns: 1fr auto;
@@ -752,15 +823,160 @@
     50% { opacity: 0.25; }
   }
 
+  /* —— retry banner inside run card —— */
+  .retry-banner {
+    padding: 10px 16px;
+    background: var(--amber-soft);
+    border-top: 2px solid var(--amber);
+    border-bottom: 2px solid var(--amber);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--amber);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: slideIn 0.3s ease-out both;
+  }
+  .retry-banner .retry-icon {
+    font-size: 15px;
+    line-height: 1;
+  }
+  .retry-banner .retry-text {
+    flex: 1;
+  }
+  .retry-banner .retry-count {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 1px solid var(--amber);
+    background: rgba(255, 255, 255, 0.3);
+  }
+  .retry-exhausted-banner {
+    padding: 10px 16px;
+    background: var(--red-soft);
+    border-top: 2px solid var(--red);
+    border-bottom: 2px solid var(--red);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--red);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: slideIn 0.3s ease-out both;
+  }
+  .retry-exhausted-banner .retry-icon {
+    font-size: 15px;
+    line-height: 1;
+  }
+
+  /* —— failed runs section —— */
+  .failed-runs-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 8px 0 14px;
+    animation: rise 0.55s ease-out 0.2s both;
+  }
+  .failed-runs-head h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    text-transform: uppercase;
+    color: var(--red);
+  }
+  .failed-runs-head p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+  .failed-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+  .failed-list:empty { display: none; }
+  .failed-list:empty + .failed-runs-head-sentinel { display: none; }
+  .failed-list .hcard {
+    border-color: var(--red);
+    box-shadow: 2px 2px 0 color-mix(in srgb, var(--red) 40%, transparent);
+  }
+  .failed-list .hcard .htitle { color: var(--red); }
+  #failed-section { display: none; }
+  #failed-section.has-items { display: block; }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation: none !important;
       transition: none !important;
     }
   }
+
+  /* —— Light mode: fix select arrow SVG for dark ink —— */
+  [data-theme="light"] select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231F2328' d='M6 8.5L1.5 4h9z'/%3E%3C/svg%3E");
+  }
+
+  /* —— Theme toggle button —— */
+  #theme-toggle {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    z-index: 100;
+    width: 38px;
+    height: 38px;
+    border: 2px solid var(--ink);
+    border-radius: 0;
+    background: var(--surface);
+    color: var(--ink);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    box-shadow: 2px 2px 0 var(--accent);
+    transition: transform 0.12s, box-shadow 0.12s, background 0.15s, color 0.15s;
+    padding: 0;
+  }
+  #theme-toggle:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 3px 3px 0 var(--accent);
+  }
+  #theme-toggle:active {
+    transform: translate(1px, 1px);
+    box-shadow: none;
+  }
+  #theme-toggle svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+  }
 </style>
 </head>
 <body>
+<button id="theme-toggle" aria-label="Toggle theme" title="Toggle dark / light theme">
+  <svg id="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
+  <svg id="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79zM4 10.5H1v2h3zm9-9.95h-2V3.5h2zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79zM20 10.5v2h3v-2zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41z"/></svg>
+</button>
+<script>
+(function() {
+  var saved = localStorage.getItem('agent_warden_theme');
+  var theme = saved || 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+  function applyIcons(t) {
+    document.getElementById('theme-icon-moon').style.display = t === 'dark' ? 'block' : 'none';
+    document.getElementById('theme-icon-sun').style.display = t === 'light' ? 'block' : 'none';
+  }
+  // Apply icons once DOM is available (this runs inline after button)
+  applyIcons(theme);
+  document.getElementById('theme-toggle').addEventListener('click', function() {
+    var current = document.documentElement.getAttribute('data-theme') || 'dark';
+    var next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('agent_warden_theme', next);
+    applyIcons(next);
+  });
+})();
+</script>
 <div class="shell">
   <header class="masthead">
     <div class="brand">
@@ -792,6 +1008,7 @@
           <div id="addsubj-form">
             <input id="new-abbr" type="text" placeholder="Abbreviation, e.g. CV" maxlength="8" spellcheck="false">
             <input id="new-name" type="text" placeholder="Full name, e.g. Computer Vision" spellcheck="false">
+            <div id="addsubj-error" class="error" style="font-size:12px;display:none;"></div>
             <div class="btnrow" style="margin-top:0;">
               <button class="btn small primary" id="addsubj-save" type="button">Create</button>
               <button class="btn small" id="addsubj-cancel" type="button">Cancel</button>
@@ -799,7 +1016,10 @@
           </div>
         </div>
         <div>
-          <label for="docs">Companion docs for Agent 2 (enricher)</label>
+          <div class="lbl-row">
+            <label for="docs">Companion docs for Agent 2 (enricher)</label>
+            <button type="button" id="docs-reset-auto" class="reset-auto-btn" style="display:none;">Reset to auto</button>
+          </div>
           <select id="docs"></select>
         </div>
         <div>
@@ -825,12 +1045,16 @@
       </div>
 
       <div class="field-block">
-        <label>Transcript files <span class="muted">(select one or more — each runs in parallel)</span></label>
-        <div class="tlist" id="tlist"></div>
-        <div class="hint">
-          <button class="btn small" id="tall" type="button">select all</button>
-          <button class="btn small" id="tnone" type="button">clear</button>
+        <div class="tlist-header">
+          <label style="margin:0;">Transcript files <span class="muted">(select one or more — each runs in parallel)</span></label>
+          <div class="tlist-actions">
+            <button class="btn small" id="tall" type="button">select all</button>
+            <button class="btn small" id="tnone" type="button">clear</button>
+            <input id="tfilter" type="text" class="tfilter-input" placeholder="Search files..." aria-label="Filter transcript files" spellcheck="false">
+          </div>
         </div>
+        <div class="tlist" id="tlist"></div>
+        <div id="tlist-empty" class="muted" style="display:none;font-size:12px;padding:8px 0;">No matching transcript files found.</div>
       </div>
 
       <div class="chips" id="phase-chips">
@@ -853,9 +1077,9 @@
         <button class="btn primary" id="run">Run pipeline(s)</button>
         <button class="btn danger" id="stop" disabled>Stop all</button>
         <span class="spacer"></span>
-        <span class="muted" id="runstate"></span>
+        <span class="muted" id="runstate" aria-live="polite" role="status"></span>
       </div>
-      <div class="status-line" id="status"></div>
+      <div class="status-line" id="status" aria-live="polite" role="status"></div>
     </div>
   </section>
 
@@ -870,6 +1094,14 @@
     <p>Phase logs, tool calls, and gate results stream here.</p>
   </div>
   <div id="runs"></div>
+
+  <div id="failed-section">
+    <div class="failed-runs-head">
+      <h2>Failed runs</h2>
+      <p>Runs that errored after exhausting retries — use manual retry or delete.</p>
+    </div>
+    <div class="failed-list" id="failed-runs"></div>
+  </div>
 </div>
 
 <script>
@@ -1071,13 +1303,19 @@ function setPhaseDot(rid, phase, cls) {
   card.phaseDots[phase].className = "dot " + cls;
 }
 
+function smartScroll(el) {
+  if (!el || state.replaying) return;
+  const nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 80;
+  if (nearBottom) el.scrollTop = el.scrollHeight;
+}
+
 function appendLog(rid, phase, line) {
   const card = state.runs[rid];
   if (!card) return;
   const el = card.phaseLogs[phase];
   if (el.textContent === "waiting…") el.textContent = "";
   el.textContent += line + "\n";
-  if (!state.replaying) el.scrollTop = el.scrollHeight;
+  smartScroll(el);
 }
 
 function transcriptEl(card, phase) {
@@ -1142,7 +1380,7 @@ function renderTool(rid, phase, ev) {
   det.appendChild(body);
   host.appendChild(det);
   state.tools[rid][phase][key] = { statusEl, outEl, det };
-  if (!state.replaying) host.scrollTop = host.scrollHeight;
+  smartScroll(host);
 }
 
 function renderThinking(rid, phase, ev) {
@@ -1158,7 +1396,7 @@ function renderThinking(rid, phase, ev) {
   pre.textContent = text + ((ev.part || {}).trimmed ? "\n… [truncated]" : "");
   det.append(sum, pre);
   host.appendChild(det);
-  host.scrollTop = host.scrollHeight;
+  smartScroll(host);
 }
 
 function renderStepMeta(rid, phase, ev) {
@@ -1249,6 +1487,42 @@ function prefixToLecture(prefix) {
   return m ? m[1] : "";
 }
 
+function selectedPhases() {
+  const p = [];
+  if ($("p1") && $("p1").checked) p.push(1);
+  if ($("p2") && $("p2").checked) p.push(2);
+  if ($("p3") && $("p3").checked) p.push(3);
+  return p;
+}
+
+function setPhases(phases) {
+  const set = new Set(phases || []);
+  if ($("p1")) $("p1").checked = set.has(1);
+  if ($("p2")) $("p2").checked = set.has(2);
+  if ($("p3")) $("p3").checked = set.has(3);
+  validateForm();
+}
+
+function validateForm() {
+  const files = checkedTranscripts();
+  const phases = selectedPhases();
+  const runBtn = $("run");
+  const stateEl = $("runstate");
+
+  if (state.runningJobs) return;
+
+  if (!files.length) {
+    runBtn.disabled = true;
+    stateEl.textContent = "Select at least 1 transcript file";
+  } else if (!phases.length) {
+    runBtn.disabled = true;
+    stateEl.textContent = "Select at least 1 agent phase";
+  } else {
+    runBtn.disabled = false;
+    stateEl.textContent = "";
+  }
+}
+
 function checkedTranscripts() {
   return Array.from(document.querySelectorAll("#tlist input:checked"));
 }
@@ -1257,6 +1531,7 @@ function applyGuessFromSelection() {
   if (state.applyingGuess) return;
   const boxes = checkedTranscripts();
   const hint = $("guess-hint");
+  validateForm();
   if (!boxes.length) {
     hint.textContent = "";
     refreshArtifacts();
@@ -1322,11 +1597,25 @@ function autoPickDocs() {
     // Fall back to Default (subject's folder) — server resolves by abbr.
     docsSel.value = "";
   }
+  const resetBtn = $("docs-reset-auto");
+  if (resetBtn) resetBtn.style.display = "none";
 }
 
 $("docs").addEventListener("change", () => {
-  if (!state.applyingGuess) $("docs").dataset.manual = "1";
+  if (!state.applyingGuess) {
+    $("docs").dataset.manual = "1";
+    const resetBtn = $("docs-reset-auto");
+    if (resetBtn) resetBtn.style.display = "inline";
+  }
 });
+
+const docsResetBtn = $("docs-reset-auto");
+if (docsResetBtn) {
+  docsResetBtn.addEventListener("click", () => {
+    delete $("docs").dataset.manual;
+    autoPickDocs();
+  });
+}
 
 $("tall").addEventListener("click", () => {
   document.querySelectorAll("#tlist input").forEach(c => c.checked = true);
@@ -1337,22 +1626,67 @@ $("tnone").addEventListener("click", () => {
   applyGuessFromSelection();
 });
 
+const tfilterInput = $("tfilter");
+if (tfilterInput) {
+  tfilterInput.addEventListener("input", () => {
+    const q = tfilterInput.value.toLowerCase().trim();
+    let visible = 0;
+    document.querySelectorAll("#tlist label").forEach(lbl => {
+      const match = !q || lbl.textContent.toLowerCase().includes(q);
+      lbl.style.display = match ? "flex" : "none";
+      if (match) visible++;
+    });
+    const emptyEl = $("tlist-empty");
+    if (emptyEl) emptyEl.style.display = visible === 0 ? "block" : "none";
+  });
+}
+
+["p1", "p2", "p3"].forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener("change", validateForm);
+});
+
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    e.preventDefault();
+    if (!$("run").disabled) startJobs();
+  }
+  if (e.key === "Escape") {
+    showAddSubject(false);
+  }
+});
+
 function showAddSubject(on) {
   $("addsubj-form").classList.toggle("open", on);
+  const errEl = $("addsubj-error");
+  if (errEl) { errEl.textContent = ""; errEl.style.display = "none"; }
   if (on) { $("new-abbr").focus(); }
 }
+
+const setAddSubjError = (msg) => {
+  const errEl = $("addsubj-error");
+  if (errEl) {
+    errEl.textContent = msg;
+    errEl.style.display = msg ? "block" : "none";
+  }
+};
+
 $("addsubj").addEventListener("click", () => showAddSubject(true));
 $("addsubj-cancel").addEventListener("click", () => showAddSubject(false));
 $("addsubj-save").addEventListener("click", async () => {
   const abbr = $("new-abbr").value.trim().toUpperCase();
   const name = $("new-name").value.trim();
-  if (!abbr || !name) return setStatus("Enter both abbreviation and name.", "error");
+  if (!abbr || !name) return setAddSubjError("Enter both abbreviation and name.");
+  if (!/^[A-Z0-9_]{1,8}$/.test(abbr)) {
+    return setAddSubjError("Abbreviation must be 1-8 chars of A-Z, 0-9 or _");
+  }
+  setAddSubjError("");
   const res = await api("/api/subjects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ abbr, name }),
   });
-  if (res.error) return setStatus(res.error, "error");
+  if (res.error) return setAddSubjError(res.error);
   $("new-abbr").value = ""; $("new-name").value = "";
   showAddSubject(false);
   const sel = $("subject");
@@ -1361,6 +1695,30 @@ $("addsubj-save").addEventListener("click", async () => {
   sel.value = res.abbr;
   setStatus(`Subject ${res.abbr} created (companion_docs/${res.abbr} folder ready).`, "ok");
   refreshConfig();
+});
+
+["new-abbr", "new-name"].forEach(id => {
+  const el = $(id);
+  if (el) {
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        $("addsubj-save").click();
+      }
+    });
+  }
+});
+
+["new-abbr", "new-name"].forEach(id => {
+  const el = $(id);
+  if (el) {
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        $("addsubj-save").click();
+      }
+    });
+  }
 });
 
 async function startJobs({ resume = false, retry = false, phases = null,
@@ -1421,8 +1779,14 @@ $("retry-btn").addEventListener("click", () => {
 });
 
 $("stop").addEventListener("click", async () => {
-  await api("/api/stop", { method: "POST" });
-  setStatus("Stopping all runs…", "warn");
+  $("stop").disabled = true;
+  $("stop").textContent = "Stopping…";
+  try {
+    await api("/api/stop", { method: "POST" });
+    setStatus("Stopping all runs…", "warn");
+  } finally {
+    setTimeout(() => { $("stop").textContent = "Stop all"; }, 2000);
+  }
 });
 
 function setStatus(text, cls) {
@@ -1469,11 +1833,7 @@ async function refreshArtifacts() {
   }
 }
 
-// ------------------------------------------------------------- history
-function renderHistory(runs) {
-  const host = $("history");
-  host.innerHTML = "";
-  for (const run of runs) {
+function buildHistoryCard(run) {
     const el = document.createElement("div");
     el.className = "hcard";
     const stCls = run.status === "done" ? "done" : run.status === "error" ? "error" :
@@ -1537,7 +1897,31 @@ function renderHistory(runs) {
     del.className = "btn small danger"; del.type = "button"; del.textContent = "Delete";
     del.addEventListener("click", () => deletePastRun(run, false));
     actions.appendChild(del);
-    host.appendChild(el);
+    return el;
+}
+
+function renderHistory(runs) {
+  const pastHost = $("history");
+  const failedHost = $("failed-runs");
+  const failedSection = $("failed-section");
+  pastHost.innerHTML = "";
+  failedHost.innerHTML = "";
+
+  const pastRuns = runs.filter(r => r.status !== "error");
+  const failedRuns = runs.filter(r => r.status === "error");
+
+  for (const run of pastRuns) {
+    pastHost.appendChild(buildHistoryCard(run));
+  }
+  for (const run of failedRuns) {
+    failedHost.appendChild(buildHistoryCard(run));
+  }
+
+  // Show/hide the failed section header based on content
+  if (failedRuns.length > 0) {
+    failedSection.classList.add("has-items");
+  } else {
+    failedSection.classList.remove("has-items");
   }
 }
 
@@ -1567,16 +1951,24 @@ function loadIntoForm(run) {
     $("lecture").value = run.lecture_num;
     $("lecture").dataset.manual = "1";
   }
+  let foundTranscript = false;
   if (run.transcript) {
     document.querySelectorAll("#tlist input").forEach(c => {
-      c.checked = c.value === run.transcript || c.value.replace(/\\/g, "/") === String(run.transcript).replace(/\\/g, "/");
+      const match = c.value === run.transcript || c.value.replace(/\\/g, "/") === String(run.transcript).replace(/\\/g, "/");
+      c.checked = match;
+      if (match) foundTranscript = true;
     });
   }
   const phases = run.resume_phases && run.resume_phases.length
     ? run.resume_phases
     : (run.phases_requested || [1, 2, 3]);
   setPhases(phases);
-  $("guess-hint").innerHTML = `Loaded <em>${esc(run.prefix || "")}</em> (${esc(run.status || "")})`;
+  validateForm();
+  if (run.transcript && !foundTranscript) {
+    setStatus(`Loaded ${run.prefix}, but original transcript file was not found in workspace list.`, "warn");
+  } else {
+    $("guess-hint").innerHTML = `Loaded <em>${esc(run.prefix || "")}</em> (${esc(run.status || "")})`;
+  }
   refreshArtifacts();
   $("subject").scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -1674,7 +2066,17 @@ $("model").addEventListener("change", () => {
   syncMetaModel();
 });
 $("variant").addEventListener("change", syncMetaModel);
-$("refresh-models").addEventListener("click", () => refreshConfig({ refreshModels: true }));
+$("refresh-models").addEventListener("click", async () => {
+  const btn = $("refresh-models");
+  btn.disabled = true;
+  btn.textContent = "↻ refreshing…";
+  try {
+    await refreshConfig({ refreshModels: true });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "↻ refresh models";
+  }
+});
 
 // ------------------------------------------------------------- events
 async function refreshConfig({ refreshModels = false } = {}) {
@@ -1731,6 +2133,7 @@ async function refreshConfig({ refreshModels = false } = {}) {
   tlist.querySelectorAll("input").forEach(inp => {
     inp.addEventListener("change", applyGuessFromSelection);
   });
+  validateForm();
 }
 
 function handleEvent(ev) {
@@ -1819,11 +2222,63 @@ function handleEvent(ev) {
   if (ev.type === "gate") {
     renderGate(rid, ev.phase, ev.result);
   }
+  if (ev.type === "retry_start") {
+    const card = state.runs[rid];
+    if (!card) return;
+    // Remove any previous retry banner
+    const old = card.el.querySelector(".retry-banner");
+    if (old) old.remove();
+    const oldExh = card.el.querySelector(".retry-exhausted-banner");
+    if (oldExh) oldExh.remove();
+    // Insert a retry banner after the phases grid
+    const banner = document.createElement("div");
+    banner.className = "retry-banner";
+    banner.innerHTML =
+      `<span class="retry-icon">&#x21bb;</span>` +
+      `<span class="retry-text">Retry <strong>${ev.retry}/${ev.max_retries}</strong> &mdash; ` +
+      `<em>${esc(ev.failed_phase)}</em> failed, resuming from <em>${esc(ev.resuming_from)}</em>` +
+      `${ev.error ? " &middot; " + esc(ev.error) : ""}</span>` +
+      `<span class="retry-count">${ev.retry}/${ev.max_retries}</span>`;
+    const phasesGrid = card.el.querySelector(".phases");
+    if (phasesGrid && phasesGrid.nextSibling) {
+      card.el.insertBefore(banner, phasesGrid.nextSibling);
+    } else {
+      card.el.appendChild(banner);
+    }
+    setRunStatus(rid, "running", `retry ${ev.retry}/${ev.max_retries}`);
+    // Reset phase dots for phases being retried
+    const order = ["extractor", "enricher", "formatter"];
+    const resumeIdx = order.indexOf(ev.resuming_from);
+    for (let i = resumeIdx; i < order.length; i++) {
+      if (i >= 0) setPhaseDot(rid, order[i], "pending");
+    }
+  }
+  if (ev.type === "retry_exhausted") {
+    const card = state.runs[rid];
+    if (!card) return;
+    const old = card.el.querySelector(".retry-banner");
+    if (old) old.remove();
+    const banner = document.createElement("div");
+    banner.className = "retry-exhausted-banner";
+    banner.innerHTML =
+      `<span class="retry-icon">&#x2717;</span>` +
+      `<span>All ${ev.retries} retries exhausted &mdash; <em>${esc(ev.failed_phase)}</em> still failing. ` +
+      `Use manual retry below.</span>`;
+    const phasesGrid = card.el.querySelector(".phases");
+    if (phasesGrid && phasesGrid.nextSibling) {
+      card.el.insertBefore(banner, phasesGrid.nextSibling);
+    } else {
+      card.el.appendChild(banner);
+    }
+  }
   if (ev.type === "pipeline_end") {
     const card = state.runs[rid];
     if (!card) return;
     const cls = ev.status === "done" ? "done" : ev.status === "error" ? "error" : "stopped";
-    setRunStatus(rid, cls, ev.status === "done" ? "complete" : ev.status);
+    const label = ev.status === "done" ? "complete"
+      : ev.retries_exhausted ? `error (${ev.retries_exhausted ? "retries exhausted" : ev.status})`
+      : ev.status;
+    setRunStatus(rid, cls, label);
     for (const p of ["extractor", "enricher", "formatter"]) {
       if (card.phaseDots[p].classList.contains("running")) setPhaseDot(rid, p, cls === "done" ? "passed" : cls);
     }
@@ -1836,7 +2291,10 @@ function handleEvent(ev) {
       }
       renderRollup(card);
     }
-    if (ev.status === "error" && !state.replaying) setStatus("Pipeline failed: " + ev.error, "error");
+    if (ev.status === "error" && !state.replaying) {
+      const retryMsg = ev.retries_exhausted ? " (all retries exhausted — use manual retry)" : "";
+      setStatus("Pipeline failed: " + ev.error + retryMsg, "error");
+    }
     state.done[rid] = ev.status === "done";
     refreshFiles(rid);
     if (!state.replaying) {

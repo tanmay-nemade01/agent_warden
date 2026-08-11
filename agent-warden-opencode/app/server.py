@@ -620,12 +620,28 @@ def _derive_prefix(stem: str) -> tuple[str, str]:
 
 
 def main():
+    import webbrowser
+
     global HOST, PORT
     args = sys.argv[1:]
     if "--host" in args:
         HOST = args[args.index("--host") + 1]
     if "--port" in args:
         PORT = int(args[args.index("--port") + 1])
+
+    url = f"http://{HOST}:{PORT}"
+
+    # ── Print startup banner to the real console (before redirect) ──
+    console_out = sys.stdout
+    console_err = sys.stderr
+    print(flush=True, file=console_out)
+    print(f"  Notes Studio is starting...", flush=True, file=console_out)
+    print(f"  URL:       {url}", flush=True, file=console_out)
+    print(f"  Workspace: {config.WORKSPACE}", flush=True, file=console_out)
+    print(f"  Model:     {config.MODEL} (variant: {config.VARIANT})",
+          flush=True, file=console_out)
+    print(flush=True, file=console_out)
+
     # Log to files in the workspace root so crashes are diagnosable without
     # any shell output redirection.
     try:
@@ -637,15 +653,26 @@ def main():
         sys.stderr = err
     except OSError:
         pass
-    print(f"Notes Studio on http://{HOST}:{PORT}", flush=True)
+    print(f"Notes Studio on {url}", flush=True)
     print(f"Workspace: {config.WORKSPACE}", flush=True)
     print(f"Model: {config.MODEL} (variant: {config.VARIANT})", flush=True)
+
     server = ThreadingHTTPServer((HOST, PORT), Handler)
+
+    # Print confirmation and open browser after server is ready
+    print(f"  Server is live at {url}", flush=True, file=console_out)
+    print(f"  Opening browser...", flush=True, file=console_out)
+    print(f"  Press Ctrl+C to stop.", flush=True, file=console_out)
+    print(flush=True, file=console_out)
+    threading.Thread(target=lambda: webbrowser.open(url),
+                     daemon=True).start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        print(f"\n  Server stopped.", flush=True, file=console_out)
         try:
             out.close(); err.close()
         except Exception:

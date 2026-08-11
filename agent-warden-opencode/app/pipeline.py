@@ -439,6 +439,8 @@ class Pipeline:
         ]
 
     # ------------------------------------------------------------------ run
+    MAX_AUTO_RETRIES = 3
+
     def run(self):
         self.out.mkdir(parents=True, exist_ok=True)
         self.run_log = self.out / f"{self.prefix}_run_events.jsonl"
@@ -448,41 +450,94 @@ class Pipeline:
                    "lecture_num": self.lecture_num,
                    "transcript": self.transcript, "phases": self.phases,
                    "model": self.model, "variant": self.variant})
-        try:
-            for num in self.phases:
-                name = AGENTS[num]
-                self._log({"type": "phase_start", "phase": name})
-                self._begin_phase_stats(name)
-                done = {
-                    1: self._phase_extractor,
-                    2: self._phase_enricher,
-                    3: self._phase_formatter,
-                }[num]()
-                phase_stats = self._end_phase_stats(name)
-                self._log({"type": "phase_end", "phase": name,
-                           "ok": done, "seconds": phase_stats["seconds"],
-                           "stats": phase_stats})
+
+        phases_to_run = list(self.phases)
+        retry_count = 0
+
+        while True:
+            try:
+                for num in phases_to_run:
+                    name = AGENTS[num]
+                    self._log({"type": "phase_start", "phase": name})
+                    self._begin_phase_stats(name)
+                    done = {
+                        1: self._phase_extractor,
+                        2: self._phase_enricher,
+                        3: self._phase_formatter,
+                    }[num]()
+                    phase_stats = self._end_phase_stats(name)
+                    self._log({"type": "phase_end", "phase": name,
+                               "ok": done, "seconds": phase_stats["seconds"],
+                               "stats": phase_stats})
+                    if self.stop_flag:
+                        self._log({"type": "pipeline_end", "status": "stopped",
+                                   "stats": self._stats_snapshot()})
+                        return
+                # All phases completed successfully.
+                self._log({"type": "pipeline_end", "status": "done",
+                           "stats": self._stats_snapshot()})
+                return
+
+            except (PhaseError, Exception) as exc:  # noqa: BLE001
+                # Close out the in-flight phase bucket so totals stay honest.
+                if self._phase_bucket is not None:
+                    running = next((p for p, b in self.stats["phases"].items()
+                                    if b is self._phase_bucket), None)
+                    if running:
+                        self._end_phase_stats(running)
+
                 if self.stop_flag:
                     self._log({"type": "pipeline_end", "status": "stopped",
                                "stats": self._stats_snapshot()})
                     return
-            self._log({"type": "pipeline_end", "status": "done",
-                       "stats": self._stats_snapshot()})
-        except PhaseError as exc:
-            if self._phase_bucket is not None:
-                # Close out the in-flight phase bucket so totals stay honest.
-                running = next((p for p, b in self.stats["phases"].items()
-                                if b is self._phase_bucket), None)
-                if running:
-                    self._end_phase_stats(running)
-            self._log({"type": "pipeline_end", "status": "error",
-                       "error": str(exc), "stats": self._stats_snapshot()})
-        except Exception as exc:  # noqa: BLE001
-            if self._phase_bucket is not None:
-                running = next((p for p, b in self.stats["phases"].items()
-                                if b is self._phase_bucket), None)
-                if running:
-                    self._end_phase_stats(running)
-            self._log({"type": "pipeline_end", "status": "error",
-                       "error": f"{type(exc).__name__}: {exc}",
-                       "stats": self._stats_snapshot()})
+
+                retry_count += 1
+                # Determine which phase failed.
+                failed_phase_num = None
+                for num in phases_to_run:
+                    name = AGENTS[num]
+                    # The failed phase is the one that was running (has a
+                    # bucket dict, not a final summary) or never got a summary.
+                    bucket = self.stats["phases"].get(name)
+                    if bucket is None or isinstance(bucket, dict) and "seconds" not in bucket:
+                        failed_phase_num = num
+                        break
+                if failed_phase_num is None:
+                    # Fallback: assume the last phase in the list failed.
+                    failed_phase_num = phases_to_run[-1] if phases_to_run else self.phases[-1]
+
+                if retry_count <= self.MAX_AUTO_RETRIES:
+                    # Decide where to resume: if agent 1 failed, restart
+                    # from agent 1; otherwise resume from the failed agent.
+                    if failed_phase_num == self.phases[0]:
+                        phases_to_run = list(self.phases)
+                    else:
+                        phases_to_run = [p for p in self.phases
+                                         if p >= failed_phase_num]
+
+                    self._log({
+                        "type": "retry_start",
+                        "retry": retry_count,
+                        "max_retries": self.MAX_AUTO_RETRIES,
+                        "failed_phase": AGENTS.get(failed_phase_num, "unknown"),
+                        "resuming_from": AGENTS.get(phases_to_run[0], "unknown"),
+                        "error": (str(exc) if isinstance(exc, PhaseError)
+                                  else f"{type(exc).__name__}: {exc}"),
+                    })
+                    continue  # retry
+                else:
+                    # Exhausted all retries — fall through to manual mode.
+                    self._log({
+                        "type": "retry_exhausted",
+                        "retries": retry_count - 1,
+                        "failed_phase": AGENTS.get(failed_phase_num, "unknown"),
+                        "error": (str(exc) if isinstance(exc, PhaseError)
+                                  else f"{type(exc).__name__}: {exc}"),
+                    })
+                    self._log({"type": "pipeline_end", "status": "error",
+                               "error": (str(exc) if isinstance(exc, PhaseError)
+                                         else f"{type(exc).__name__}: {exc}"),
+                               "retries_exhausted": True,
+                               "stats": self._stats_snapshot()})
+                    return
+
