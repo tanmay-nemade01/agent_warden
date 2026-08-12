@@ -4,7 +4,7 @@ Turn lecture transcripts into self-contained HTML notes. This repo ships two pie
 
 | Folder | What it is |
 |---|---|
-| [`agent-warden-opencode/`](agent-warden-opencode/) | **Notes Studio** — local web UI that runs the pipeline with [opencode](https://opencode.ai) |
+| [`agent-warden-opencode/`](agent-warden-opencode/) | **Notes Studio** — local web UI that runs the pipeline with [OpenCode](https://opencode.ai) or [Command Code](https://commandcode.ai/docs/reference/cli) |
 | [`make-transcript-notes-kit-3agent/`](make-transcript-notes-kit-3agent/) | The 3-agent toolkit: skill files, quality-gate scripts, HTML template |
 
 Git tracks only those two folders (plus this README and `.gitignore`). Transcripts, companion docs, topic mappings, and generated notes stay on your machine.
@@ -23,7 +23,7 @@ Agent 4 (interactive enhancer) is optional and skipped by Notes Studio.
 ## What you need
 
 - **Python 3.10+**
-- **[opencode CLI](https://opencode.ai)** on PATH, with a provider signed in
+- **[opencode CLI](https://opencode.ai)** and/or **[Command Code](https://commandcode.ai/docs/reference/cli)** (`cmdc` on Windows) on PATH, signed in
 - Toolkit Python deps (PyYAML):
 
 ```bash
@@ -91,8 +91,8 @@ Open [http://127.0.0.1:8787](http://127.0.0.1:8787). Optional: `--port 8787` / `
 
 1. Pick a **transcript**. Subject, lecture prefix, and number fill in from the filename when possible.
 2. Choose which agents to run (1–3). If this lecture already has artifacts, use **Resume** or **Retry failed**.
-3. Pick model and reasoning effort if you want something other than the default (`opencode-go/deepseek-v4-flash`, `max`).
-4. Press **Run pipeline**. Each phase streams the live opencode session. After each agent, the toolkit gates run (`lint_dense.py`, `verify_manifest.py`, `lint.py`). Failures trigger up to two fix sessions.
+3. Pick backend (OpenCode is the default), then model and reasoning effort if you want something other than the default (`opencode-go/deepseek-v4-flash` / `max`, or Command Code `deepseek/deepseek-v4-flash` / `high`).
+4. Press **Run pipeline**. Each phase streams the live agent session. After each agent, the toolkit gates run (`lint_dense.py`, `verify_manifest.py`, `lint.py`). Failures trigger up to two fix sessions.
 5. When Agent 3 finishes, open `notes.html` from the UI. Past runs survive refresh; you can resume, retry, archive, or delete an output folder.
 
 Run history is appended to `outputs/<Subject>/<Prefix>/<prefix>_run_events.jsonl`.

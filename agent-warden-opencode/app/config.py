@@ -1,7 +1,7 @@
 """Static configuration for the transcript-notes automation.
 
 Everything is relative to the workspace root (E:\\agent_warden), which is also
-the working directory for every opencode run so that the toolkit's own
+the working directory for every agent CLI run so that the toolkit's own
 instructions (outputs/, topic_mappings/, extracted_pdfs/ paths) resolve as-is.
 """
 from __future__ import annotations
@@ -21,14 +21,52 @@ DOCS_DIR = (WORKSPACE / "companion_docs"
             if (WORKSPACE / "companion_docs").is_dir()
             else WORKSPACE / "extracted_pdfs")
 
-MODEL = "opencode-go/deepseek-v4-flash"
-VARIANT = "max"
-MODEL_PROVIDER = "opencode-go"
+BACKEND_OPENCODE = "opencode"
+BACKEND_COMMANDCODE = "commandcode"
+DEFAULT_BACKEND = BACKEND_OPENCODE
+
+BACKENDS = {
+    BACKEND_OPENCODE: {
+        "id": BACKEND_OPENCODE,
+        "label": "OpenCode",
+        "model": "opencode-go/deepseek-v4-flash",
+        "variant": "max",
+        "provider": "opencode-go",
+        "effort_variants": ["low", "high", "max"],
+    },
+    BACKEND_COMMANDCODE: {
+        "id": BACKEND_COMMANDCODE,
+        "label": "Command Code",
+        "model": "deepseek/deepseek-v4-flash",
+        "variant": "high",
+        "provider": "commandcode",
+        "effort_variants": ["low", "medium", "high"],
+    },
+}
+
+# OpenCode defaults (kept as top-level names for existing callers).
+MODEL = BACKENDS[BACKEND_OPENCODE]["model"]
+VARIANT = BACKENDS[BACKEND_OPENCODE]["variant"]
+MODEL_PROVIDER = BACKENDS[BACKEND_OPENCODE]["provider"]
 MAX_FIX_ROUNDS = 3          # 1 initial attempt + up to 2 fix sessions per phase
 PHASE_TIMEOUT_SECONDS = 6 * 60 * 60  # generous ceiling; notes take a while
+COMMANDCODE_MAX_TURNS = 250
 # Prefer higher effort when falling back from the default "max".
 _VARIANT_RANK = ("none", "minimal", "low", "medium", "high", "xhigh",
                  "thinking", "max")
+
+
+def normalize_backend(backend: str | None) -> str:
+    raw = (backend or DEFAULT_BACKEND).strip().lower().replace("-", "").replace("_", "")
+    if raw in {"commandcode", "cmdc", "cc"}:
+        return BACKEND_COMMANDCODE
+    if raw in {"opencode", "oc"}:
+        return BACKEND_OPENCODE
+    return DEFAULT_BACKEND
+
+
+def backend_meta(backend: str | None = None) -> dict:
+    return BACKENDS[normalize_backend(backend)]
 
 SUBJECTS = {
     "ACI":  "Artificial Computational Intelligence",
@@ -97,9 +135,11 @@ def default_docs_dir(abbr: str, subject: str = "") -> Path | None:
 
 
 _OPENCODE_EXE: str | None = None
-_MODELS_CACHE: dict | None = None
-_MODELS_CACHE_AT: float = 0.0
-_MODELS_CACHE_TTL = 300.0  # seconds
+_COMMANDCODE_ARGV: list[str] | None = None
+_MODELS_CACHE: dict[str, dict] = {}
+_MODELS_CACHE_AT: dict[str, float] = {}
+_MODELS_CACHE_TTL = 300.0  # seconds (OpenCode)
+_COMMANDCODE_MODELS_TTL = 900.0  # CLI is slow to start; keep the list longer
 
 
 def find_opencode() -> str:
@@ -129,6 +169,57 @@ def find_opencode() -> str:
     # Last resort: whatever which finds (may be a .cmd wrapper).
     _OPENCODE_EXE = shutil.which("opencode") or "opencode"
     return _OPENCODE_EXE
+
+
+def find_commandcode_argv() -> list[str]:
+    """Argv prefix for Command Code, skipping PowerShell shims.
+
+    On Windows the user-facing name is `cmdc` (`cmd` is taken). Invoking the
+    `.ps1` wrapper from Python hangs; prefer `node …/command-code/dist/index.mjs`.
+    """
+    global _COMMANDCODE_ARGV
+    if _COMMANDCODE_ARGV:
+        return _COMMANDCODE_ARGV
+
+    def _from_bindir(bindir: Path) -> list[str] | None:
+        mjs = bindir / "node_modules" / "command-code" / "dist" / "index.mjs"
+        if not mjs.is_file():
+            return None
+        node = bindir / "node.exe"
+        node_exe = str(node) if node.is_file() else (
+            shutil.which("node.exe") or shutil.which("node") or "node")
+        return [node_exe, str(mjs)]
+
+    for name in ("cmdc.cmd", "command-code.cmd", "cmdc", "command-code"):
+        found = shutil.which(name)
+        if not found:
+            continue
+        path = Path(found)
+        if path.suffix.lower() == ".ps1":
+            cmd = path.with_suffix(".cmd")
+            if cmd.is_file():
+                path = cmd
+        argv = _from_bindir(path.parent)
+        if argv:
+            _COMMANDCODE_ARGV = argv
+            return argv
+
+    npm = Path(os.environ.get("APPDATA", "")) / "npm"
+    if npm.is_dir():
+        argv = _from_bindir(npm)
+        if argv:
+            _COMMANDCODE_ARGV = argv
+            return argv
+        mjs = (npm / "node_modules" / "command-code" / "dist" / "index.mjs")
+        if mjs.is_file():
+            node_exe = shutil.which("node.exe") or shutil.which("node") or "node"
+            _COMMANDCODE_ARGV = [node_exe, str(mjs)]
+            return _COMMANDCODE_ARGV
+
+    fallback = shutil.which("cmdc.cmd") or shutil.which("command-code.cmd") \
+        or shutil.which("cmdc") or "cmdc"
+    _COMMANDCODE_ARGV = [fallback]
+    return _COMMANDCODE_ARGV
 
 
 def _parse_models_verbose(stdout: str) -> list[dict]:
@@ -199,44 +290,104 @@ def preferred_variant(variants: list[str],
     return max(variants, key=lambda v: rank.get(v, -1))
 
 
-def list_models(provider: str | None = None, refresh: bool = False,
-                timeout: float = 45.0) -> dict:
-    """Discover models (and reasoning variants) via `opencode models`.
-
-    Returns {"ok", "provider", "models", "default_model", "default_variant",
-    "error"}. Falls back to the hardcoded default when the CLI fails.
-    Cached briefly so UI startup /api/config stays snappy.
-    """
-    import subprocess
-    import time as _time
-
-    global _MODELS_CACHE, _MODELS_CACHE_AT
-    provider = provider or MODEL_PROVIDER
-    now = _time.time()
-    if (not refresh and _MODELS_CACHE is not None
-            and _MODELS_CACHE.get("provider") == provider
-            and (now - _MODELS_CACHE_AT) < _MODELS_CACHE_TTL):
-        return _MODELS_CACHE
-
-    fallback = [{
-        "id": MODEL,
+def _fallback_models(backend: str) -> list[dict]:
+    meta = backend_meta(backend)
+    return [{
+        "id": meta["model"],
         "name": "DeepSeek V4 Flash",
         "family": "deepseek-flash",
         "status": "active",
         "reasoning": True,
-        "variants": ["low", "high", "max"],
+        "variants": list(meta["effort_variants"]),
         "cost": {},
         "limit": {},
     }]
+
+
+def _cache_get(key: str, ttl: float, refresh: bool):
+    import time as _time
+    now = _time.time()
+    cached = _MODELS_CACHE.get(key)
+    if (not refresh and cached is not None
+            and (now - _MODELS_CACHE_AT.get(key, 0)) < ttl):
+        return cached
+    return None
+
+
+def _cache_put(key: str, result: dict) -> dict:
+    import time as _time
+    _MODELS_CACHE[key] = result
+    _MODELS_CACHE_AT[key] = _time.time()
+    return result
+
+
+def _parse_commandcode_models(stdout: str, effort_variants: list[str]) -> list[dict]:
+    """Parse `cmdc --list-models` (copy-pasteable ids, possibly with ANSI)."""
+    import re
+    ansi = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+    id_re = re.compile(r"^[\w.-]+(?:/[\w.@+-]+)?$")
+    skip = {"model", "models", "id", "name", "provider", "available", "copy"}
+    models: list[dict] = []
+    seen: set[str] = set()
+    text = stdout or ""
+    stripped = text.strip()
+    if stripped.startswith("[") or stripped.startswith("{"):
+        try:
+            raw = json.loads(stripped)
+            rows = raw if isinstance(raw, list) else (raw.get("models") or [])
+            for row in rows:
+                if isinstance(row, str):
+                    mid = row.strip()
+                    name = mid.split("/", 1)[-1]
+                elif isinstance(row, dict):
+                    mid = str(row.get("id") or row.get("model") or "").strip()
+                    name = str(row.get("name") or mid.split("/", 1)[-1])
+                else:
+                    continue
+                if not mid or mid in seen:
+                    continue
+                seen.add(mid)
+                models.append({
+                    "id": mid, "name": name, "family": "",
+                    "status": "active", "reasoning": True,
+                    "variants": list(effort_variants), "cost": {}, "limit": {},
+                })
+            if models:
+                return models
+        except ValueError:
+            pass
+    for line in text.splitlines():
+        line = ansi.sub("", line).strip()
+        if not line or set(line) <= {"-", "=", " "}:
+            continue
+        token = line.split()[0].strip("`,;|")
+        if token.lower() in skip or not id_re.match(token):
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        rest = line[len(line.split()[0]):].strip(" -|")
+        name = rest or token.split("/", 1)[-1]
+        models.append({
+            "id": token, "name": name, "family": "",
+            "status": "active", "reasoning": True,
+            "variants": list(effort_variants), "cost": {}, "limit": {},
+        })
+    return models
+
+
+def _list_opencode_models(provider: str, refresh: bool, timeout: float) -> dict:
+    import subprocess
+
+    fallback = _fallback_models(BACKEND_OPENCODE)
     exe = find_opencode()
     if not exe:
-        result = {
-            "ok": False, "provider": provider, "models": fallback,
-            "default_model": MODEL, "default_variant": VARIANT,
+        return {
+            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider,
+            "models": fallback, "default_model": MODEL,
+            "default_variant": VARIANT,
             "error": "opencode executable not found",
         }
-        _MODELS_CACHE, _MODELS_CACHE_AT = result, now
-        return result
     cmd = [exe, "models", provider, "--verbose"]
     if refresh:
         cmd.append("--refresh")
@@ -246,65 +397,149 @@ def list_models(provider: str | None = None, refresh: bool = False,
             errors="replace", timeout=timeout,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.TimeoutExpired) as exc:
-        result = {
-            "ok": False, "provider": provider, "models": fallback,
-            "default_model": MODEL, "default_variant": VARIANT,
+        return {
+            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider,
+            "models": fallback, "default_model": MODEL,
+            "default_variant": VARIANT,
             "error": f"{type(exc).__name__}: {exc}",
         }
-        _MODELS_CACHE, _MODELS_CACHE_AT = result, now
-        return result
     models = _parse_models_verbose(proc.stdout or "")
-    # Prefer active models; keep unknowns if status missing.
     models = [m for m in models
               if (m.get("status") or "active") in {"active", "unknown"}]
     if not models:
         err = (proc.stderr or "").strip() or f"exit {proc.returncode}"
-        result = {
-            "ok": False, "provider": provider, "models": fallback,
-            "default_model": MODEL, "default_variant": VARIANT,
+        return {
+            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider,
+            "models": fallback, "default_model": MODEL,
+            "default_variant": VARIANT,
             "error": f"no models parsed ({err})",
         }
-        _MODELS_CACHE, _MODELS_CACHE_AT = result, now
-        return result
     ids = {m["id"] for m in models}
     default_model = MODEL if MODEL in ids else models[0]["id"]
     variants = next((m["variants"] for m in models if m["id"] == default_model),
                     [])
-    default_variant = preferred_variant(variants, VARIANT)
-    result = {
-        "ok": True, "provider": provider, "models": models,
-        "default_model": default_model, "default_variant": default_variant,
+    return {
+        "ok": True, "backend": BACKEND_OPENCODE, "provider": provider,
+        "models": models, "default_model": default_model,
+        "default_variant": preferred_variant(variants, VARIANT),
         "error": None,
     }
-    _MODELS_CACHE, _MODELS_CACHE_AT = result, now
-    return result
+
+
+def _list_commandcode_models(refresh: bool, timeout: float) -> dict:
+    """Live `cmdc --list-models` is slow; skip unless refresh=True or cached."""
+    import subprocess
+
+    meta = backend_meta(BACKEND_COMMANDCODE)
+    fallback = _fallback_models(BACKEND_COMMANDCODE)
+    argv = find_commandcode_argv()
+    if not argv:
+        return {
+            "ok": False, "backend": BACKEND_COMMANDCODE,
+            "provider": meta["provider"], "models": fallback,
+            "default_model": meta["model"], "default_variant": meta["variant"],
+            "error": "command-code executable not found",
+        }
+    if not refresh:
+        return {
+            "ok": True, "backend": BACKEND_COMMANDCODE,
+            "provider": meta["provider"], "models": fallback,
+            "default_model": meta["model"], "default_variant": meta["variant"],
+            "error": None,
+            "hint": "live list not loaded — Command Code is slow to start; click refresh",
+        }
+    cmd = argv + ["--list-models", "--skip-onboarding", "--no-auto-update"]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "ok": False, "backend": BACKEND_COMMANDCODE,
+            "provider": meta["provider"], "models": fallback,
+            "default_model": meta["model"], "default_variant": meta["variant"],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    models = _parse_commandcode_models(
+        (proc.stdout or "") + "\n" + (proc.stderr or ""),
+        list(meta["effort_variants"]))
+    if not models:
+        err = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+        return {
+            "ok": False, "backend": BACKEND_COMMANDCODE,
+            "provider": meta["provider"], "models": fallback,
+            "default_model": meta["model"], "default_variant": meta["variant"],
+            "error": f"no models parsed ({err})",
+        }
+    ids = {m["id"] for m in models}
+    default_model = meta["model"] if meta["model"] in ids else models[0]["id"]
+    variants = next((m["variants"] for m in models if m["id"] == default_model),
+                    list(meta["effort_variants"]))
+    return {
+        "ok": True, "backend": BACKEND_COMMANDCODE,
+        "provider": meta["provider"], "models": models,
+        "default_model": default_model,
+        "default_variant": preferred_variant(variants, meta["variant"]),
+        "error": None,
+    }
+
+
+def list_models(provider: str | None = None, refresh: bool = False,
+                timeout: float | None = None, backend: str | None = None) -> dict:
+    """Discover models for a backend.
+
+    Returns {"ok", "backend", "provider", "models", "default_model",
+    "default_variant", "error"}. Falls back to the hardcoded default when the
+    CLI fails. Cached so UI startup stays snappy. Command Code's CLI is slow
+    to start, so a live `--list-models` runs only when refresh=True.
+    """
+    backend = normalize_backend(backend)
+    meta = backend_meta(backend)
+    provider = provider or meta["provider"]
+    cache_key = f"{backend}:{provider}"
+    ttl = (_COMMANDCODE_MODELS_TTL if backend == BACKEND_COMMANDCODE
+           else _MODELS_CACHE_TTL)
+    cached = _cache_get(cache_key, ttl, refresh)
+    if cached is not None:
+        return cached
+    if backend == BACKEND_COMMANDCODE:
+        result = _list_commandcode_models(
+            refresh=refresh, timeout=timeout if timeout is not None else 180.0)
+    else:
+        result = _list_opencode_models(
+            provider=provider, refresh=refresh,
+            timeout=timeout if timeout is not None else 45.0)
+    return _cache_put(cache_key, result)
 
 
 def resolve_model_choice(model: str | None = None,
                          variant: str | None = None,
-                         catalog: dict | None = None) -> tuple[str, str]:
+                         catalog: dict | None = None,
+                         backend: str | None = None) -> tuple[str, str]:
     """Validate / normalize a UI model+variant choice against the catalog."""
-    catalog = catalog or list_models()
+    backend = normalize_backend(backend or (catalog or {}).get("backend"))
+    meta = backend_meta(backend)
+    catalog = catalog or list_models(backend=backend)
     models = {m["id"]: m for m in catalog.get("models") or []}
-    chosen = (model or "").strip() or catalog.get("default_model") or MODEL
+    chosen = (model or "").strip() or catalog.get("default_model") or meta["model"]
     if chosen not in models and "/" not in chosen and models:
-        # Allow bare model id when provider is implied.
-        prefixed = f"{catalog.get('provider') or MODEL_PROVIDER}/{chosen}"
+        prefixed = f"{catalog.get('provider') or meta['provider']}/{chosen}"
         if prefixed in models:
             chosen = prefixed
-    meta = models.get(chosen)
-    if meta is None:
+    row = models.get(chosen)
+    if row is None:
         # Unknown to catalog — still allow explicit provider/model strings.
-        if "/" not in chosen:
-            chosen = catalog.get("default_model") or MODEL
-            meta = models.get(chosen)
-    variants = list((meta or {}).get("variants") or [])
+        if "/" not in chosen and backend == BACKEND_OPENCODE:
+            chosen = catalog.get("default_model") or meta["model"]
+            row = models.get(chosen)
+    variants = list((row or {}).get("variants") or [])
     raw_variant = "" if variant is None else str(variant).strip()
     if not variants:
         return chosen, ""
     if raw_variant and raw_variant in variants:
         return chosen, raw_variant
-    return chosen, preferred_variant(variants, raw_variant or VARIANT)
+    return chosen, preferred_variant(variants, raw_variant or meta["variant"])
 
 
 def skill_path(agent: str) -> Path:
@@ -492,6 +727,7 @@ def summarize_run_events(events_path: Path, subject: str = "",
         "last_failed_phase": None,
         "model": None,
         "variant": None,
+        "backend": None,
     }
     phase_secs: dict[str, float] = {}
     phase_cost: dict[str, float] = {}
@@ -520,6 +756,7 @@ def summarize_run_events(events_path: Path, subject: str = "",
                     summary["phases_requested"] = ev.get("phases") or []
                     summary["model"] = ev.get("model")
                     summary["variant"] = ev.get("variant")
+                    summary["backend"] = ev.get("backend")
                     summary["started_at"] = ev.get("time")
                     summary["status"] = "running"
                 elif et == "phase_start":

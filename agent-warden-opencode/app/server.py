@@ -244,11 +244,13 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/config":
             refresh = (query.get("refresh_models") or ["0"])[0] in (
                 "1", "true", "yes")
-            self._json(self._config(refresh_models=refresh))
+            backend = (query.get("backend") or [None])[0]
+            self._json(self._config(refresh_models=refresh, backend=backend))
         elif path == "/api/models":
             refresh = (query.get("refresh") or ["0"])[0] in (
                 "1", "true", "yes")
-            self._json(config.list_models(refresh=refresh))
+            backend = (query.get("backend") or [None])[0]
+            self._json(config.list_models(refresh=refresh, backend=backend))
         elif path == "/api/docs":
             self._json(self._docs_folders())
         elif path == "/api/history":
@@ -322,7 +324,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _config(self, refresh_models: bool = False) -> dict:
+    def _config(self, refresh_models: bool = False,
+                backend: str | None = None) -> dict:
         subjects = [{"abbr": a, "subject": v}
                     for a, v in sorted(config.all_subjects().items())]
         docs = self._docs_folders()
@@ -331,15 +334,21 @@ class Handler(BaseHTTPRequestHandler):
             matched = config.default_docs_dir(a, name)
             if matched:
                 docs_by_abbr[a] = {"name": matched.name, "path": str(matched)}
-        catalog = config.list_models(refresh=refresh_models)
+        backend = config.normalize_backend(backend)
+        catalog = config.list_models(refresh=refresh_models, backend=backend)
+        bmeta = config.backend_meta(backend)
         return {
             "workspace": str(config.WORKSPACE),
-            "model": catalog.get("default_model") or config.MODEL,
-            "variant": catalog.get("default_variant") or config.VARIANT,
+            "backend": backend,
+            "backends": [{"id": b["id"], "label": b["label"]}
+                         for b in config.BACKENDS.values()],
+            "model": catalog.get("default_model") or bmeta["model"],
+            "variant": catalog.get("default_variant") or bmeta["variant"],
             "models": catalog.get("models") or [],
             "models_ok": bool(catalog.get("ok")),
             "models_error": catalog.get("error"),
-            "model_provider": catalog.get("provider") or config.MODEL_PROVIDER,
+            "models_hint": catalog.get("hint"),
+            "model_provider": catalog.get("provider") or bmeta["provider"],
             "subjects": subjects,
             "transcripts": config.list_transcripts(),
             "docs": docs,
@@ -379,9 +388,10 @@ class Handler(BaseHTTPRequestHandler):
         retry = bool(body.get("retry"))
         phases_in = body.get("phases")
         phases = [int(p) for p in (phases_in or [1, 2, 3])]
-        catalog = config.list_models()
+        backend = config.normalize_backend(body.get("backend"))
+        catalog = config.list_models(backend=backend)
         model, variant = config.resolve_model_choice(
-            body.get("model"), body.get("variant"), catalog)
+            body.get("model"), body.get("variant"), catalog, backend=backend)
         transcripts = body.get("transcripts") or []
         single = body.get("transcript")
         if single:
@@ -480,12 +490,12 @@ class Handler(BaseHTTPRequestHandler):
                 subject=subj, abbr=abbr, prefix=prefix,
                 lecture_num=lecture_num, transcript=t,
                 phases=job_phases, emit=emit, docs_dir=docs, run_id=run_id,
-                model=model, variant=variant)
+                model=model, variant=variant, backend=backend)
             run["pipeline"] = pipeline
             jobs.append({"run_id": run_id, "subject": subj,
                          "prefix": prefix, "lecture_num": lecture_num,
-                         "phases": job_phases, "model": model,
-                         "variant": variant})
+                         "phases": job_phases, "backend": backend,
+                         "model": model, "variant": variant})
 
             def worker(_rid=run_id, _p=pipeline):
                 try:

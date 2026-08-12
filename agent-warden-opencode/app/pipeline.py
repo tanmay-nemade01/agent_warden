@@ -1,6 +1,6 @@
-"""Three-agent notes pipeline, driven by the opencode CLI.
+"""Three-agent notes pipeline, driven by an agent CLI (OpenCode or Command Code).
 
-Each phase is one `opencode run` invocation (a fresh session, matching the
+Each phase is one non-interactive CLI invocation (a fresh session, matching the
 toolkit's "one agent per new chat window" design). The agent has real tools
 (read/write/edit/bash) and performs its phase exactly as its SKILL file
 instructs, including running the toolkit scripts itself. After the agent
@@ -55,7 +55,8 @@ class Pipeline:
     def __init__(self, subject: str, abbr: str, prefix: str, lecture_num: str,
                  transcript: str, phases: list[int] | None = None,
                  emit=None, docs_dir: str | None = None, run_id: str = "",
-                 model: str | None = None, variant: str | None = None):
+                 model: str | None = None, variant: str | None = None,
+                 backend: str | None = None):
         self.subject = subject
         self.abbr = abbr
         self.prefix = prefix
@@ -65,9 +66,11 @@ class Pipeline:
         self.emit = emit or (lambda ev: None)
         self.docs_dir = docs_dir
         self.run_id = run_id or f"{abbr}:{prefix}"
-        self.model = (model or config.MODEL).strip() or config.MODEL
-        # Empty string means "no --variant" (model has no effort knobs).
-        self.variant = (config.VARIANT if variant is None
+        self.backend = config.normalize_backend(backend)
+        bmeta = config.backend_meta(self.backend)
+        self.model = (model or bmeta["model"]).strip() or bmeta["model"]
+        # Empty string means "no --variant" / "--effort" (model has no knobs).
+        self.variant = (bmeta["variant"] if variant is None
                         else str(variant).strip())
         self.out = config.OUTPUTS_DIR / subject / prefix
         self.proc: subprocess.Popen | None = None
@@ -81,6 +84,7 @@ class Pipeline:
         }
         self._phase_bucket: dict | None = None
         self._phase_t0: float | None = None
+        self._cc_tools: dict[str, dict] = {}
 
     # ------------------------------------------------------------------ utils
     def _log(self, ev: dict):
@@ -141,7 +145,39 @@ class Pipeline:
 
     def _run_agent(self, agent: int, message: str, title: str,
                    extra_env: dict | None = None) -> tuple[int, list[str]]:
-        """Run opencode non-interactively; stream structured events."""
+        """Run the selected backend non-interactively; stream structured events."""
+        if self.backend == config.BACKEND_COMMANDCODE:
+            return self._run_commandcode(agent, message, title, extra_env)
+        return self._run_opencode(agent, message, title, extra_env)
+
+    def _stream_process(self, agent: int, parse_line) -> tuple[int, list[str]]:
+        lines: list[str] = []
+        try:
+            assert self.proc is not None and self.proc.stdout is not None
+            for raw in self.proc.stdout:
+                line = raw.rstrip("\r\n")
+                lines.append(line)
+                events = parse_line(line)
+                if events:
+                    for event in events:
+                        self._accumulate_stats(AGENTS[agent], event)
+                        self._log({"type": "agent_event",
+                                   "phase": AGENTS[agent],
+                                   "event": event})
+                elif line.strip():
+                    self._log({"type": "log", "phase": AGENTS[agent],
+                               "line": line})
+                if self.stop_flag:
+                    self._kill()
+                    raise PhaseError("stopped by user")
+        except KeyboardInterrupt:
+            self._kill()
+            raise PhaseError("interrupted")
+        code = self.proc.wait() if self.proc else 1
+        return code, lines
+
+    def _run_opencode(self, agent: int, message: str, title: str,
+                      extra_env: dict | None = None) -> tuple[int, list[str]]:
         exe = config.find_opencode()
         cmd = [exe, "run", "--auto", "-m", self.model]
         if self.variant:
@@ -160,33 +196,58 @@ class Pipeline:
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
             env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        lines: list[str] = []
+
+        def parse(line: str) -> list[dict]:
+            if not line.lstrip().startswith("{"):
+                return []
+            event = self._parse_agent_event(line)
+            return [event] if event is not None else []
+
+        return self._stream_process(agent, parse)
+
+    def _run_commandcode(self, agent: int, message: str, title: str,
+                         extra_env: dict | None = None) -> tuple[int, list[str]]:
+        """Headless Command Code: `cmdc -p` with JSON events and --yolo.
+
+        Prompt goes on stdin to avoid Windows argv length limits. The CLI is
+        slow to start; that is expected. cwd is the workspace so toolkit paths
+        resolve. See https://commandcode.ai/docs/headless
+        """
+        argv = config.find_commandcode_argv()
+        cmd = argv + [
+            "-p",
+            "--output-format", "json",
+            "-m", self.model,
+            "--yolo",
+            "--trust",
+            "--skip-onboarding",
+            "--no-auto-update",
+            "--no-skills",
+            "--max-turns", str(config.COMMANDCODE_MAX_TURNS),
+            "-n", title,
+        ]
+        if self.variant:
+            cmd.extend(["--effort", self.variant])
+        env = dict(os.environ)
+        env["NO_COLOR"] = "1"
+        env["FORCE_COLOR"] = "0"
+        if extra_env:
+            env.update(extra_env)
+        self._cc_tools = {}
+        self._log({"type": "phase_cmd", "phase": AGENTS[agent],
+                   "cmd": " ".join(cmd[:10]) + " ..."})
+        self.proc = subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+            errors="replace", env=env, cwd=str(config.WORKSPACE),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         try:
-            assert self.proc.stdout is not None
-            for raw in self.proc.stdout:
-                line = raw.rstrip("\r\n")
-                lines.append(line)
-                if line.lstrip().startswith("{"):
-                    event = self._parse_agent_event(line)
-                    if event is not None:
-                        self._accumulate_stats(AGENTS[agent], event)
-                        self._log({"type": "agent_event",
-                                   "phase": AGENTS[agent],
-                                   "event": event})
-                    else:
-                        self._log({"type": "log", "phase": AGENTS[agent],
-                                   "line": line})
-                else:
-                    self._log({"type": "log", "phase": AGENTS[agent],
-                               "line": line})
-                if self.stop_flag:
-                    self._kill()
-                    raise PhaseError("stopped by user")
-        except KeyboardInterrupt:
-            self._kill()
-            raise PhaseError("interrupted")
-        code = self.proc.wait()
-        return code, lines
+            assert self.proc.stdin is not None
+            self.proc.stdin.write(message)
+            self.proc.stdin.close()
+        except OSError:
+            pass
+        return self._stream_process(agent, self._parse_commandcode_line)
 
     @staticmethod
     def _parse_agent_event(line: str) -> dict | None:
@@ -229,6 +290,173 @@ class Pipeline:
             part["state"] = state
         return {"type": ev_type, "part": part,
                 "ts": raw.get("timestamp")}
+
+    @staticmethod
+    def _usage_tokens(usage) -> dict:
+        if not isinstance(usage, dict):
+            return {"input": 0, "output": 0, "reasoning": 0}
+
+        def g(*keys):
+            for k in keys:
+                if usage.get(k) is not None:
+                    try:
+                        return int(usage[k] or 0)
+                    except (TypeError, ValueError):
+                        return 0
+            return 0
+
+        return {
+            "input": g("input", "inputTokens", "input_tokens", "promptTokens",
+                       "prompt_tokens"),
+            "output": g("output", "outputTokens", "output_tokens",
+                        "completionTokens", "completion_tokens"),
+            "reasoning": g("reasoning", "reasoningTokens", "reasoning_tokens",
+                           "cacheReadTokens"),
+        }
+
+    @staticmethod
+    def _usage_cost(usage) -> float:
+        if not isinstance(usage, dict):
+            return 0.0
+        for k in ("cost", "total_cost", "totalCost"):
+            if usage.get(k) is not None:
+                try:
+                    return float(usage[k] or 0)
+                except (TypeError, ValueError):
+                    return 0.0
+        return 0.0
+
+    def _parse_commandcode_line(self, line: str) -> list[dict]:
+        """Map one Command Code NDJSON line to UI agent_event dicts."""
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(raw, dict):
+            return []
+        if raw.get("type") == "event" and isinstance(raw.get("event"), dict):
+            ev = raw["event"]
+        elif raw.get("type") == "result":
+            return self._commandcode_result(raw)
+        else:
+            ev = raw
+        et = ev.get("type")
+        if not et:
+            return []
+        if et == "turn_start":
+            return [{"type": "step_start", "part": {
+                "turn": ev.get("turnNumber")}}]
+        if et in {"turn_end"}:
+            usage = ev.get("usage") or {}
+            return [{"type": "step_finish", "part": {
+                "reason": ev.get("stopReason") or et,
+                "tokens": self._usage_tokens(usage),
+                "cost": self._usage_cost(usage),
+            }}]
+        if et == "thinking_end":
+            text = ev.get("text") or ev.get("thinking") or ""
+            if not isinstance(text, str) or not text:
+                return []
+            trimmed = False
+            if len(text) > self.EVENT_TEXT_CAP:
+                text = text[:self.EVENT_TEXT_CAP]
+                trimmed = True
+            return [{"type": "reasoning", "part": {
+                "text": text, "trimmed": trimmed}}]
+        if et == "message_end":
+            text = ev.get("text") or ev.get("content") or ev.get("finalText") or ""
+            if isinstance(text, list):
+                text = "".join(
+                    (p.get("text") or "") if isinstance(p, dict) else str(p)
+                    for p in text)
+            if not isinstance(text, str) or not text.strip():
+                return []
+            trimmed = False
+            if len(text) > self.EVENT_TEXT_CAP:
+                text = text[:self.EVENT_TEXT_CAP]
+                trimmed = True
+            return [{"type": "text", "part": {
+                "text": text, "trimmed": trimmed}}]
+        if et == "tool_running":
+            call_id = str(ev.get("toolCallId") or ev.get("id") or "")
+            rec = {
+                "tool": ev.get("toolName") or ev.get("tool") or "tool",
+                "title": ev.get("description") or "",
+                "input": ev.get("input"),
+            }
+            if call_id:
+                self._cc_tools[call_id] = rec
+            part = {
+                "tool": rec["tool"],
+                "title": rec["title"],
+                "callID": call_id,
+                "state": {"status": "running"},
+            }
+            if rec["input"] is not None:
+                part["state"]["input"] = rec["input"]
+            return [{"type": "tool_use", "part": part}]
+        if et in {"tool_completed", "tool_errored"}:
+            call_id = str(ev.get("toolCallId") or ev.get("id") or "")
+            rec = self._cc_tools.get(call_id) or {
+                "tool": ev.get("toolName") or ev.get("tool") or "tool",
+                "title": ev.get("description") or "",
+            }
+            out = ev.get("result") if et == "tool_completed" else ev.get("error")
+            if out is None:
+                out = ev.get("output") or ""
+            if not isinstance(out, str):
+                try:
+                    out = json.dumps(out, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    out = str(out)
+            trimmed = False
+            if len(out) > self.EVENT_TOOL_OUTPUT_CAP:
+                out = out[:self.EVENT_TOOL_OUTPUT_CAP]
+                trimmed = True
+            status = "completed" if et == "tool_completed" else "error"
+            part = {
+                "tool": rec.get("tool") or "tool",
+                "title": rec.get("title") or "",
+                "callID": call_id,
+                "state": {"status": status, "output": out},
+            }
+            if trimmed:
+                part["state"]["output_trimmed"] = True
+            if rec.get("input") is not None:
+                part["state"]["input"] = rec["input"]
+            return [{"type": "tool_use", "part": part}]
+        return []
+
+    def _commandcode_result(self, raw: dict) -> list[dict]:
+        text = raw.get("finalText") or ""
+        if raw.get("subtype") == "error":
+            err = raw.get("error") or "command-code error"
+            text = text or str(err)
+        if not isinstance(text, str) or not text.strip():
+            usage = raw.get("usage") or {}
+            if usage:
+                return [{"type": "step_finish", "part": {
+                    "reason": raw.get("stopReason") or raw.get("subtype")
+                    or "result",
+                    "tokens": self._usage_tokens(usage),
+                    "cost": self._usage_cost(usage),
+                }}]
+            return []
+        clipped = text
+        trimmed = False
+        if len(clipped) > self.EVENT_TEXT_CAP:
+            clipped = clipped[:self.EVENT_TEXT_CAP]
+            trimmed = True
+        out = [{"type": "text", "part": {
+            "text": clipped, "trimmed": trimmed}}]
+        usage = raw.get("usage") or {}
+        if usage and not self.stats["tokens"]["input"] and not self.stats["tokens"]["output"]:
+            out.append({"type": "step_finish", "part": {
+                "reason": raw.get("stopReason") or raw.get("subtype") or "result",
+                "tokens": self._usage_tokens(usage),
+                "cost": self._usage_cost(usage),
+            }})
+        return out
 
     def _accumulate_stats(self, phase: str, event: dict):
         if event.get("type") != "step_finish":
@@ -449,6 +677,7 @@ class Pipeline:
                    "abbr": self.abbr, "prefix": self.prefix,
                    "lecture_num": self.lecture_num,
                    "transcript": self.transcript, "phases": self.phases,
+                   "backend": self.backend,
                    "model": self.model, "variant": self.variant})
 
         phases_to_run = list(self.phases)

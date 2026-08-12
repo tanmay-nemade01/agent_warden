@@ -1029,6 +1029,13 @@
           <select id="docs"></select>
         </div>
         <div>
+          <label for="backend">Agent backend</label>
+          <select id="backend">
+            <option value="opencode">OpenCode</option>
+            <option value="commandcode">Command Code</option>
+          </select>
+        </div>
+        <div>
           <label for="model">Model</label>
           <select id="model"></select>
           <div class="hint">
@@ -1125,6 +1132,8 @@ const state = {
   models: [],
   defaultModel: "opencode-go/deepseek-v4-flash",
   defaultVariant: "max",
+  backend: "opencode",
+  backends: [],
   artifactInfo: null,
   applyingGuess: false,
   replaying: false,
@@ -1244,9 +1253,10 @@ function ensureRunCard(ev) {
   const el = document.createElement("div");
   el.className = "runcard";
   el.dataset.run = rid;
-  const modelBit = ev.model
-    ? `${esc(ev.model)}${ev.variant ? " · " + esc(ev.variant) : ""}`
-    : "";
+  const modelBit = [
+    ev.backend ? esc(ev.backend) : "",
+    ev.model ? `${esc(ev.model)}${ev.variant ? " · " + esc(ev.variant) : ""}` : "",
+  ].filter(Boolean).join(" · ");
   el.innerHTML = `
     <div class="runhead">
       <span class="dot"></span>
@@ -1748,6 +1758,7 @@ async function startJobs({ resume = false, retry = false, phases = null,
     abbr, prefix, lecture_num: lectureNum, docs, resume, retry,
     model: $("model").value || state.defaultModel,
     variant: $("variant").disabled ? "" : ($("variant").value || ""),
+    backend: $("backend").value || state.backend || "opencode",
   };
   if (transcripts.length) body.transcripts = transcripts;
   if (!resume && !retry) body.phases = phases;
@@ -1862,6 +1873,7 @@ function buildHistoryCard(run) {
           ${run.seconds ? ` · ${fmtDur(run.seconds)}` : ""}
           ${run.cost ? ` · ${fmtCost(run.cost)}` : ""}
           ${run.tokens ? ` · ${fmtTok(run.tokens)}` : ""}
+          ${run.backend ? ` · ${esc(run.backend)}` : ""}
           ${run.model ? ` · ${esc(run.model)}${run.variant ? "/" + esc(run.variant) : ""}` : ""}
           ${phaseBits ? ` · ${esc(phaseBits)}` : ""}
           ${run.error ? ` · <span class="error">${esc(run.error)}</span>` : ""}
@@ -2005,7 +2017,7 @@ const VARIANT_RANK = ["none", "minimal", "low", "medium", "high", "xhigh",
 
 function preferredVariant(variants, wanted) {
   if (!variants || !variants.length) return "";
-  wanted = wanted || state.defaultVariant || "max";
+  wanted = wanted || state.defaultVariant || (state.backend === "commandcode" ? "high" : "max");
   if (variants.includes(wanted)) return wanted;
   let best = variants[0], bestScore = -1;
   for (const v of variants) {
@@ -2055,6 +2067,7 @@ function fillVariantSelect(prefer) {
 }
 
 function syncMetaModel() {
+  const backend = $("backend")?.value || state.backend || "opencode";
   const model = $("model")?.value || state.defaultModel;
   const variant = $("variant")?.disabled ? "(default)" : ($("variant")?.value || "—");
   const meta = $("meta");
@@ -2063,10 +2076,23 @@ function syncMetaModel() {
   meta.innerHTML =
     `<strong>Desk</strong>` +
     `<span class="path" title="${esc(ws)}">ws · ${esc(ws)}</span>` +
+    `backend · ${esc(backend)}<br>` +
     `model · ${esc(model)}<br>` +
     `effort · ${esc(variant)}`;
 }
 
+$("backend").addEventListener("change", async () => {
+  const backend = $("backend").value;
+  localStorage.setItem("agent_warden_backend", backend);
+  state.backend = backend;
+  $("model").innerHTML = "";
+  $("variant").innerHTML = "";
+  const hint = $("models-hint");
+  if (backend === "commandcode") {
+    hint.textContent = "Command Code default: deepseek/deepseek-v4-flash. Refresh models is slow.";
+  }
+  await refreshConfig({ refreshModels: false });
+});
 $("model").addEventListener("change", () => {
   fillVariantSelect();
   syncMetaModel();
@@ -2086,27 +2112,49 @@ $("refresh-models").addEventListener("click", async () => {
 
 // ------------------------------------------------------------- events
 async function refreshConfig({ refreshModels = false } = {}) {
-  const cfg = await api("/api/config" + (refreshModels ? "?refresh_models=1" : ""));
+  const backend = $("backend")?.value
+    || localStorage.getItem("agent_warden_backend")
+    || state.backend
+    || "opencode";
+  const q = new URLSearchParams({ backend });
+  if (refreshModels) q.set("refresh_models", "1");
+  const cfg = await api("/api/config?" + q.toString());
   state.subjects = cfg.subjects || [];
   state.transcripts = cfg.transcripts || [];
   state.docs = cfg.docs || [];
   state.docsByAbbr = cfg.docs_by_abbr || {};
   state.models = cfg.models || [];
-  state.defaultModel = cfg.model || "opencode-go/deepseek-v4-flash";
-  state.defaultVariant = cfg.variant || "max";
+  state.backend = cfg.backend || backend;
+  state.backends = cfg.backends || [];
+  state.defaultModel = cfg.model || (state.backend === "commandcode"
+    ? "deepseek/deepseek-v4-flash" : "opencode-go/deepseek-v4-flash");
+  state.defaultVariant = cfg.variant || (state.backend === "commandcode" ? "high" : "max");
+  const bsel = $("backend");
+  if (bsel && (cfg.backends || []).length) {
+    const prevB = bsel.value || backend;
+    bsel.innerHTML = (cfg.backends || []).map(b =>
+      `<option value="${esc(b.id)}">${esc(b.label)}</option>`).join("");
+    bsel.value = prevB;
+  } else if (bsel) {
+    bsel.value = state.backend;
+  }
   const meta = $("meta");
   meta.dataset.ready = "1";
   meta.dataset.workspace = cfg.workspace || "";
   meta.innerHTML =
     `<strong>Desk</strong>` +
     `<span class="path" title="${esc(cfg.workspace)}">ws · ${esc(cfg.workspace)}</span>` +
+    `backend · ${esc(state.backend)}<br>` +
     `model · ${esc(state.defaultModel)}<br>` +
     `effort · ${esc(state.defaultVariant)}`;
   const hint = $("models-hint");
   if (cfg.models_ok === false && cfg.models_error) {
     hint.textContent = `fallback · ${cfg.models_error}`;
+  } else if (cfg.models_hint) {
+    hint.textContent = cfg.models_hint;
   } else {
-    hint.textContent = `${(cfg.models || []).length} opencode-go models`;
+    const label = state.backend === "commandcode" ? "Command Code" : "OpenCode";
+    hint.textContent = `${(cfg.models || []).length} ${label} models`;
   }
   const prevModel = $("model").value;
   const prevVariant = $("variant").value;
@@ -2342,6 +2390,13 @@ setInterval(() => {
   for (const rid in state.runs) refreshFiles(rid);
 }, 10000);
 
+(function initBackend() {
+  const saved = localStorage.getItem("agent_warden_backend");
+  if (saved === "commandcode" || saved === "opencode") {
+    $("backend").value = saved;
+    state.backend = saved;
+  }
+})();
 refreshConfig().then(async () => {
   applyGuessFromSelection();
   autoPickDocs();
