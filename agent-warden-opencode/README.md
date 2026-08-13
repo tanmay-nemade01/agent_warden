@@ -36,8 +36,13 @@ Agent 4 (enhancer) is intentionally skipped, per the toolkit's own guidance.
 ## Run
 
 ```bash
-start.bat                 # or: python app/server.py [--port 8787]
+start.bat                 # or: ./start.sh / python app/server.py [--port 8787]
 ```
+
+Default bind is loopback (`127.0.0.1`). Binding `--host 0.0.0.0` requires
+`NOTES_STUDIO_TOKEN`; send it as `X-Notes-Token` / `Authorization: Bearer`
+or `?token=` (the UI reads `?token=` from the page URL). `GET /healthz` is
+unauthenticated. Generated `notes.html` is served with `Content-Security-Policy: sandbox`.
 
 Open http://127.0.0.1:8787
 
@@ -52,6 +57,9 @@ Open http://127.0.0.1:8787
    `cmdc -p --output-format json --yolo` ([headless mode](https://commandcode.ai/docs/headless));
    the CLI is slow to start. Gates show PASS/FAIL under each
    phase; failing gates trigger fix sessions (max 2) before the phase reports.
+   If a stage still fails, that stage is retried automatically up to 3 times
+   (each transcript file has its own budget). **Failed runs** sit at the top
+   of the page after those retries are exhausted.
 4. **Live runs** show a cost/time rollup (per agent + total). **Past runs**
    survives refresh — resume, retry, open `notes.html`, or **Archive** /
    **Delete** the output folder. Refresh mid-run replays buffered SSE events
@@ -75,11 +83,15 @@ so the UI starts from the DeepSeek V4 Flash default until you click
 agent-warden-opencode/
 ├── app/
 │   ├── config.py       workspace/toolkit/subject/model constants
+│   ├── paths.py        confine() for user-supplied path segments
+│   ├── permissions.py  per-job OpenCode / Command Code write fences
 │   ├── gates.py        toolkit script wrappers + [PASS]/[WARN]/[FAIL] parsing
 │   ├── pipeline.py     3-phase orchestrator (OpenCode or Command Code + fix loops)
 │   ├── server.py       stdlib HTTP + SSE server
 │   └── static/index.html
-└── start.bat
+├── tests/
+├── start.bat
+└── start.sh
 ```
 
 Run history per lecture is appended to

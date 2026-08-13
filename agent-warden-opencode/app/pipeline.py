@@ -11,22 +11,24 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 
-from . import config, gates
+from . import config, gates, permissions
+from .paths import confine, resolve_under
 
 AGENTS = {1: "extractor", 2: "enricher", 3: "formatter"}
 
-ADAPTATION = """\
+_COMMON_ADAPT = """\
 # Runtime adaptation for this automated run
 
-- Working directory (cwd): {workspace} — all relative paths below resolve from here.
-- Transcript: {transcript}
+- Working directory (cwd): {workspace} — relative paths below resolve from here.
 - Output directory (create it if missing): {out}
-- Toolkit root: {toolkit}
+- Toolkit root (READ and RUN scripts only — never write here): {toolkit}
 - Lecture number: {lecture_num}
 - Subject: {subject} ({abbr})
 
@@ -34,19 +36,56 @@ Whenever the skill says to run `python scripts/<name>.py <args>`, run it as:
 
     python make-transcript-notes-kit-3agent/scripts/<name>.py <args>
 
-from the working directory above. You have full shell access and may read any
-file under the working directory.
+from the working directory above. You may write under the output directory.
+Do not write into the toolkit (scripts, utils, templates, SKILL files).
+Do not use the question tool — proceed autonomously.
 
-You are the ONLY agent in this session. Do not ask questions — proceed
-autonomously and finish the entire phase. When your phase is complete, print
-exactly this line as the final line of your reply:
+When your phase is complete, print exactly this line as the final line of
+your reply:
 
     PHASE_COMPLETE
 """
 
+ADAPTATION_BY_AGENT = {
+    1: _COMMON_ADAPT + """
+## Agent 1 scope
+- Transcript (read-only): {transcript}
+- Write only: dense draft and extraction manifest under the output directory.
+- Do not read companion docs. Do not touch topic_mappings/.
+""",
+    2: _COMMON_ADAPT + """
+## Agent 2 scope
+- Read: dense draft + extraction manifest under the output directory.
+- Companion docs (read-only): {docs_line}
+- Write: enriched draft, sections/, and topic mapping YAML **only** via
+  `python make-transcript-notes-kit-3agent/scripts/update_topic_mapping.py`.
+- Do not rewrite toolkit scripts. Do not edit the original transcript.
+""",
+    3: _COMMON_ADAPT + """
+## Agent 3 scope
+- Read: enriched draft, extraction manifest, templates/notes.html, and the
+  topic mapping YAML (read-only — do not write YAML).
+- Write: HTML notes under the output directory.
+- You are a renderer. If placeholders, TODOs, or `*[verify]*` remain, stop
+  and leave them in place so the orchestrator can return the work to Agent 2.
+  Do not invent missing instructional content.
+""",
+}
+
+_BOUNCE_RE = re.compile(
+    r"\*\[verify\]|\*\[verify:|\bTODO\b|placeholder|"
+    r"return (the )?(affected )?section to Agent 2|"
+    r"blocking (upstream|Agent 2)",
+    re.I,
+)
+
 
 class PhaseError(RuntimeError):
     pass
+
+
+class BounceToEnricher(PhaseError):
+    """Formatter found Agent 2 defects; re-queue enricher then formatter."""
 
 
 class Pipeline:
@@ -61,7 +100,18 @@ class Pipeline:
         self.abbr = abbr
         self.prefix = prefix
         self.lecture_num = lecture_num
-        self.transcript = str(Path(transcript).resolve())
+        resolved_t = resolve_under(config.TRANSCRIPTS_DIR, transcript)
+        if resolved_t is None:
+            # Allow an already-absolute path that still sits under workspace
+            # transcripts, or a path the UI listed.
+            raw = Path(transcript)
+            try:
+                resolved_t = raw.resolve()
+                resolved_t.relative_to(config.TRANSCRIPTS_DIR.resolve())
+            except (ValueError, OSError):
+                raise PhaseError(
+                    f"transcript is not under {config.TRANSCRIPTS_DIR}") from None
+        self.transcript = str(resolved_t)
         self.phases = [p for p in (phases or [1, 2, 3]) if p in AGENTS]
         self.emit = emit or (lambda ev: None)
         self.docs_dir = docs_dir
@@ -72,7 +122,10 @@ class Pipeline:
         # Empty string means "no --variant" / "--effort" (model has no knobs).
         self.variant = (bmeta["variant"] if variant is None
                         else str(variant).strip())
-        self.out = config.OUTPUTS_DIR / subject / prefix
+        out = confine(config.OUTPUTS_DIR, subject, prefix)
+        if out is None:
+            raise PhaseError("invalid subject or prefix")
+        self.out = out
         self.proc: subprocess.Popen | None = None
         self.stop_flag = False
         self.run_log: Path | None = None
@@ -85,6 +138,10 @@ class Pipeline:
         self._phase_bucket: dict | None = None
         self._phase_t0: float | None = None
         self._cc_tools: dict[str, dict] = {}
+        self._timed_out = False
+        self._job_files: dict[str, Path] | None = None
+        self._current_phase: str | None = None
+        self._last_tool: str = ""
 
     # ------------------------------------------------------------------ utils
     def _log(self, ev: dict):
@@ -102,31 +159,24 @@ class Pipeline:
         hardcoded mapping, so new subject folders just work."""
         return config.default_docs_dir(self.abbr, self.subject)
 
+    def _docs_line(self) -> str:
+        if self.docs_dir == "__none__":
+            return "(none selected — enrich from the draft and web research if needed)"
+        if self.docs_dir and self.docs_dir != "__none__":
+            docs_dir = resolve_under(config.WORKSPACE, self.docs_dir)
+            if docs_dir and docs_dir.is_dir():
+                return str(docs_dir)
+            return "(selected folder missing — enrich from the draft)"
+        doc_root = self._default_docs_dir()
+        return str(doc_root) if doc_root else "(no companion-docs folder for this subject)"
+
     def _agent_message(self, agent: int, extra: str = "") -> str:
         skill = config.skill_path(agent)
         docs_note = ""
         if agent == 2:
-            if self.docs_dir and self.docs_dir != "__none__":
-                docs_dir = Path(self.docs_dir)
-                if docs_dir.is_dir():
-                    docs_note = (f"- Enrichment docs directory: {docs_dir} "
-                                 "(read-only; use only files relevant to this "
-                                 "lecture)\n")
-                else:
-                    docs_note = ("- The selected enrichment docs directory does "
-                                 "not exist; enrich from the transcript content "
-                                 "and web research if needed.\n")
-            elif self.docs_dir == "__none__":
-                docs_note = ("- No companion docs selected for this run; enrich "
-                             "from the transcript content and web research if "
-                             "needed.\n")
-            else:
-                doc_root = self._default_docs_dir()
-                docs_note = (f"- Enrichment docs directory: {doc_root} (read-only; use "
-                             f"only files relevant to this lecture)\n" if doc_root
-                             else "- No enrichment docs folder exists for this subject; enrich "
-                                  "from the transcript content and web research if needed.\n")
-        adapt = ADAPTATION.format(
+            docs_note = (f"- Enrichment docs directory: {self._docs_line()} "
+                         "(read-only; use only files relevant to this lecture)\n")
+        adapt = ADAPTATION_BY_AGENT[agent].format(
             workspace=config.WORKSPACE,
             transcript=self.transcript,
             out=self.out,
@@ -134,6 +184,7 @@ class Pipeline:
             lecture_num=self.lecture_num,
             subject=self.subject,
             abbr=self.abbr,
+            docs_line=self._docs_line(),
         )
         return (f"Read the skill file at {skill} and follow its instructions "
                 f"exactly. It defines your role and the complete process.\n\n"
@@ -142,6 +193,58 @@ class Pipeline:
     # Payloads that can carry large tool outputs / reasoning text.
     EVENT_TEXT_CAP = 6000          # chars kept per event field
     EVENT_TOOL_OUTPUT_CAP = 8000   # chars kept of a tool's output
+
+    def _ensure_job_files(self) -> dict[str, Path]:
+        if self._job_files is None:
+            self.out.mkdir(parents=True, exist_ok=True)
+            self._job_files = permissions.write_job_configs(self.out)
+        return self._job_files
+
+    def _timeout_watch(self, proc: subprocess.Popen):
+        deadline = time.time() + config.PHASE_TIMEOUT_SECONDS
+        while proc.poll() is None:
+            if time.time() >= deadline:
+                self._timed_out = True
+                self._log({"type": "phase_timeout",
+                           "seconds": config.PHASE_TIMEOUT_SECONDS})
+                self._kill()
+                return
+            time.sleep(1.0)
+
+    def _popen(self, cmd: list[str], *, stdin_data: str | None = None,
+               extra_env: dict | None = None,
+               cwd: str | None = None) -> None:
+        env = dict(os.environ)
+        if extra_env:
+            env.update(extra_env)
+        kwargs: dict = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "env": env,
+        }
+        if stdin_data is not None:
+            kwargs["stdin"] = subprocess.PIPE
+        if cwd:
+            kwargs["cwd"] = cwd
+        if os.name == "nt":
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            kwargs["creationflags"] = flags
+        else:
+            kwargs["start_new_session"] = True
+        self._timed_out = False
+        self.proc = subprocess.Popen(cmd, **kwargs)
+        if stdin_data is not None and self.proc.stdin is not None:
+            try:
+                self.proc.stdin.write(stdin_data)
+                self.proc.stdin.close()
+            except OSError:
+                pass
+        threading.Thread(target=self._timeout_watch, args=(self.proc,),
+                         daemon=True).start()
 
     def _run_agent(self, agent: int, message: str, title: str,
                    extra_env: dict | None = None) -> tuple[int, list[str]]:
@@ -160,6 +263,10 @@ class Pipeline:
                 events = parse_line(line)
                 if events:
                     for event in events:
+                        if event.get("type") == "tool_use":
+                            part = event.get("part") or {}
+                            self._last_tool = str(
+                                part.get("tool") or part.get("title") or "")
                         self._accumulate_stats(AGENTS[agent], event)
                         self._log({"type": "agent_event",
                                    "phase": AGENTS[agent],
@@ -170,14 +277,24 @@ class Pipeline:
                 if self.stop_flag:
                     self._kill()
                     raise PhaseError("stopped by user")
+                if self._timed_out:
+                    raise PhaseError(
+                        f"{AGENTS[agent]} exceeded "
+                        f"{config.PHASE_TIMEOUT_SECONDS}s timeout")
         except KeyboardInterrupt:
             self._kill()
             raise PhaseError("interrupted")
         code = self.proc.wait() if self.proc else 1
+        if self._timed_out:
+            raise PhaseError(
+                f"{AGENTS[agent]} exceeded "
+                f"{config.PHASE_TIMEOUT_SECONDS}s timeout")
         return code, lines
 
     def _run_opencode(self, agent: int, message: str, title: str,
                       extra_env: dict | None = None) -> tuple[int, list[str]]:
+        job = self._ensure_job_files()
+        job["prompt"].write_text(message, encoding="utf-8")
         exe = config.find_opencode()
         cmd = [exe, "run", "--auto", "-m", self.model]
         if self.variant:
@@ -185,17 +302,16 @@ class Pipeline:
         cmd.extend([
             "--format", "json", "--thinking",
             "--dir", str(config.WORKSPACE),
-            "--title", title, message,
+            "--title", title,
+            "--file", str(job["prompt"]),
         ])
-        env = dict(os.environ)
+        env = permissions.opencode_env(job["opencode"])
         if extra_env:
             env.update(extra_env)
         self._log({"type": "phase_cmd", "phase": AGENTS[agent],
                    "cmd": " ".join(cmd[:8]) + " ..."})
-        self.proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
-            env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self._popen(cmd, stdin_data=message, extra_env=env,
+                    cwd=str(config.WORKSPACE))
 
         def parse(line: str) -> list[dict]:
             if not line.lstrip().startswith("{"):
@@ -209,11 +325,13 @@ class Pipeline:
                          extra_env: dict | None = None) -> tuple[int, list[str]]:
         """Headless Command Code: `cmdc -p` with JSON events and --yolo.
 
-        Prompt goes on stdin to avoid Windows argv length limits. The CLI is
-        slow to start; that is expected. cwd is the workspace so toolkit paths
-        resolve. See https://commandcode.ai/docs/headless
+        Prompt goes on stdin to avoid Windows argv length limits. Deny rules
+        in the per-job settings still apply under --yolo.
         """
+        job = self._ensure_job_files()
+        job["prompt"].write_text(message, encoding="utf-8")
         argv = config.find_commandcode_argv()
+        cc_perms = permissions.commandcode_permissions()
         cmd = argv + [
             "-p",
             "--output-format", "json",
@@ -225,28 +343,18 @@ class Pipeline:
             "--no-skills",
             "--max-turns", str(config.COMMANDCODE_MAX_TURNS),
             "-n", title,
+            "--config", "permissions=" + json.dumps(cc_perms),
         ]
         if self.variant:
             cmd.extend(["--effort", self.variant])
-        env = dict(os.environ)
-        env["NO_COLOR"] = "1"
-        env["FORCE_COLOR"] = "0"
+        env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
         if extra_env:
             env.update(extra_env)
         self._cc_tools = {}
         self._log({"type": "phase_cmd", "phase": AGENTS[agent],
                    "cmd": " ".join(cmd[:10]) + " ..."})
-        self.proc = subprocess.Popen(
-            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-            errors="replace", env=env, cwd=str(config.WORKSPACE),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        try:
-            assert self.proc.stdin is not None
-            self.proc.stdin.write(message)
-            self.proc.stdin.close()
-        except OSError:
-            pass
+        self._popen(cmd, stdin_data=message, extra_env=env,
+                    cwd=str(config.WORKSPACE))
         return self._stream_process(agent, self._parse_commandcode_line)
 
     @staticmethod
@@ -511,15 +619,27 @@ class Pipeline:
         }
 
     def _kill(self):
-        if self.proc and self.proc.poll() is None:
+        proc = self.proc
+        if proc is None or proc.poll() is not None:
+            self.proc = None
+            return
+        if os.name == "nt":
             try:
                 subprocess.run(
-                    ["taskkill", "/PID", str(self.proc.pid), "/T", "/F"],
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                     capture_output=True, timeout=30,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             except Exception:
                 try:
-                    self.proc.kill()
+                    proc.kill()
+                except Exception:
+                    pass
+        else:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except Exception:
+                try:
+                    proc.kill()
                 except Exception:
                     pass
         self.proc = None
@@ -528,11 +648,36 @@ class Pipeline:
         self.stop_flag = True
         self._kill()
 
+    def _mtime_map(self, paths: list[Path]) -> dict[str, float | None]:
+        out: dict[str, float | None] = {}
+        for p in paths:
+            try:
+                out[str(p)] = p.stat().st_mtime if p.is_file() else None
+            except OSError:
+                out[str(p)] = None
+        return out
+
+    def _fail_if_stale(self, agent: int, code: int, before: dict[str, float | None],
+                       paths: list[Path]) -> None:
+        missing = [p.name for p in paths if not p.is_file()]
+        if missing:
+            raise PhaseError(
+                f"{AGENTS[agent]} exited {code} without producing "
+                + ", ".join(missing))
+        after = self._mtime_map(paths)
+        unchanged = all(before.get(str(p)) == after.get(str(p)) for p in paths)
+        if unchanged and code != 0:
+            raise PhaseError(
+                f"{AGENTS[agent]} exited {code} without updating artifacts "
+                f"(refusing to gate stale files)")
+
     # ---------------------------------------------------------------- phases
     def _phase_extractor(self) -> bool:
         dense = self.out / f"{self.prefix}_notes_dense.md"
         manifest = self.out / f"{self.prefix}_extraction_manifest.json"
         self.out.mkdir(parents=True, exist_ok=True)
+        targets = [dense, manifest]
+        before = self._mtime_map(targets)
         msg = self._agent_message(1, (
             f"Process the transcript into {dense} and {manifest} as the skill "
             "specifies, then run the dense-draft lint gate and the manifest "
@@ -540,10 +685,7 @@ class Pipeline:
         code, _ = self._run_agent(1, msg, f"extractor {self.prefix}")
         if self.stop_flag:
             return False
-        if not dense.is_file() or not manifest.is_file():
-            raise PhaseError(
-                f"extractor exited {code} without producing {dense.name} / "
-                f"{manifest.name}")
+        self._fail_if_stale(1, code, before, targets)
         return self._verify(1, [
             ("lint_dense", gates.gate_lint_dense(
                 str(dense), self.lecture_num, "dense")),
@@ -557,6 +699,7 @@ class Pipeline:
         enriched = self.out / f"{self.prefix}_notes_enriched.md"
         if not dense.is_file():
             raise PhaseError(f"missing {dense.name} — run the extractor first")
+        before = self._mtime_map([enriched])
         msg = self._agent_message(2, (
             f"Enrich {dense} (manifest: {manifest}) into {enriched} exactly as "
             "the skill specifies — split, enrich each section, assemble, bind "
@@ -565,9 +708,7 @@ class Pipeline:
         code, _ = self._run_agent(2, msg, f"enricher {self.prefix}")
         if self.stop_flag:
             return False
-        if not enriched.is_file():
-            raise PhaseError(
-                f"enricher exited {code} without producing {enriched.name}")
+        self._fail_if_stale(2, code, before, [enriched])
         return self._verify(2, [
             ("lint_dense", gates.gate_lint_dense(
                 str(enriched), self.lecture_num, "enriched")),
@@ -581,6 +722,7 @@ class Pipeline:
         html = self.out / f"{self.prefix}_notes" / f"{self.prefix}_notes.html"
         if not enriched.is_file():
             raise PhaseError(f"missing {enriched.name} — run the enricher first")
+        before = self._mtime_map([html])
         msg = self._agent_message(3, (
             f"Format {enriched} into {html} exactly as the skill specifies — "
             "split, convert sections, assemble the body, fill the "
@@ -591,9 +733,7 @@ class Pipeline:
         code, _ = self._run_agent(3, msg, f"formatter {self.prefix}")
         if self.stop_flag:
             return False
-        if not html.is_file():
-            raise PhaseError(
-                f"formatter exited {code} without producing {html.name}")
+        self._fail_if_stale(3, code, before, [html])
         return self._verify(3, [
             ("lint_html", gates.gate_lint_html(str(html))),
             ("verify_manifest", gates.gate_verify_manifest(
@@ -601,6 +741,22 @@ class Pipeline:
         ])
 
     # -------------------------------------------------------------- gate loop
+    def _should_bounce_to_enricher(
+            self, gate_results: list[tuple[str, gates.GateResult]]) -> bool:
+        for _name, res in gate_results:
+            blob = "\n".join(res.findings) + "\n" + (res.output or "")
+            if _BOUNCE_RE.search(blob):
+                return True
+        enriched = self.out / f"{self.prefix}_notes_enriched.md"
+        if enriched.is_file():
+            try:
+                text = enriched.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+            if "*[verify]" in text:
+                return True
+        return False
+
     def _verify(self, agent: int, gate_results: list[tuple[str, gates.GateResult]]) -> bool:
         """Run gates, then fix sessions until they pass or rounds run out."""
         rounds = 0
@@ -613,6 +769,10 @@ class Pipeline:
                     ok = False
             if ok:
                 return True
+            if agent == 3 and self._should_bounce_to_enricher(gate_results):
+                raise BounceToEnricher(
+                    "formatter gates found Agent 2 defects "
+                    "(*[verify]*/placeholder) — returning to enricher")
             rounds += 1
             if rounds >= config.MAX_FIX_ROUNDS or self.stop_flag:
                 raise PhaseError(
@@ -621,13 +781,14 @@ class Pipeline:
             for name, res in gate_results:
                 items = "\n".join(res.findings)
                 findings.append(f"--- {name} ---\n{items[:2000]}")
-            fix_msg = (
+            extra = (
                 "The verification gates on your output files reported FAILs. "
                 "Fix the underlying content (read the files, correct the real "
                 "issues, never silence a warning by deleting content), then "
                 "re-run the gates yourself exactly as the skill specifies until "
                 f"they PASS. Files to fix:\n{findings}\n\n"
                 f"When finished, print exactly: PHASE_COMPLETE")
+            fix_msg = self._agent_message(agent, extra)
             code, _ = self._run_agent(
                 agent, fix_msg, f"fix {AGENTS[agent]} {self.prefix}")
             if self.stop_flag:
@@ -667,106 +828,132 @@ class Pipeline:
         ]
 
     # ------------------------------------------------------------------ run
-    MAX_AUTO_RETRIES = 3
-
     def run(self):
         self.out.mkdir(parents=True, exist_ok=True)
         self.run_log = self.out / f"{self.prefix}_run_events.jsonl"
         self.stats["started_at"] = time.time()
+        max_retries = config.MAX_STAGE_RETRIES
+        hb_stop = threading.Event()
+
+        def heartbeat():
+            while not hb_stop.wait(15.0):
+                if self.stop_flag:
+                    break
+                self.emit({
+                    "type": "heartbeat",
+                    "phase": self._current_phase,
+                    "last_tool": self._last_tool,
+                    "alive": True,
+                    "time": time.time(),
+                    "stats": self._stats_snapshot(),
+                })
+
+        hb_thread = threading.Thread(target=heartbeat, daemon=True)
+        hb_thread.start()
+        try:
+            self._run_phases(max_retries)
+        finally:
+            hb_stop.set()
+
+    def _run_phases(self, max_retries: int):
         self._log({"type": "pipeline_start", "subject": self.subject,
                    "abbr": self.abbr, "prefix": self.prefix,
                    "lecture_num": self.lecture_num,
                    "transcript": self.transcript, "phases": self.phases,
                    "backend": self.backend,
-                   "model": self.model, "variant": self.variant})
+                   "model": self.model, "variant": self.variant,
+                   "stage_retries": max_retries})
 
-        phases_to_run = list(self.phases)
-        retry_count = 0
-
-        while True:
+        stage_retries = {num: 0 for num in (1, 2, 3)}
+        runners = {
+            1: self._phase_extractor,
+            2: self._phase_enricher,
+            3: self._phase_formatter,
+        }
+        i = 0
+        while i < len(self.phases):
+            num = self.phases[i]
+            name = AGENTS[num]
             try:
-                for num in phases_to_run:
-                    name = AGENTS[num]
-                    self._log({"type": "phase_start", "phase": name})
-                    self._begin_phase_stats(name)
-                    done = {
-                        1: self._phase_extractor,
-                        2: self._phase_enricher,
-                        3: self._phase_formatter,
-                    }[num]()
-                    phase_stats = self._end_phase_stats(name)
-                    self._log({"type": "phase_end", "phase": name,
-                               "ok": done, "seconds": phase_stats["seconds"],
-                               "stats": phase_stats})
-                    if self.stop_flag:
-                        self._log({"type": "pipeline_end", "status": "stopped",
-                                   "stats": self._stats_snapshot()})
-                        return
-                # All phases completed successfully.
-                self._log({"type": "pipeline_end", "status": "done",
-                           "stats": self._stats_snapshot()})
-                return
-
-            except (PhaseError, Exception) as exc:  # noqa: BLE001
-                # Close out the in-flight phase bucket so totals stay honest.
-                if self._phase_bucket is not None:
-                    running = next((p for p, b in self.stats["phases"].items()
-                                    if b is self._phase_bucket), None)
-                    if running:
-                        self._end_phase_stats(running)
-
+                self._current_phase = name
+                self._log({"type": "phase_start", "phase": name,
+                           "attempt": stage_retries[num] + 1,
+                           "max_retries": max_retries})
+                self._begin_phase_stats(name)
+                done = runners[num]()
+                phase_stats = self._end_phase_stats(name)
+                self._log({"type": "phase_end", "phase": name,
+                           "ok": done, "seconds": phase_stats["seconds"],
+                           "stats": phase_stats})
                 if self.stop_flag:
                     self._log({"type": "pipeline_end", "status": "stopped",
                                "stats": self._stats_snapshot()})
                     return
-
-                retry_count += 1
-                # Determine which phase failed.
-                failed_phase_num = None
-                for num in phases_to_run:
-                    name = AGENTS[num]
-                    # The failed phase is the one that was running (has a
-                    # bucket dict, not a final summary) or never got a summary.
-                    bucket = self.stats["phases"].get(name)
-                    if bucket is None or isinstance(bucket, dict) and "seconds" not in bucket:
-                        failed_phase_num = num
-                        break
-                if failed_phase_num is None:
-                    # Fallback: assume the last phase in the list failed.
-                    failed_phase_num = phases_to_run[-1] if phases_to_run else self.phases[-1]
-
-                if retry_count <= self.MAX_AUTO_RETRIES:
-                    # Decide where to resume: if agent 1 failed, restart
-                    # from agent 1; otherwise resume from the failed agent.
-                    if failed_phase_num == self.phases[0]:
-                        phases_to_run = list(self.phases)
-                    else:
-                        phases_to_run = [p for p in self.phases
-                                         if p >= failed_phase_num]
-
-                    self._log({
-                        "type": "retry_start",
-                        "retry": retry_count,
-                        "max_retries": self.MAX_AUTO_RETRIES,
-                        "failed_phase": AGENTS.get(failed_phase_num, "unknown"),
-                        "resuming_from": AGENTS.get(phases_to_run[0], "unknown"),
-                        "error": (str(exc) if isinstance(exc, PhaseError)
-                                  else f"{type(exc).__name__}: {exc}"),
-                    })
-                    continue  # retry
-                else:
-                    # Exhausted all retries — fall through to manual mode.
-                    self._log({
-                        "type": "retry_exhausted",
-                        "retries": retry_count - 1,
-                        "failed_phase": AGENTS.get(failed_phase_num, "unknown"),
-                        "error": (str(exc) if isinstance(exc, PhaseError)
-                                  else f"{type(exc).__name__}: {exc}"),
-                    })
-                    self._log({"type": "pipeline_end", "status": "error",
-                               "error": (str(exc) if isinstance(exc, PhaseError)
-                                         else f"{type(exc).__name__}: {exc}"),
-                               "retries_exhausted": True,
+                i += 1
+            except BounceToEnricher as exc:
+                if self._phase_bucket is not None:
+                    self._end_phase_stats(name)
+                if self.stop_flag:
+                    self._log({"type": "pipeline_end", "status": "stopped",
                                "stats": self._stats_snapshot()})
                     return
+                stage_retries[2] += 1
+                err = str(exc)
+                self._log({
+                    "type": "bounce_to_enricher",
+                    "from_phase": name,
+                    "retry": stage_retries[2],
+                    "max_retries": max_retries,
+                    "error": err,
+                })
+                if stage_retries[2] > max_retries:
+                    self._log({
+                        "type": "retry_exhausted",
+                        "retries": stage_retries[2] - 1,
+                        "max_retries": max_retries,
+                        "failed_phase": "enricher",
+                        "error": err,
+                    })
+                    self._log({"type": "pipeline_end", "status": "error",
+                               "error": err, "retries_exhausted": True,
+                               "failed_phase": "enricher",
+                               "stats": self._stats_snapshot()})
+                    return
+                self.phases = self.phases[:i] + [2, 3]
+                continue
+            except (PhaseError, Exception) as exc:  # noqa: BLE001
+                if self._phase_bucket is not None:
+                    self._end_phase_stats(name)
+                if self.stop_flag:
+                    self._log({"type": "pipeline_end", "status": "stopped",
+                               "stats": self._stats_snapshot()})
+                    return
+                err = (str(exc) if isinstance(exc, PhaseError)
+                       else f"{type(exc).__name__}: {exc}")
+                stage_retries[num] += 1
+                if stage_retries[num] <= max_retries:
+                    self._log({
+                        "type": "retry_start",
+                        "retry": stage_retries[num],
+                        "max_retries": max_retries,
+                        "failed_phase": name,
+                        "resuming_from": name,
+                        "error": err,
+                    })
+                    continue
+                self._log({
+                    "type": "retry_exhausted",
+                    "retries": stage_retries[num] - 1,
+                    "max_retries": max_retries,
+                    "failed_phase": name,
+                    "error": err,
+                })
+                self._log({"type": "pipeline_end", "status": "error",
+                           "error": err, "retries_exhausted": True,
+                           "failed_phase": name,
+                           "stats": self._stats_snapshot()})
+                return
+
+        self._log({"type": "pipeline_end", "status": "done",
+                   "stats": self._stats_snapshot()})
 

@@ -1,8 +1,9 @@
 """Static configuration for the transcript-notes automation.
 
-Everything is relative to the workspace root (E:\\agent_warden), which is also
-the working directory for every agent CLI run so that the toolkit's own
-instructions (outputs/, topic_mappings/, extracted_pdfs/ paths) resolve as-is.
+Everything is relative to the workspace root (repo parent of this package,
+or ``NOTES_WORKSPACE``), which is also the working directory for every agent
+CLI run so that the toolkit's own instructions (outputs/, topic_mappings/,
+extracted_pdfs/ paths) resolve as-is.
 """
 from __future__ import annotations
 
@@ -12,7 +13,10 @@ import os
 import shutil
 from pathlib import Path
 
-WORKSPACE = Path(os.environ.get("NOTES_WORKSPACE", r"E:\agent_warden")).resolve()
+from .paths import confine, is_safe_component
+
+_DEFAULT_WORKSPACE = Path(__file__).resolve().parents[2]
+WORKSPACE = Path(os.environ.get("NOTES_WORKSPACE", str(_DEFAULT_WORKSPACE))).resolve()
 TOOLKIT = WORKSPACE / "make-transcript-notes-kit-3agent"
 TRANSCRIPTS_DIR = WORKSPACE / "transcript files"
 OUTPUTS_DIR = WORKSPACE / "outputs"
@@ -48,7 +52,9 @@ BACKENDS = {
 MODEL = BACKENDS[BACKEND_OPENCODE]["model"]
 VARIANT = BACKENDS[BACKEND_OPENCODE]["variant"]
 MODEL_PROVIDER = BACKENDS[BACKEND_OPENCODE]["provider"]
-MAX_FIX_ROUNDS = 3          # 1 initial attempt + up to 2 fix sessions per phase
+MAX_FIX_ROUNDS = 3          # 1 initial attempt + up to 2 gate-fix sessions per attempt
+MAX_STAGE_RETRIES = 3       # after a phase fails, retry that phase this many times
+MAX_PARALLEL_RUNS = 2       # in-flight CLI agents; extras wait for a slot
 PHASE_TIMEOUT_SECONDS = 6 * 60 * 60  # generous ceiling; notes take a while
 COMMANDCODE_MAX_TURNS = 250
 # Prefer higher effort when falling back from the default "max".
@@ -107,14 +113,19 @@ def save_subject(abbr: str, name: str) -> dict[str, str]:
     """Persist a user-created subject and create its companion-docs folder and topic mapping YAML."""
     abbr = abbr.strip().upper()
     name = name.strip()
+    if not is_safe_component(abbr) or not is_safe_component(name):
+        raise ValueError("subject abbreviation or name is not a safe path component")
+    docs_folder = confine(DOCS_DIR, abbr)
+    yaml_path = confine(TOPIC_MAPPINGS_DIR, f"{name}.yaml")
+    if docs_folder is None or yaml_path is None:
+        raise ValueError("subject abbreviation or name is not a safe path component")
     subjects = all_subjects()
     subjects[abbr] = name
     data = {a: n for a, n in sorted(subjects.items())
             if a not in SUBJECTS}
     SUBJECTS_FILE.write_text(json.dumps(data, indent=2) + "\n",
                              encoding="utf-8")
-    (DOCS_DIR / abbr).mkdir(parents=True, exist_ok=True)
-    yaml_path = TOPIC_MAPPINGS_DIR / f"{name}.yaml"
+    docs_folder.mkdir(parents=True, exist_ok=True)
     if not yaml_path.is_file():
         yaml_path.write_text(f'subject_name: "{name}"\nlectures: []\n', encoding="utf-8")
     return subjects
@@ -568,8 +579,8 @@ def list_transcripts() -> list[dict]:
 
 
 def list_outputs(subject: str, prefix: str) -> list[dict]:
-    base = OUTPUTS_DIR / subject / prefix
-    if not base.is_dir():
+    base = confine(OUTPUTS_DIR, subject, prefix)
+    if not base or not base.is_dir():
         return []
     out = []
     for p in sorted(base.rglob("*")):
@@ -635,7 +646,9 @@ def guess_from_filename(filename: str,
 
 
 def output_paths(subject: str, prefix: str) -> dict[str, Path]:
-    base = OUTPUTS_DIR / subject / prefix
+    base = confine(OUTPUTS_DIR, subject, prefix)
+    if base is None:
+        raise ValueError("invalid subject or prefix")
     return {
         "base": base,
         "dense": base / f"{prefix}_notes_dense.md",
@@ -648,7 +661,17 @@ def output_paths(subject: str, prefix: str) -> dict[str, Path]:
 
 def artifacts_status(subject: str, prefix: str) -> dict:
     """Which phase artifacts exist, and which phases to run to resume."""
-    paths = output_paths(subject, prefix)
+    try:
+        paths = output_paths(subject, prefix)
+    except ValueError:
+        return {
+            "subject": subject, "prefix": prefix, "abbr": "",
+            "artifacts": {"extractor": False, "enricher": False,
+                          "formatter": False},
+            "files": {}, "resume_phases": [1, 2, 3],
+            "resume_label": "start from extractor", "html_url": None,
+            "events_path": None, "error": "invalid subject or prefix",
+        }
     has_extractor = paths["dense"].is_file() and paths["manifest"].is_file()
     has_enricher = paths["enriched"].is_file()
     has_formatter = paths["html"].is_file()
@@ -849,6 +872,47 @@ def summarize_run_events(events_path: Path, subject: str = "",
     return summary
 
 
+def read_run_events(subject: str, prefix: str, offset: int = 0,
+                    limit: int = 1500) -> dict:
+    """Page events from outputs/<subject>/<prefix>/*_run_events.jsonl."""
+    try:
+        events_path = output_paths(subject, prefix)["events"]
+    except ValueError:
+        return {"error": "invalid subject or prefix", "events": [], "total": 0}
+    if not events_path.is_file():
+        alts = sorted(events_path.parent.glob("*_run_events.jsonl")) if events_path.parent.is_dir() else []
+        if not alts:
+            return {"events": [], "total": 0, "path": None}
+        events_path = alts[-1]
+    offset = max(0, int(offset or 0))
+    limit = max(1, min(int(limit or 1500), 4000))
+    events: list[dict] = []
+    total = 0
+    try:
+        with open(events_path, encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if offset <= total < offset + limit:
+                    events.append(ev)
+                total += 1
+    except OSError as exc:
+        return {"error": f"{type(exc).__name__}: {exc}", "events": [], "total": 0}
+    return {
+        "events": events,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "truncated": total > offset + len(events),
+        "path": str(events_path),
+    }
+
+
 def list_past_runs(limit: int = 60) -> list[dict]:
     """Scan outputs/*/ for run_events.jsonl and return newest-first summaries."""
     if not OUTPUTS_DIR.is_dir():
@@ -891,9 +955,11 @@ def delete_past_run(subject: str, prefix: str, archive: bool = False) -> dict:
     prefix = (prefix or "").strip()
     if not subject or not prefix:
         raise ValueError("subject and prefix required")
-    if subject.startswith("_") or ".." in subject or ".." in prefix:
+    if subject.startswith("_"):
         raise ValueError("invalid subject or prefix")
-    base = (OUTPUTS_DIR / subject / prefix).resolve()
+    base = confine(OUTPUTS_DIR, subject, prefix)
+    if base is None:
+        raise ValueError("invalid subject or prefix")
     try:
         base.relative_to(OUTPUTS_DIR.resolve())
     except ValueError as exc:

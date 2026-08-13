@@ -113,19 +113,19 @@
   .shell {
     position: relative;
     z-index: 1;
-    max-width: 1120px;
+    max-width: 1280px;
     margin: 0 auto;
-    padding: 36px 28px 80px;
+    padding: 20px 24px 64px;
   }
 
   /* —— brand masthead —— */
   .masthead {
-    display: grid;
-    grid-template-columns: 1fr minmax(200px, 260px);
-    gap: 28px;
-    align-items: end;
-    margin-bottom: 36px;
-    padding-bottom: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
     border-bottom: 2px solid var(--ink);
     animation: rise 0.55s ease-out both;
   }
@@ -158,9 +158,9 @@
     margin: 0;
     font-family: var(--display);
     font-weight: 800;
-    font-size: clamp(2.75rem, 7vw, 4.25rem);
-    line-height: 0.88;
-    letter-spacing: -0.05em;
+    font-size: clamp(1.55rem, 3.5vw, 2.1rem);
+    line-height: 0.92;
+    letter-spacing: -0.04em;
     text-transform: uppercase;
   }
   .brand h1 span {
@@ -168,24 +168,26 @@
   }
   .tagline {
     margin: 0;
-    max-width: 36rem;
+    max-width: 34rem;
     color: var(--ink-soft);
-    font-size: 15.5px;
-    line-height: 1.45;
+    font-size: 13px;
+    line-height: 1.35;
   }
   .meta-panel {
     text-align: left;
     font-family: var(--mono);
     font-size: 11px;
-    line-height: 1.6;
+    line-height: 1.5;
     color: var(--muted);
-    padding: 14px 14px 12px;
+    padding: 10px 12px;
     background: var(--surface-2);
     border: 2px solid var(--ink);
     box-shadow: var(--shadow);
-    max-width: 100%;
+    max-width: 280px;
+    min-width: 180px;
     overflow: hidden;
     animation: rise 0.55s ease-out 0.08s both;
+    flex-shrink: 0;
   }
   .meta-panel strong {
     display: block;
@@ -208,10 +210,15 @@
     background: var(--surface-2);
     border: 2px solid var(--ink);
     box-shadow: var(--shadow);
-    margin-bottom: 40px;
+    margin: 0;
     position: relative;
     animation: rise 0.6s ease-out 0.12s both;
   }
+  .ticket summary.ticket-bar {
+    list-style: none;
+    cursor: pointer;
+  }
+  .ticket summary.ticket-bar::-webkit-details-marker { display: none; }
   .ticket::before,
   .ticket::after {
     content: "";
@@ -252,17 +259,113 @@
     border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
     padding: 4px 9px;
   }
-  .ticket-body { padding: 24px 22px 22px; }
+  .ticket-body { padding: 16px 18px 18px; }
+
+  .workbench {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
+    gap: 20px;
+    align-items: start;
+    margin-bottom: 22px;
+  }
+  .board {
+    min-width: 0;
+  }
+  .board-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    margin-bottom: 12px;
+  }
+  .board-head h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: 1.2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    text-transform: uppercase;
+  }
+  .board-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .board-stats .stat-pill {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 1.5px solid var(--line);
+    color: var(--ink-soft);
+  }
+  .board-stats .stat-pill.fail {
+    border-color: var(--red);
+    color: var(--red);
+    background: var(--red-soft);
+  }
+  .board-stats .stat-pill.live {
+    border-color: var(--amber);
+    color: var(--amber);
+    background: var(--amber-soft);
+  }
+  .board-filters {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+  }
+  .board-filters button {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 4px 9px;
+    border: 1.5px solid var(--line);
+    background: var(--surface);
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .board-filters button.active {
+    border-color: var(--ink);
+    color: var(--ink);
+    background: var(--paper);
+  }
+  .ticket-sticky {
+    position: sticky;
+    top: 12px;
+  }
+  @media (max-width: 980px) {
+    .workbench { grid-template-columns: 1fr; }
+    .ticket-sticky { position: static; }
+    .masthead { flex-wrap: wrap; }
+    .meta-panel { max-width: 100%; }
+  }
 
   .grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px 18px;
   }
-  @media (max-width: 860px) {
-    .masthead { grid-template-columns: 1fr; }
-    .meta-panel { text-align: left; min-width: 0; }
-    .grid { grid-template-columns: 1fr; }
+  .more-opts {
+    margin-top: 12px;
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+  }
+  .more-opts > summary {
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .more-opts > div { margin-top: 10px; }
+  .history-list:empty { max-height: none; }
+  .history-list.is-loading:empty::after {
+    content: "Loading runs…";
   }
 
   .lbl-row {
@@ -551,7 +654,7 @@
     font-family: var(--mono);
     font-size: 12px;
   }
-  .runhead .rstatus {
+  .rstatus {
     font-family: var(--mono);
     font-size: 11px;
     text-transform: uppercase;
@@ -559,10 +662,10 @@
     padding: 3px 8px;
     border: 1px solid currentColor;
   }
-  .runhead .rstatus.running { color: var(--amber); background: var(--amber-soft); }
-  .runhead .rstatus.done { color: var(--green); background: var(--green-soft); }
-  .runhead .rstatus.error { color: var(--red); background: var(--red-soft); }
-  .runhead .rstatus.stopped { color: var(--muted); background: var(--paper-2); }
+  .rstatus.running { color: var(--amber); background: var(--amber-soft); }
+  .rstatus.done { color: var(--green); background: var(--green-soft); }
+  .rstatus.error { color: var(--red); background: var(--red-soft); font-weight: 700; }
+  .rstatus.stopped { color: var(--muted); background: var(--paper-2); }
   .runhead .elapsed {
     color: var(--ink-soft);
     font-family: var(--mono);
@@ -789,9 +892,9 @@
   .rollup .total { color: var(--ink); font-weight: 500; }
   .rollup .ph { color: var(--muted); }
 
-  .history-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+  .history-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 0; max-height: min(70vh, 720px); overflow: auto; }
   .history-list:empty::after {
-    content: "No past runs yet — finished jobs will land here.";
+    content: "No runs yet — pick transcripts on the right and press Run.";
     display: block; padding: 28px 20px; color: var(--muted);
     border: 2px dashed var(--line); text-align: center; font-size: 14px;
   }
@@ -805,6 +908,22 @@
     gap: 10px 16px;
     align-items: center;
     animation: rise 0.4s ease-out both;
+  }
+  .hcard.is-error {
+    border-color: var(--red);
+    background: var(--red-soft);
+    box-shadow: 2px 2px 0 color-mix(in srgb, var(--red) 45%, transparent);
+  }
+  .hcard.is-error .htitle { color: var(--red); }
+  .hcard.is-running {
+    border-color: var(--amber);
+  }
+  .hcard .herr {
+    display: block;
+    margin-top: 4px;
+    color: var(--red);
+    font-size: 12.5px;
+    font-weight: 600;
   }
   .hcard .htop { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
   .hcard .htitle { font-family: var(--display); font-weight: 700; font-size: 14.5px; }
@@ -878,39 +997,28 @@
     line-height: 1;
   }
 
-  /* —— failed runs section —— */
-  .failed-runs-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    margin: 8px 0 14px;
-    animation: rise 0.55s ease-out 0.2s both;
-  }
-  .failed-runs-head h2 {
-    margin: 0;
+  .live-section { margin-top: 8px; }
+  .live-section > summary {
+    cursor: pointer;
     font-family: var(--display);
-    font-size: 1.35rem;
+    font-size: 1.15rem;
     font-weight: 800;
     letter-spacing: -0.03em;
     text-transform: uppercase;
-    color: var(--red);
+    list-style: none;
+    padding: 8px 0 12px;
+    color: var(--ink);
   }
-  .failed-runs-head p {
-    margin: 0;
-    color: var(--muted);
+  .live-section > summary::-webkit-details-marker { display: none; }
+  .live-section > summary span {
+    font-family: var(--font);
     font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--muted);
+    margin-left: 10px;
   }
-  .failed-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
-  .failed-list:empty { display: none; }
-  .failed-list:empty + .failed-runs-head-sentinel { display: none; }
-  .failed-list .hcard {
-    border-color: var(--red);
-    box-shadow: 2px 2px 0 color-mix(in srgb, var(--red) 40%, transparent);
-  }
-  .failed-list .hcard .htitle { color: var(--red); }
-  #failed-section { display: none; }
-  #failed-section.has-items { display: block; }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -956,10 +1064,95 @@
     height: 18px;
     fill: currentColor;
   }
+
+  .btn:focus-visible,
+  #theme-toggle:focus-visible,
+  .board-filters button:focus-visible,
+  .reset-auto-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .conn-pill {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .conn-pill.ok { border-color: var(--green); color: var(--green); }
+  .conn-pill.bad { border-color: var(--red); color: var(--red); background: var(--red-soft); }
+
+  .ticket-cta {
+    position: sticky;
+    bottom: 0;
+    margin-top: 16px;
+    padding-top: 12px;
+    background: var(--surface-2);
+    border-top: 2px solid var(--ink);
+  }
+  .run-est { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
+  .batch-preview {
+    display: none;
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1.5px dashed var(--line-strong);
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .batch-preview.show { display: block; }
+  .batch-preview li { margin: 3px 0; font-family: var(--mono); font-size: 11px; }
+
+  .board-search {
+    width: 160px;
+    padding: 5px 10px !important;
+    font-size: 12px !important;
+  }
+  .hgroup { margin-bottom: 14px; }
+  .hgroup-title {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .hgroup-title span { font-family: var(--mono); font-weight: 500; }
+  .hcard { position: relative; }
+  .hcard .hlogs {
+    grid-column: 1 / -1;
+    max-height: 280px;
+    overflow: auto;
+    font: 11px/1.45 var(--mono);
+    color: var(--ink-soft);
+    background: var(--paper-2);
+    border: 1.5px solid var(--line);
+    padding: 8px 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .menu { position: relative; }
+  .menu-pop {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 100%;
+    z-index: 5;
+    min-width: 140px;
+    background: var(--surface);
+    border: 2px solid var(--ink);
+    padding: 4px;
+  }
+  .menu.open .menu-pop { display: flex; flex-direction: column; gap: 2px; }
+  .menu-pop button { width: 100%; text-align: left; }
+  .alive-line { font-family: var(--mono); font-size: 11px; color: var(--amber); }
 </style>
 </head>
 <body>
-<button id="theme-toggle" aria-label="Toggle theme" title="Toggle dark / light theme">
+<button id="theme-toggle" aria-label="Switch to light theme" title="Toggle dark / light theme" aria-pressed="true">
   <svg id="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
   <svg id="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79zM4 10.5H1v2h3zm9-9.95h-2V3.5h2zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79zM20 10.5v2h3v-2zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41z"/></svg>
 </button>
@@ -971,6 +1164,9 @@
   function applyIcons(t) {
     document.getElementById('theme-icon-moon').style.display = t === 'dark' ? 'block' : 'none';
     document.getElementById('theme-icon-sun').style.display = t === 'light' ? 'block' : 'none';
+    var btn = document.getElementById('theme-toggle');
+    btn.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false');
+    btn.setAttribute('aria-label', t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
   }
   // Apply icons once DOM is available (this runs inline after button)
   applyIcons(theme);
@@ -998,68 +1194,48 @@
     </div>
   </header>
 
-  <section class="ticket" aria-labelledby="ticket-title">
-    <div class="ticket-bar">
-      <h2 id="ticket-title">New job ticket</h2>
-      <span class="chip">3-agent pipeline</span>
-    </div>
-    <div class="ticket-body">
-      <div class="grid">
-        <div>
-          <label for="subject">Subject</label>
-          <select id="subject"></select>
-          <div class="hint">
-            <button class="btn small ghost" id="addsubj" type="button">+ add subject</button>
+  <div class="workbench">
+    <section class="board" aria-labelledby="board-title">
+      <div class="board-head">
+        <h2 id="board-title">Runs</h2>
+        <div class="board-stats" id="board-stats"></div>
+        <div class="board-filters" id="board-filters" role="group" aria-label="Filter runs">
+          <button type="button" data-filter="all" class="active">All</button>
+          <button type="button" data-filter="error">Failed</button>
+          <button type="button" data-filter="running">Live</button>
+          <button type="button" data-filter="done">Done</button>
+        </div>
+        <input id="hfilter" type="text" class="board-search" placeholder="Search runs…" aria-label="Search runs" spellcheck="false">
+      </div>
+      <div class="history-list is-loading" id="history"></div>
+    </section>
+
+    <details class="ticket ticket-sticky" id="ticket" open>
+      <summary class="ticket-bar">
+        <h2 id="ticket-title">New job</h2>
+        <span class="chip">collapse</span>
+      </summary>
+      <div class="ticket-body">
+      <div>
+        <label for="subject">Subject</label>
+        <select id="subject"></select>
+        <div class="hint">
+          <button class="btn small ghost" id="addsubj" type="button">+ add subject</button>
+        </div>
+        <div id="addsubj-form">
+          <input id="new-abbr" type="text" placeholder="Abbreviation, e.g. CV" maxlength="8" spellcheck="false">
+          <input id="new-name" type="text" placeholder="Full name, e.g. Computer Vision" spellcheck="false">
+          <div id="addsubj-error" class="error" style="font-size:12px;display:none;"></div>
+          <div class="btnrow" style="margin-top:0;">
+            <button class="btn small primary" id="addsubj-save" type="button">Create</button>
+            <button class="btn small" id="addsubj-cancel" type="button">Cancel</button>
           </div>
-          <div id="addsubj-form">
-            <input id="new-abbr" type="text" placeholder="Abbreviation, e.g. CV" maxlength="8" spellcheck="false">
-            <input id="new-name" type="text" placeholder="Full name, e.g. Computer Vision" spellcheck="false">
-            <div id="addsubj-error" class="error" style="font-size:12px;display:none;"></div>
-            <div class="btnrow" style="margin-top:0;">
-              <button class="btn small primary" id="addsubj-save" type="button">Create</button>
-              <button class="btn small" id="addsubj-cancel" type="button">Cancel</button>
-            </div>
-          </div>
-        </div>
-        <div>
-          <div class="lbl-row">
-            <label for="docs">Companion docs for Agent 2 (enricher)</label>
-            <button type="button" id="docs-reset-auto" class="reset-auto-btn" style="display:none;">Reset to auto</button>
-          </div>
-          <select id="docs"></select>
-        </div>
-        <div>
-          <label for="backend">Agent backend</label>
-          <select id="backend">
-            <option value="opencode">OpenCode</option>
-            <option value="commandcode">Command Code</option>
-          </select>
-        </div>
-        <div>
-          <label for="model">Model</label>
-          <select id="model"></select>
-          <div class="hint">
-            <button class="btn small ghost" id="refresh-models" type="button">↻ refresh models</button>
-            <span class="muted" id="models-hint"></span>
-          </div>
-        </div>
-        <div>
-          <label for="variant">Reasoning effort</label>
-          <select id="variant"></select>
-        </div>
-        <div>
-          <label for="prefix">Lecture prefix <span class="muted">(optional when running multiple)</span></label>
-          <input id="prefix" type="text" placeholder="e.g. NLP_Lecture_9" spellcheck="false">
-        </div>
-        <div>
-          <label for="lecture">Lecture number <span class="muted">(optional; auto-detects)</span></label>
-          <input id="lecture" type="text" placeholder="auto-detect" spellcheck="false">
         </div>
       </div>
 
       <div class="field-block">
         <div class="tlist-header">
-          <label style="margin:0;">Transcript files <span class="muted">(select one or more — each runs in parallel)</span></label>
+          <label style="margin:0;">Transcript files <span class="muted">(select one or more)</span></label>
           <div class="tlist-actions">
             <button class="btn small" id="tall" type="button">select all</button>
             <button class="btn small" id="tnone" type="button">clear</button>
@@ -1077,6 +1253,7 @@
       </div>
 
       <div class="guess-hint" id="guess-hint"></div>
+      <div id="batch-preview" class="batch-preview"></div>
       <div class="resume-banner" id="resume-banner">
         <div class="rb-text">
           <strong id="resume-label">Resume available</strong>
@@ -1086,35 +1263,62 @@
         <button class="btn small" id="retry-btn" type="button" style="display:none;">Retry failed</button>
       </div>
 
-      <div class="btnrow">
-        <button class="btn primary" id="run">Run pipeline(s)</button>
-        <button class="btn danger" id="stop" disabled>Stop all</button>
-        <span class="spacer"></span>
+      <div class="field-block">
+        <label for="backend">Agent backend</label>
+        <select id="backend">
+          <option value="opencode">OpenCode</option>
+          <option value="commandcode">Command Code</option>
+        </select>
+      </div>
+      <div class="field-block">
+        <label for="model">Model</label>
+        <select id="model"></select>
+        <div class="hint">
+          <button class="btn small ghost" id="refresh-models" type="button">↻ refresh models</button>
+          <span class="muted" id="models-hint"></span>
+        </div>
+      </div>
+      <div class="field-block">
+        <label for="variant">Reasoning effort</label>
+        <select id="variant"></select>
+      </div>
+
+      <details class="more-opts" id="more-opts">
+        <summary>More options</summary>
+        <div>
+          <div class="lbl-row">
+            <label for="docs">Companion docs (Agent 2)</label>
+            <button type="button" id="docs-reset-auto" class="reset-auto-btn" style="display:none;">Reset to auto</button>
+          </div>
+          <select id="docs"></select>
+        </div>
+        <div>
+          <label for="prefix">Lecture prefix</label>
+          <input id="prefix" type="text" placeholder="e.g. NLP_Lecture_9" spellcheck="false">
+        </div>
+        <div>
+          <label for="lecture">Lecture number</label>
+          <input id="lecture" type="text" placeholder="auto-detect" spellcheck="false">
+        </div>
+      </details>
+
+      <div class="ticket-cta">
+        <div class="btnrow" style="margin-top:0;">
+          <button class="btn primary" id="run">Run pipeline</button>
+          <button class="btn danger" id="stop" disabled>Stop all</button>
+        </div>
+        <div class="run-est" id="run-est"></div>
+        <div class="status-line" id="status" aria-live="polite" role="status"></div>
         <span class="muted" id="runstate" aria-live="polite" role="status"></span>
       </div>
-      <div class="status-line" id="status" aria-live="polite" role="status"></div>
     </div>
-  </section>
-
-  <div class="runs-head">
-    <h2>Past runs</h2>
-    <p>Survives refresh — resume, retry, or open notes.</p>
+    </details>
   </div>
-  <div class="history-list" id="history"></div>
 
-  <div class="runs-head">
-    <h2>Live runs</h2>
-    <p>Phase logs, tool calls, and gate results stream here.</p>
-  </div>
-  <div id="runs"></div>
-
-  <div id="failed-section">
-    <div class="failed-runs-head">
-      <h2>Failed runs</h2>
-      <p>Runs that errored after exhausting retries — use manual retry or delete.</p>
-    </div>
-    <div class="failed-list" id="failed-runs"></div>
-  </div>
+  <details class="live-section" id="live-wrap" open>
+    <summary>Live session logs <span>tool calls and gates for in-flight jobs</span></summary>
+    <div id="runs"></div>
+  </details>
 </div>
 
 <script>
@@ -1137,11 +1341,38 @@ const state = {
   artifactInfo: null,
   applyingGuess: false,
   replaying: false,
+  historyRuns: [],
+  historyFilter: "all",
+  historyQuery: "",
+  starting: false,
+  maxParallel: 2,
+  sseOk: true,
 };
 
+const AUTH_TOKEN = new URLSearchParams(location.search).get("token") || "";
+
 async function api(url, opts) {
-  const r = await fetch(url, opts);
-  return r.json();
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers || {});
+  if (AUTH_TOKEN) headers["X-Notes-Token"] = AUTH_TOKEN;
+  let r;
+  try {
+    r = await fetch(url, Object.assign({}, opts, { headers }));
+  } catch (err) {
+    return { error: err.message || "network error" };
+  }
+  const text = await r.text();
+  let data = {};
+  if (text) {
+    try { data = JSON.parse(text); }
+    catch { return { error: r.ok ? "invalid json" : `HTTP ${r.status}` }; }
+  }
+  if (!r.ok) {
+    if (typeof data !== "object" || data === null) data = {};
+    if (!data.error) data.error = `HTTP ${r.status}`;
+    data.status = r.status;
+  }
+  return data;
 }
 
 function esc(s) {
@@ -1174,20 +1405,6 @@ function fmtTok(t) {
   if (!total) return "0 tok";
   const k = n => n >= 1000 ? (n/1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
   return `${k(total)} tok`;
-}
-
-function setPhases(phases) {
-  $("p1").checked = phases.includes(1);
-  $("p2").checked = phases.includes(2);
-  $("p3").checked = phases.includes(3);
-}
-
-function selectedPhases() {
-  const phases = [];
-  if ($("p1").checked) phases.push(1);
-  if ($("p2").checked) phases.push(2);
-  if ($("p3").checked) phases.push(3);
-  return phases;
 }
 
 function emptyStats() {
@@ -1491,7 +1708,9 @@ function refreshFiles(rid) {
       el.innerHTML = files.map(f => {
         const url = base + f.name.split("/").map(encodeURIComponent).join("/");
         const isHtml = f.name.endsWith(".html");
-        const view = isHtml ? ` <a class="file" target="_blank" href="${url}">[view]</a>` : "";
+        const view = isHtml
+          ? ` <a class="file" target="_blank" rel="noopener" href="${url}">[view]</a>`
+          : "";
         return `<span><a class="file" href="${url}" target="_blank">${esc(f.name)}</a> <span class="muted">${fmtBytes(f.bytes)}</span>${view}</span>`;
       }).join("");
     });
@@ -1524,8 +1743,13 @@ function validateForm() {
   const phases = selectedPhases();
   const runBtn = $("run");
   const stateEl = $("runstate");
+  updateRunEstimate();
+  refreshBatchPreview();
 
-  if (state.runningJobs) return;
+  if (state.starting) {
+    runBtn.disabled = true;
+    return;
+  }
 
   if (!files.length) {
     runBtn.disabled = true;
@@ -1537,6 +1761,62 @@ function validateForm() {
     runBtn.disabled = false;
     stateEl.textContent = "";
   }
+}
+
+function typicalTokens() {
+  const runs = (state.historyRuns || []).filter(r => r.tokens && (r.tokens.input || 0) > 1000);
+  if (runs.length >= 2) {
+    const avg = k => runs.reduce((s, r) => s + Number((r.tokens || {})[k] || 0), 0) / runs.length;
+    return { input: avg("input"), output: avg("output"), reasoning: avg("reasoning") };
+  }
+  return { input: 350000, output: 70000, reasoning: 160000 };
+}
+
+function estimateRunCost() {
+  const modelId = $("model") ? $("model").value : "";
+  const meta = (state.models || []).find(m => m.id === modelId) || {};
+  const cost = meta.cost || {};
+  const inRate = Number(cost.input) || 0;
+  const outRate = Number(cost.output) || 0;
+  const t = typicalTokens();
+  const n = Math.max(checkedTranscripts().length, 0);
+  const per = n ? ((t.input * inRate) + ((t.output + t.reasoning) * outRate)) / 1e6 : 0;
+  const mins = 55;
+  const parallel = Math.max(1, Number(state.maxParallel) || 2);
+  const wallMins = n ? Math.ceil(n / parallel) * mins : 0;
+  return { n, per, total: per * n, wallMins };
+}
+
+function updateRunEstimate() {
+  const runBtn = $("run");
+  const estEl = $("run-est");
+  if (!runBtn) return;
+  const est = estimateRunCost();
+  runBtn.textContent = est.n > 1 ? `Run ${est.n} pipelines` : "Run pipeline";
+  if (estEl) {
+    estEl.textContent = est.n
+      ? `~${fmtCost(est.total)} · ~${est.wallMins}m wall (${est.n} job${est.n > 1 ? "s" : ""}, ${state.maxParallel} at a time)`
+      : "";
+  }
+}
+
+function refreshBatchPreview() {
+  const el = $("batch-preview");
+  if (!el) return;
+  const boxes = checkedTranscripts();
+  if (boxes.length < 2) {
+    el.classList.remove("show");
+    el.innerHTML = "";
+    return;
+  }
+  const items = boxes.map(b => {
+    const meta = state.transcripts.find(t => t.path === b.value) || {};
+    const g = meta.guess || {};
+    const prefix = g.prefix || meta.name || b.value;
+    return `<li>${esc(prefix)}</li>`;
+  }).join("");
+  el.classList.add("show");
+  el.innerHTML = `<strong>Will start ${boxes.length} jobs</strong> (max ${state.maxParallel} in parallel)<ul>${items}</ul>`;
 }
 
 function checkedTranscripts() {
@@ -1634,7 +1914,11 @@ if (docsResetBtn) {
 }
 
 $("tall").addEventListener("click", () => {
-  document.querySelectorAll("#tlist input").forEach(c => c.checked = true);
+  document.querySelectorAll("#tlist label").forEach(lbl => {
+    if (lbl.style.display === "none") return;
+    const c = lbl.querySelector("input");
+    if (c) c.checked = true;
+  });
   applyGuessFromSelection();
 });
 $("tnone").addEventListener("click", () => {
@@ -1725,18 +2009,6 @@ $("addsubj-save").addEventListener("click", async () => {
   }
 });
 
-["new-abbr", "new-name"].forEach(id => {
-  const el = $(id);
-  if (el) {
-    el.addEventListener("keydown", e => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        $("addsubj-save").click();
-      }
-    });
-  }
-});
-
 async function startJobs({ resume = false, retry = false, phases = null,
                            abbr = null, prefix = null, lectureNum = null,
                            transcripts = null } = {}) {
@@ -1749,6 +2021,7 @@ async function startJobs({ resume = false, retry = false, phases = null,
     return setStatus("Choose at least one transcript file.", "error");
   if (!resume && !retry && !phases.length)
     return setStatus("Select at least one agent phase.", "error");
+  state.starting = true;
   $("run").disabled = true;
   $("runstate").textContent = resume ? "resuming…" : retry ? "retrying…" :
     ("starting " + Math.max(transcripts.length, 1) + " run(s)…");
@@ -1762,13 +2035,19 @@ async function startJobs({ resume = false, retry = false, phases = null,
   };
   if (transcripts.length) body.transcripts = transcripts;
   if (!resume && !retry) body.phases = phases;
-  const res = await api("/api/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  $("run").disabled = false;
-  $("runstate").textContent = "";
+  let res;
+  try {
+    res = await api("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } finally {
+    state.starting = false;
+    $("run").disabled = false;
+    $("runstate").textContent = "";
+    validateForm();
+  }
   if (res.error) return setStatus(res.error, "error");
   const started = (res.jobs || []).map(j => `${j.prefix} [${(j.phases||[]).join(",")}]`).join(", ");
   setStatus(`Started ${(res.jobs||[]).length} run(s): ${started}`, "ok");
@@ -1850,40 +2129,47 @@ async function refreshArtifacts() {
   }
 }
 
+function lectureLabel(run) {
+  if (run.lecture_num) return "Lecture " + run.lecture_num;
+  const m = String(run.prefix || "").match(/(\d+)\s*$/);
+  return m ? "Lecture " + m[1] : (run.prefix || "Run");
+}
+
 function buildHistoryCard(run) {
     const el = document.createElement("div");
-    el.className = "hcard";
     const stCls = run.status === "done" ? "done" : run.status === "error" ? "error" :
       run.status === "stopped" ? "stopped" : "running";
+    el.className = "hcard" + (stCls === "error" ? " is-error" : stCls === "running" ? " is-running" : "");
     const when = run.ended_at || run.started_at || run.mtime;
     const whenStr = when ? new Date(when * 1000).toLocaleString() : "";
     const phaseBits = Object.entries(run.phase_stats || {}).map(([n, p]) => {
       const short = n === "extractor" ? "A1" : n === "enricher" ? "A2" : "A3";
       return `${short} ${fmtDur(p.seconds)}`;
     }).join(" · ");
+    const statusLabel = run.status === "error" ? "FAILED" : (run.status || "unknown");
+    const failBit = run.last_failed_phase ? ` · failed ${esc(run.last_failed_phase)}` : "";
     el.innerHTML = `
       <div>
         <div class="htop">
-          <span class="htitle">${esc(run.subject || "")}</span>
+          <span class="htitle">${esc(lectureLabel(run))}</span>
           <span class="hprefix">${esc(run.prefix || "")}</span>
-          <span class="rstatus ${stCls}">${esc(run.status || "unknown")}</span>
+          <span class="rstatus ${stCls}">${esc(statusLabel)}</span>
         </div>
         <div class="hmeta">
           ${esc(whenStr)}
           ${run.seconds ? ` · ${fmtDur(run.seconds)}` : ""}
           ${run.cost ? ` · ${fmtCost(run.cost)}` : ""}
           ${run.tokens ? ` · ${fmtTok(run.tokens)}` : ""}
-          ${run.backend ? ` · ${esc(run.backend)}` : ""}
           ${run.model ? ` · ${esc(run.model)}${run.variant ? "/" + esc(run.variant) : ""}` : ""}
-          ${phaseBits ? ` · ${esc(phaseBits)}` : ""}
-          ${run.error ? ` · <span class="error">${esc(run.error)}</span>` : ""}
+          ${phaseBits ? ` · ${esc(phaseBits)}` : ""}${failBit}
         </div>
+        ${run.error ? `<span class="herr">${esc(run.error)}</span>` : ""}
       </div>
       <div class="hactions"></div>`;
     const actions = el.querySelector(".hactions");
     if (run.html_url) {
       const a = document.createElement("a");
-      a.className = "btn small"; a.target = "_blank"; a.href = run.html_url; a.textContent = "Open notes";
+      a.className = "btn small"; a.target = "_blank"; a.rel = "noopener"; a.href = run.html_url; a.textContent = "Open notes";
       actions.appendChild(a);
     }
     if ((run.resume_phases || []).length) {
@@ -1900,47 +2186,120 @@ function buildHistoryCard(run) {
       b.addEventListener("click", () => loadAndRun(run, { retry: true }));
       actions.appendChild(b);
     }
+    const logs = document.createElement("button");
+    logs.className = "btn small ghost"; logs.type = "button"; logs.textContent = "Logs";
+    logs.addEventListener("click", () => toggleHistoryLogs(run, el, logs));
+    actions.appendChild(logs);
+
     const load = document.createElement("button");
     load.className = "btn small ghost"; load.type = "button"; load.textContent = "Load";
     load.addEventListener("click", () => loadIntoForm(run));
     actions.appendChild(load);
 
+    const menu = document.createElement("div");
+    menu.className = "menu";
+    const more = document.createElement("button");
+    more.className = "btn small ghost"; more.type = "button"; more.textContent = "More";
+    more.setAttribute("aria-haspopup", "true");
+    const pop = document.createElement("div");
+    pop.className = "menu-pop";
     const arch = document.createElement("button");
     arch.className = "btn small ghost"; arch.type = "button"; arch.textContent = "Archive";
-    arch.title = "Move outputs to outputs/_archive/";
-    arch.addEventListener("click", () => deletePastRun(run, true));
-    actions.appendChild(arch);
-
+    arch.addEventListener("click", () => { menu.classList.remove("open"); deletePastRun(run, true); });
     const del = document.createElement("button");
     del.className = "btn small danger"; del.type = "button"; del.textContent = "Delete";
-    del.addEventListener("click", () => deletePastRun(run, false));
-    actions.appendChild(del);
+    del.addEventListener("click", () => { menu.classList.remove("open"); deletePastRun(run, false); });
+    pop.append(arch, del);
+    more.addEventListener("click", (e) => {
+      e.stopPropagation();
+      document.querySelectorAll(".menu.open").forEach(m => { if (m !== menu) m.classList.remove("open"); });
+      menu.classList.toggle("open");
+    });
+    menu.append(more, pop);
+    actions.appendChild(menu);
     return el;
 }
 
+async function toggleHistoryLogs(run, card, btn) {
+  const existing = card.querySelector(".hlogs");
+  if (existing) {
+    existing.remove();
+    btn.textContent = "Logs";
+    return;
+  }
+  const panel = document.createElement("div");
+  panel.className = "hlogs";
+  panel.textContent = "Loading logs…";
+  card.appendChild(panel);
+  btn.textContent = "Hide logs";
+  const res = await api(`/api/run-events?subject=${encodeURIComponent(run.subject || "")}&prefix=${encodeURIComponent(run.prefix || "")}&limit=1200`);
+  if (res.error) {
+    panel.textContent = res.error;
+    return;
+  }
+  const lines = [];
+  for (const ev of res.events || []) {
+    const t = ev.type;
+    if (t === "pipeline_start") lines.push(`start · ${ev.model || ""} ${ev.variant || ""}`);
+    else if (t === "phase_start") lines.push(`▸ ${ev.phase}`);
+    else if (t === "phase_end") lines.push(`  ${ev.phase} ${ev.ok ? "ok" : "fail"} · ${fmtDur(ev.seconds || 0)}`);
+    else if (t === "gate") {
+      const g = ev.result || {};
+      lines.push(`  gate ${g.gate} ${g.status}${(g.findings || []).length ? " · " + g.findings.slice(0, 2).join("; ") : ""}`);
+    } else if (t === "agent_event" && ev.event && ev.event.type === "tool_use") {
+      const p = ev.event.part || {};
+      lines.push(`  tool ${p.tool || ""} ${p.title || ""}`);
+    } else if (t === "retry_start") lines.push(`  retry ${ev.retry}/${ev.max_retries} ${ev.failed_phase}`);
+    else if (t === "pipeline_end") lines.push(`end ${ev.status}${ev.error ? " · " + ev.error : ""}`);
+  }
+  const extra = (res.total || 0) > (res.events || []).length
+    ? `\n… ${res.total - res.events.length} older events omitted`
+    : "";
+  panel.textContent = (lines.join("\n") || "No events in this run.") + extra;
+}
+
 function renderHistory(runs) {
-  const pastHost = $("history");
-  const failedHost = $("failed-runs");
-  const failedSection = $("failed-section");
-  pastHost.innerHTML = "";
-  failedHost.innerHTML = "";
-
-  const pastRuns = runs.filter(r => r.status !== "error");
-  const failedRuns = runs.filter(r => r.status === "error");
-
-  for (const run of pastRuns) {
-    pastHost.appendChild(buildHistoryCard(run));
+  if (runs) state.historyRuns = runs;
+  const host = $("history");
+  const stats = $("board-stats");
+  if (!host) return;
+  host.classList.remove("is-loading");
+  host.innerHTML = "";
+  const all = state.historyRuns.slice();
+  const nFail = all.filter(r => r.status === "error").length;
+  const nLive = all.filter(r => r.status === "running").length;
+  const nDone = all.filter(r => r.status === "done").length;
+  if (stats) {
+    stats.innerHTML =
+      (nFail ? `<span class="stat-pill fail">${nFail} failed</span>` : "") +
+      (nLive ? `<span class="stat-pill live">${nLive} live</span>` : "") +
+      `<span class="stat-pill">${nDone} done</span>` +
+      `<span class="stat-pill">${all.length} total</span>`;
   }
-  for (const run of failedRuns) {
-    failedHost.appendChild(buildHistoryCard(run));
+  const rank = s => s === "error" ? 0 : s === "running" ? 1 : s === "stopped" ? 2 : 3;
+  const filt = state.historyFilter || "all";
+  const q = (state.historyQuery || "").toLowerCase();
+  const shown = all
+    .filter(r => filt === "all" ? true : (r.status || "") === filt)
+    .filter(r => !q || `${r.subject} ${r.prefix} ${r.abbr} ${r.error || ""}`.toLowerCase().includes(q))
+    .sort((a, b) => rank(a.status) - rank(b.status) || (Number(b.mtime || 0) - Number(a.mtime || 0)));
+  const groups = new Map();
+  for (const run of shown) {
+    const key = run.subject || "Other";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(run);
   }
-
-  // Show/hide the failed section header based on content
-  if (failedRuns.length > 0) {
-    failedSection.classList.add("has-items");
-  } else {
-    failedSection.classList.remove("has-items");
+  for (const [subj, list] of groups) {
+    const wrap = document.createElement("div");
+    wrap.className = "hgroup";
+    const title = document.createElement("div");
+    title.className = "hgroup-title";
+    title.innerHTML = `${esc(subj)} <span>${list.length}</span>`;
+    wrap.appendChild(title);
+    for (const run of list) wrap.appendChild(buildHistoryCard(run));
+    host.appendChild(wrap);
   }
+  updateRunEstimate();
 }
 
 async function deletePastRun(run, archive) {
@@ -1988,7 +2347,11 @@ function loadIntoForm(run) {
     $("guess-hint").innerHTML = `Loaded <em>${esc(run.prefix || "")}</em> (${esc(run.status || "")})`;
   }
   refreshArtifacts();
-  $("subject").scrollIntoView({ behavior: "smooth", block: "center" });
+  const ticket = $("ticket");
+  if (ticket) ticket.open = true;
+  const more = $("more-opts");
+  if (more && (run.prefix || run.lecture_num || run.backend)) more.open = true;
+  $("subject").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function loadAndRun(run, { resume = false, retry = false } = {}) {
@@ -2007,9 +2370,20 @@ function loadAndRun(run, { resume = false, retry = false } = {}) {
 }
 
 async function refreshHistory() {
-  const res = await api("/api/history?limit=40");
+  const res = await api("/api/history?limit=80");
+  if (res.error) return setStatus(res.error, "error");
   renderHistory(res.runs || []);
 }
+
+$("board-filters")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-filter]");
+  if (!btn) return;
+  state.historyFilter = btn.dataset.filter;
+  $("board-filters").querySelectorAll("button").forEach(b => {
+    b.classList.toggle("active", b === btn);
+  });
+  renderHistory(state.historyRuns);
+});
 
 // ------------------------------------------------------------- model / effort
 const VARIANT_RANK = ["none", "minimal", "low", "medium", "high", "xhigh",
@@ -2073,8 +2447,11 @@ function syncMetaModel() {
   const meta = $("meta");
   if (!meta || !meta.dataset.ready) return;
   const ws = meta.dataset.workspace || "";
+  const conn = state.sseOk ? "live" : "offline";
+  const connCls = state.sseOk ? "ok" : "bad";
   meta.innerHTML =
     `<strong>Desk</strong>` +
+    `<span class="conn-pill ${connCls}">${conn}</span>` +
     `<span class="path" title="${esc(ws)}">ws · ${esc(ws)}</span>` +
     `backend · ${esc(backend)}<br>` +
     `model · ${esc(model)}<br>` +
@@ -2096,8 +2473,9 @@ $("backend").addEventListener("change", async () => {
 $("model").addEventListener("change", () => {
   fillVariantSelect();
   syncMetaModel();
+  updateRunEstimate();
 });
-$("variant").addEventListener("change", syncMetaModel);
+$("variant").addEventListener("change", () => { syncMetaModel(); updateRunEstimate(); });
 $("refresh-models").addEventListener("click", async () => {
   const btn = $("refresh-models");
   btn.disabled = true;
@@ -2119,6 +2497,10 @@ async function refreshConfig({ refreshModels = false } = {}) {
   const q = new URLSearchParams({ backend });
   if (refreshModels) q.set("refresh_models", "1");
   const cfg = await api("/api/config?" + q.toString());
+  if (cfg.error) {
+    setStatus(cfg.error, "error");
+    return;
+  }
   state.subjects = cfg.subjects || [];
   state.transcripts = cfg.transcripts || [];
   state.docs = cfg.docs || [];
@@ -2126,6 +2508,7 @@ async function refreshConfig({ refreshModels = false } = {}) {
   state.models = cfg.models || [];
   state.backend = cfg.backend || backend;
   state.backends = cfg.backends || [];
+  if (cfg.max_parallel) state.maxParallel = cfg.max_parallel;
   state.defaultModel = cfg.model || (state.backend === "commandcode"
     ? "deepseek/deepseek-v4-flash" : "opencode-go/deepseek-v4-flash");
   state.defaultVariant = cfg.variant || (state.backend === "commandcode" ? "high" : "max");
@@ -2161,6 +2544,7 @@ async function refreshConfig({ refreshModels = false } = {}) {
   fillModelSelect(prevModel || state.defaultModel);
   fillVariantSelect(prevVariant || state.defaultVariant);
   syncMetaModel();
+  updateRunEstimate();
   const sel = $("subject");
   const prev = sel.value;
   sel.innerHTML = cfg.subjects.map(s =>
@@ -2206,19 +2590,51 @@ function handleEvent(ev) {
     });
     return;
   }
+  if (ev.type === "queued") {
+    const card = ensureRunCard(ev);
+    setRunStatus(ev.run_id, "running", "queued");
+    $("stop").disabled = false;
+    return;
+  }
   if (ev.type === "pipeline_start") {
     const card = ensureRunCard(ev);
     card.subject = ev.subject; card.prefix = ev.prefix;
-    if (!ev.replay) {
+    if (ev.time) card.startedAt = Number(ev.time) * 1000;
+    else if (!ev.replay) {
       card.stats = emptyStats();
       card.startedAt = Date.now();
     }
+    if (!ev.replay) card.stats = card.stats || emptyStats();
     renderRollup(card);
     setRunStatus(ev.run_id, "running", "running");
     $("stop").disabled = false;
+    const live = $("live-wrap");
+    if (live) live.open = true;
   }
   if (!ev.run_id || !state.runs[ev.run_id]) return;
   const rid = ev.run_id;
+  if (state.replaying && ev.type === "agent_event" && ev.event && ev.event.type === "reasoning") return;
+  if (ev.type === "heartbeat") {
+    const card = state.runs[rid];
+    if (!card) return;
+    let line = card.el.querySelector(".alive-line");
+    if (!line) {
+      line = document.createElement("div");
+      line.className = "alive-line";
+      const head = card.el.querySelector(".runhead");
+      if (head) head.insertAdjacentElement("afterend", line);
+      else card.el.prepend(line);
+    }
+    const tool = ev.last_tool ? ` · ${ev.last_tool}` : "";
+    line.textContent = `alive · ${ev.phase || card.phase || "…"}${tool}`;
+    if (ev.stats) {
+      card.stats.cost = Number(ev.stats.cost) || card.stats.cost;
+      card.stats.tokens = ev.stats.tokens || card.stats.tokens;
+      card.stats.seconds = Number(ev.stats.seconds) || card.stats.seconds;
+      renderRollup(card);
+    }
+    return;
+  }
   if (ev.type === "phase_start") {
     const card = state.runs[rid];
     card.phase = ev.phase;
@@ -2289,10 +2705,10 @@ function handleEvent(ev) {
     banner.className = "retry-banner";
     banner.innerHTML =
       `<span class="retry-icon">&#x21bb;</span>` +
-      `<span class="retry-text">Retry <strong>${ev.retry}/${ev.max_retries}</strong> &mdash; ` +
-      `<em>${esc(ev.failed_phase)}</em> failed, resuming from <em>${esc(ev.resuming_from)}</em>` +
+      `<span class="retry-text">Stage retry <strong>${ev.retry}/${ev.max_retries}</strong> &mdash; ` +
+      `<em>${esc(ev.failed_phase)}</em> failed, retrying this stage` +
       `${ev.error ? " &middot; " + esc(ev.error) : ""}</span>` +
-      `<span class="retry-count">${ev.retry}/${ev.max_retries}</span>`;
+      `<span class="retry-count">${esc(ev.failed_phase || "stage")} ${ev.retry}/${ev.max_retries}</span>`;
     const phasesGrid = card.el.querySelector(".phases");
     if (phasesGrid && phasesGrid.nextSibling) {
       card.el.insertBefore(banner, phasesGrid.nextSibling);
@@ -2316,8 +2732,8 @@ function handleEvent(ev) {
     banner.className = "retry-exhausted-banner";
     banner.innerHTML =
       `<span class="retry-icon">&#x2717;</span>` +
-      `<span>All ${ev.retries} retries exhausted &mdash; <em>${esc(ev.failed_phase)}</em> still failing. ` +
-      `Use manual retry below.</span>`;
+      `<span>All ${ev.retries} retries exhausted for <em>${esc(ev.failed_phase)}</em>. ` +
+      `Use Retry on the Runs board.</span>`;
     const phasesGrid = card.el.querySelector(".phases");
     if (phasesGrid && phasesGrid.nextSibling) {
       card.el.insertBefore(banner, phasesGrid.nextSibling);
@@ -2367,28 +2783,73 @@ function handleEvent(ev) {
   }
 }
 
-const es = new EventSource("/api/events");
-es.onmessage = e => {
-  let ev;
-  try { ev = JSON.parse(e.data); } catch { return; }
-  handleEvent(ev);
-};
+function connectEvents() {
+  const es = new EventSource(AUTH_TOKEN
+    ? `/api/events?token=${encodeURIComponent(AUTH_TOKEN)}`
+    : "/api/events");
+  es.onopen = () => {
+    state.sseOk = true;
+    syncMetaModel();
+  };
+  es.onmessage = e => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch { return; }
+    handleEvent(ev);
+  };
+  es.onerror = () => {
+    state.sseOk = false;
+    syncMetaModel();
+  };
+  return es;
+}
+connectEvents();
 
 setInterval(() => {
   for (const rid in state.runs) {
     const card = state.runs[rid];
     if (!card.el.isConnected) continue;
+    const st = card.el.querySelector(".rstatus");
+    if (!(st && st.classList.contains("running"))) continue;
     const secs = Math.floor((Date.now() - card.startedAt) / 1000);
     const mm = Math.floor(secs / 60), ss = secs % 60;
     card.el.querySelector(".elapsed").textContent = `${mm}:${String(ss).padStart(2, "0")}`;
-    const st = card.el.querySelector(".rstatus");
-    if (st && st.classList.contains("running")) renderRollup(card);
+    renderRollup(card);
   }
 }, 1000);
 
 setInterval(() => {
-  for (const rid in state.runs) refreshFiles(rid);
+  for (const rid in state.runs) {
+    const card = state.runs[rid];
+    const st = card && card.el.querySelector(".rstatus");
+    if (st && st.classList.contains("running")) refreshFiles(rid);
+  }
 }, 10000);
+
+setInterval(async () => {
+  const h = await api("/healthz");
+  if (h.error || !h.ok) {
+    state.sseOk = false;
+    syncMetaModel();
+  }
+}, 20000);
+
+document.addEventListener("click", () => {
+  document.querySelectorAll(".menu.open").forEach(m => m.classList.remove("open"));
+});
+const hfilter = $("hfilter");
+if (hfilter) {
+  hfilter.addEventListener("input", () => {
+    state.historyQuery = hfilter.value.trim();
+    renderHistory();
+  });
+}
+const ticket = $("ticket");
+if (ticket) {
+  const chip = ticket.querySelector(".chip");
+  const syncChip = () => { if (chip) chip.textContent = ticket.open ? "collapse" : "expand"; };
+  ticket.addEventListener("toggle", syncChip);
+  syncChip();
+}
 
 (function initBackend() {
   const saved = localStorage.getItem("agent_warden_backend");

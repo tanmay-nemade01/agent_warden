@@ -1,15 +1,15 @@
+# Ignore everything in the repository root except the two app folders
+/*
+!/.gitignore
+!/agent-warden-opencode/
+!/make-transcript-notes-kit-3agent/
+!/README.md
+
+# Standard junk (applies inside the tracked folders too)
 __pycache__/
 *.pyc
-*.pyo
-.venv/
 .pytest_cache/
-*.egg-info/
+.venv/
 node_modules/
 *.log
 .DS_Store
-
-# Only push the two app folders; everything else is local
-companion_docs/
-outputs/
-transcript files/
-topic_mappings/
