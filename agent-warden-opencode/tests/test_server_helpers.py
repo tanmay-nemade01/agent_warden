@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app import config
-from app.server import EventBus, _job_identity, is_loopback_host
+from app.server import EventBus, _job_identity, inflight_summary, is_loopback_host
 
 
 class LoopbackTests(unittest.TestCase):
@@ -71,6 +71,58 @@ class RunEventsReadTests(unittest.TestCase):
             self.assertEqual(len(page["events"]), 1)
             self.assertEqual(page["events"][0]["type"], "phase_start")
             self.assertTrue(page["truncated"])
+
+
+class InFlightSummaryTests(unittest.TestCase):
+    def test_includes_phase_and_usage(self):
+        class FakePipe:
+            model = "test-model"
+            variant = "max"
+            backend = "opencode"
+            _current_phase = "enricher"
+            _last_tool = "read"
+
+            def _stats_snapshot(self):
+                return {
+                    "seconds": 12.0,
+                    "cost": 0.042,
+                    "tokens": {"input": 1100, "output": 200, "reasoning": 50},
+                    "phases": {"extractor": {"seconds": 8, "cost": 0.02}},
+                }
+
+        payload = inflight_summary({
+            "run_id": "run1",
+            "subject": "NLP",
+            "prefix": "NLP_Lecture_1",
+            "abbr": "NLP",
+            "phases": [1, 2, 3],
+            "t0": 100.0,
+            "active": True,
+            "current_phase": "enricher",
+            "pipeline": FakePipe(),
+        })
+        self.assertEqual(payload["status"], "running")
+        self.assertEqual(payload["current_phase"], "enricher")
+        self.assertEqual(payload["cost"], 0.042)
+        self.assertEqual(payload["tokens"]["input"], 1100)
+        self.assertEqual(payload["last_tool"], "read")
+        self.assertEqual(payload["model"], "test-model")
+        self.assertTrue(payload["in_flight"])
+
+    def test_queued_without_pipeline(self):
+        payload = inflight_summary({
+            "run_id": "run2",
+            "subject": "NLP",
+            "prefix": "NLP_Lecture_2",
+            "abbr": "NLP",
+            "phases": [1],
+            "t0": 1.0,
+            "active": False,
+            "pipeline": None,
+        })
+        self.assertEqual(payload["status"], "queued")
+        self.assertIsNone(payload["current_phase"])
+        self.assertEqual(payload["cost"], 0.0)
 
 
 if __name__ == "__main__":

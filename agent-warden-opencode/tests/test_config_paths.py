@@ -48,5 +48,34 @@ class SubjectPathTests(unittest.TestCase):
                 self.assertEqual(data["ZZQ"], "Zed Queue")
 
 
+class SummarizeRunTests(unittest.TestCase):
+    def test_current_phase_and_tokens(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            out = root / "NLP" / "NLP_Lecture_1"
+            out.mkdir(parents=True)
+            path = out / "NLP_Lecture_1_run_events.jsonl"
+            events = [
+                {"type": "pipeline_start", "subject": "NLP",
+                 "prefix": "NLP_Lecture_1", "phases": [1, 2, 3],
+                 "model": "m", "time": 1},
+                {"type": "phase_start", "phase": "extractor"},
+                {"type": "agent_event", "phase": "extractor",
+                 "event": {"type": "step_finish", "part": {
+                     "tokens": {"input": 100, "output": 20, "reasoning": 5},
+                     "cost": 0.01}}},
+                {"type": "phase_start", "phase": "enricher"},
+            ]
+            path.write_text("\n".join(json.dumps(e) for e in events) + "\n",
+                            encoding="utf-8")
+            with patch.object(config, "OUTPUTS_DIR", root):
+                summary = config.summarize_run_events(
+                    path, "NLP", "NLP_Lecture_1")
+            self.assertEqual(summary["status"], "running")
+            self.assertEqual(summary["current_phase"], "enricher")
+            self.assertEqual(summary["tokens"]["input"], 100)
+            self.assertGreater(summary["cost"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

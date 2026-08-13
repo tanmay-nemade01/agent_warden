@@ -79,6 +79,32 @@ _BOUNCE_RE = re.compile(
     re.I,
 )
 
+# After OpenCode hits its output-token cap, `opencode run` exits 0 with no
+# tool calls. The TUI/desktop just keep the session open; we do the same
+# with --session and this nudge so max-effort thinking is not thrown away.
+_CONTINUE_AFTER_TRUNCATION = """\
+Your previous turn was truncated at the output-token cap (finish reason \
+"length") before any tool calls were emitted. Continue the same work from \
+where you left off: write the required output files now, then run this \
+phase's gates. Do not restart from scratch. Do not re-read the skill \
+unless a needed file is missing. When finished, print exactly: PHASE_COMPLETE
+"""
+
+
+def is_truncated_step(reason: str | None, tokens: dict | None = None) -> bool:
+    """True when a step ended because the model hit max_tokens (or dropped)."""
+    r = (reason or "").strip().lower()
+    if r == "length":
+        return True
+    if r == "unknown":
+        toks = tokens or {}
+        try:
+            return int(toks.get("output") or 0) == 0
+        except (TypeError, ValueError):
+            return True
+    return False
+
+
 
 class PhaseError(RuntimeError):
     pass
@@ -142,6 +168,10 @@ class Pipeline:
         self._job_files: dict[str, Path] | None = None
         self._current_phase: str | None = None
         self._last_tool: str = ""
+        self._oc_session_id: str | None = None
+        self._last_step_reason: str = ""
+        self._last_step_tokens: dict = {}
+
 
     # ------------------------------------------------------------------ utils
     def _log(self, ev: dict):
@@ -248,10 +278,54 @@ class Pipeline:
 
     def _run_agent(self, agent: int, message: str, title: str,
                    extra_env: dict | None = None) -> tuple[int, list[str]]:
-        """Run the selected backend non-interactively; stream structured events."""
+        """Run the selected backend; resume the OpenCode session if truncated."""
         if self.backend == config.BACKEND_COMMANDCODE:
             return self._run_commandcode(agent, message, title, extra_env)
-        return self._run_opencode(agent, message, title, extra_env)
+        self._oc_session_id = None
+        code, lines = self._run_opencode(agent, message, title, extra_env)
+        n = 0
+        while (not self.stop_flag
+               and is_truncated_step(self._last_step_reason,
+                                     self._last_step_tokens)
+               and self._oc_session_id
+               and n < config.MAX_TRUNCATION_CONTINUES):
+            n += 1
+            self._log({
+                "type": "session_continue",
+                "phase": AGENTS[agent],
+                "continue": n,
+                "max_continues": config.MAX_TRUNCATION_CONTINUES,
+                "reason": self._last_step_reason,
+                "session": self._oc_session_id,
+                "tokens": dict(self._last_step_tokens or {}),
+            })
+            more_code, more = self._run_opencode(
+                agent, _CONTINUE_AFTER_TRUNCATION, title, extra_env,
+                session_id=self._oc_session_id)
+            code = more_code
+            lines.extend(more)
+        return code, lines
+
+    def _note_opencode_meta(self, line: str) -> None:
+        """Capture session id and step_finish reason from raw JSONL."""
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(raw, dict):
+            return
+        sid = raw.get("sessionID")
+        if not sid:
+            part = raw.get("part")
+            if isinstance(part, dict):
+                sid = part.get("sessionID")
+        if isinstance(sid, str) and sid.startswith("ses_"):
+            self._oc_session_id = sid
+        if raw.get("type") == "step_finish":
+            part = raw.get("part") if isinstance(raw.get("part"), dict) else {}
+            self._last_step_reason = str(part.get("reason") or "")
+            toks = part.get("tokens")
+            self._last_step_tokens = toks if isinstance(toks, dict) else {}
 
     def _stream_process(self, agent: int, parse_line) -> tuple[int, list[str]]:
         lines: list[str] = []
@@ -260,6 +334,7 @@ class Pipeline:
             for raw in self.proc.stdout:
                 line = raw.rstrip("\r\n")
                 lines.append(line)
+                self._note_opencode_meta(line)
                 events = parse_line(line)
                 if events:
                     for event in events:
@@ -292,7 +367,8 @@ class Pipeline:
         return code, lines
 
     def _run_opencode(self, agent: int, message: str, title: str,
-                      extra_env: dict | None = None) -> tuple[int, list[str]]:
+                      extra_env: dict | None = None,
+                      session_id: str | None = None) -> tuple[int, list[str]]:
         job = self._ensure_job_files()
         job["prompt"].write_text(message, encoding="utf-8")
         exe = config.find_opencode()
@@ -302,14 +378,21 @@ class Pipeline:
         cmd.extend([
             "--format", "json", "--thinking",
             "--dir", str(config.WORKSPACE),
-            "--title", title,
-            "--file", str(job["prompt"]),
         ])
+        if session_id:
+            # Pin the id — never `--continue` (that is "last session" and
+            # races under parallel runs).
+            cmd.extend(["--session", session_id])
+        else:
+            cmd.extend(["--title", title, "--file", str(job["prompt"])])
         env = permissions.opencode_env(job["opencode"])
         if extra_env:
             env.update(extra_env)
+        self._last_step_reason = ""
+        self._last_step_tokens = {}
         self._log({"type": "phase_cmd", "phase": AGENTS[agent],
-                   "cmd": " ".join(cmd[:8]) + " ..."})
+                   "cmd": " ".join(cmd[:10]) + " ...",
+                   "session": session_id})
         self._popen(cmd, stdin_data=message, extra_env=env,
                     cwd=str(config.WORKSPACE))
 

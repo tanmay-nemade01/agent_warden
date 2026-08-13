@@ -31,7 +31,47 @@ STATIC = Path(__file__).parent / "static"
 MAX_BODY = 1 * 1024 * 1024
 REQUIRE_TOKEN = False
 STATE_LOCK = threading.RLock()
-RUN_SLOTS = threading.Semaphore(config.MAX_PARALLEL_RUNS)
+
+# Dynamic job-slot limiter (replaces a fixed-size semaphore so the queue
+# depth can be changed at runtime via POST /api/parallel).
+MAX_PARALLEL = config.MAX_PARALLEL_RUNS
+SLOTS_FREE = config.MAX_PARALLEL_RUNS
+SLOTS_COND = threading.Condition()
+
+
+def get_max_parallel() -> int:
+    return MAX_PARALLEL
+
+
+def set_max_parallel(n: int) -> int:
+    """Raise/lower the concurrency limit; queued workers are woken when raised."""
+    global MAX_PARALLEL, SLOTS_FREE
+    n = max(1, min(int(n or 1), 64))
+    with SLOTS_COND:
+        if n > MAX_PARALLEL:
+            SLOTS_FREE += n - MAX_PARALLEL
+        elif SLOTS_FREE > n:
+            SLOTS_FREE = n
+        MAX_PARALLEL = n
+        SLOTS_COND.notify_all()
+    return MAX_PARALLEL
+
+
+def try_acquire_slot() -> bool:
+    """Claim a slot if one is free (non-blocking)."""
+    global SLOTS_FREE
+    with SLOTS_COND:
+        if SLOTS_FREE > 0:
+            SLOTS_FREE -= 1
+            return True
+        return False
+
+
+def release_slot():
+    global SLOTS_FREE
+    with SLOTS_COND:
+        SLOTS_FREE += 1
+        SLOTS_COND.notify()
 
 
 class EventBus:
@@ -124,6 +164,48 @@ STATE = {
     "last_error": None,
     "_seq": 0,
 }
+
+
+def inflight_summary(run: dict) -> dict:
+    """History-card payload for a queued or running job."""
+    pipeline = run.get("pipeline")
+    stats: dict = {}
+    if pipeline is not None:
+        snap = getattr(pipeline, "_stats_snapshot", None)
+        if callable(snap):
+            try:
+                stats = snap() or {}
+            except Exception:  # noqa: BLE001
+                stats = getattr(pipeline, "stats", None) or {}
+        else:
+            stats = getattr(pipeline, "stats", None) or {}
+    phase = run.get("current_phase")
+    if not phase and pipeline is not None:
+        phase = getattr(pipeline, "_current_phase", None)
+    tokens = stats.get("tokens") or {"input": 0, "output": 0, "reasoning": 0}
+    abbr = run.get("abbr") or config.abbr_for_subject(run.get("subject", ""))
+    return {
+        "run_id": run.get("run_id"),
+        "subject": run.get("subject", ""),
+        "prefix": run.get("prefix", ""),
+        "abbr": abbr,
+        "status": "running" if run.get("active") else "queued",
+        "mtime": run.get("t0") or time.time(),
+        "started_at": run.get("t0"),
+        "phases_requested": run.get("phases") or [],
+        "in_flight": True,
+        "current_phase": phase,
+        "last_tool": ((getattr(pipeline, "_last_tool", None) or None)
+                      if pipeline else None) or run.get("last_tool"),
+        "cost": float(stats.get("cost") or 0),
+        "tokens": tokens,
+        "seconds": float(stats.get("seconds") or 0),
+        "phase_stats": stats.get("phases") or {},
+        "model": getattr(pipeline, "model", None) if pipeline else run.get("model"),
+        "variant": getattr(pipeline, "variant", None) if pipeline else run.get("variant"),
+        "backend": getattr(pipeline, "backend", None) if pipeline else run.get("backend"),
+        "last_failed_phase": run.get("last_failed_phase"),
+    }
 
 
 def is_loopback_host(host: str) -> bool:
@@ -317,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
                 n_runs = len(STATE["runs"])
             return self._json({
                 "ok": True, "auth": REQUIRE_TOKEN, "runs": n_runs,
-                "max_parallel": config.MAX_PARALLEL_RUNS,
+                "max_parallel": get_max_parallel(),
             })
         if ((path.startswith("/api/") or path.startswith("/outputs/"))
                 and not self._api_authed()):
@@ -334,13 +416,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(config.list_models(refresh=refresh, backend=backend))
         if path == "/api/docs":
             return self._json(self._docs_folders())
+        if path == "/api/parallel":
+            return self._json({"max_parallel": get_max_parallel(),
+                               "in_flight": self._inflight_runs()})
         if path == "/api/history":
             try:
                 limit = int((query.get("limit") or ["60"])[0] or 60)
             except ValueError:
                 limit = 60
-            return self._json({"runs": config.list_past_runs(
-                limit=min(max(limit, 1), 200))})
+            runs = config.list_past_runs(
+                limit=min(max(limit, 1), 200))
+            inflight = self._inflight_runs()
+            active_keys = {(r["subject"], r["prefix"]) for r in inflight}
+            runs = [r for r in runs
+                    if (r.get("subject"), r.get("prefix")) not in active_keys]
+            return self._json({"runs": inflight + runs})
         if path == "/api/artifacts":
             subject = (query.get("subject") or [""])[0]
             prefix = (query.get("prefix") or [""])[0]
@@ -395,6 +485,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._stop_run()
         if path == "/api/subjects":
             return self._add_subject()
+        if path == "/api/parallel":
+            return self._set_parallel()
         if path == "/api/history/delete":
             return self._delete_history()
         return self._text("not found", 404)
@@ -471,7 +563,7 @@ class Handler(BaseHTTPRequestHandler):
             "docs": docs,
             "docs_by_abbr": docs_by_abbr,
             "runs": runs,
-            "max_parallel": config.MAX_PARALLEL_RUNS,
+            "max_parallel": get_max_parallel(),
         }
 
     def _docs_folders(self) -> list[dict]:
@@ -484,6 +576,29 @@ class Handler(BaseHTTPRequestHandler):
             if p.is_dir():
                 out.append({"name": p.name, "path": str(p)})
         return out
+
+    def _inflight_runs(self) -> list[dict]:
+        """Minimal run summaries for jobs in the queue (queued or running)."""
+        out = []
+        with STATE_LOCK:
+            runs = list(STATE["runs"].values())
+        for run in runs:
+            out.append(inflight_summary(run))
+        out.sort(key=lambda r: r["mtime"])
+        return out
+
+    def _set_parallel(self):
+        body = self._body()
+        if body is None:
+            return
+        try:
+            n = int(body.get("max_parallel"))
+        except (TypeError, ValueError):
+            return self._json(
+                {"error": "max_parallel must be an integer (1-12)"}, 400)
+        set_max_parallel(n)
+        self._json({"ok": True, "max_parallel": get_max_parallel(),
+                    "in_flight": self._inflight_runs()})
 
     def _preview_run(self):
         body = self._body()
@@ -596,7 +711,9 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 run_id = next_run_id()
                 run = {"pipeline": None, "subject": subj,
-                       "abbr": abbr, "prefix": prefix, "run_id": run_id}
+                       "abbr": abbr, "prefix": prefix, "run_id": run_id,
+                       "phases": list(job_phases), "t0": time.time(),
+                       "active": False, "current_phase": None}
                 STATE["runs"][run_id] = run
                 STATE["last_error"] = None
             self._launch_job(spec, run_id, run)
@@ -604,13 +721,26 @@ class Handler(BaseHTTPRequestHandler):
                         ("subject", "prefix", "lecture_num", "phases",
                          "backend", "model", "variant")}})
         return {"ok": bool(jobs), "jobs": jobs, "rejected": rejected,
-                "max_parallel": config.MAX_PARALLEL_RUNS}
+                "max_parallel": get_max_parallel()}
 
     def _launch_job(self, spec: dict, run_id: str, run: dict):
         def emit(ev: dict, _rid=run_id, _run=run):
             ev["run_id"] = _rid
             ev["subject"] = _run["subject"]
             ev["prefix"] = _run["prefix"]
+            et = ev.get("type")
+            if et == "phase_start":
+                _run["current_phase"] = ev.get("phase")
+            elif et == "phase_end":
+                if not ev.get("ok"):
+                    _run["last_failed_phase"] = ev.get("phase")
+                elif _run.get("current_phase") == ev.get("phase"):
+                    _run["current_phase"] = None
+            elif et == "heartbeat":
+                if ev.get("phase"):
+                    _run["current_phase"] = ev.get("phase")
+                if ev.get("last_tool"):
+                    _run["last_tool"] = ev.get("last_tool")
             BUS.publish(ev)
 
         pipeline = Pipeline(
@@ -629,8 +759,11 @@ class Handler(BaseHTTPRequestHandler):
                     BUS.publish({"type": "pipeline_end", "run_id": _rid,
                                  "status": "stopped"})
                     return
-                if RUN_SLOTS.acquire(timeout=0.5):
+                if try_acquire_slot():
                     break
+                time.sleep(0.25)
+            with STATE_LOCK:
+                _run["active"] = True
             try:
                 if _p.stop_flag:
                     BUS.publish({"type": "pipeline_end", "run_id": _rid,
@@ -642,7 +775,7 @@ class Handler(BaseHTTPRequestHandler):
                              "status": "error",
                              "error": f"{type(exc).__name__}: {exc}"})
             finally:
-                RUN_SLOTS.release()
+                release_slot()
                 with STATE_LOCK:
                     STATE["runs"].pop(_rid, None)
                 BUS.publish({"type": "idle", "run_id": _rid})

@@ -57,6 +57,13 @@ MAX_STAGE_RETRIES = 3       # after a phase fails, retry that phase this many ti
 MAX_PARALLEL_RUNS = 2       # in-flight CLI agents; extras wait for a slot
 PHASE_TIMEOUT_SECONDS = 6 * 60 * 60  # generous ceiling; notes take a while
 COMMANDCODE_MAX_TURNS = 250
+# OpenCode sends min(model.limit.output, this env). Default 32k is far
+# too small for max-effort thinking (finish reason length/unknown, 0
+# output tokens). DeepSeek V4 catalog output is 384k; 128k still truncated
+# mid-thought and forced session-continues. Keep this >= catalog output
+# so the model limit is the real cap, not our ceiling.
+OPENCODE_OUTPUT_TOKEN_MAX = 384000
+MAX_TRUNCATION_CONTINUES = 3  # resume same OpenCode session after reason=length
 # Prefer higher effort when falling back from the default "max".
 _VARIANT_RANK = ("none", "minimal", "low", "medium", "high", "xhigh",
                  "thinking", "max")
@@ -751,6 +758,7 @@ def summarize_run_events(events_path: Path, subject: str = "",
         "model": None,
         "variant": None,
         "backend": None,
+        "current_phase": None,
     }
     phase_secs: dict[str, float] = {}
     phase_cost: dict[str, float] = {}
@@ -784,6 +792,7 @@ def summarize_run_events(events_path: Path, subject: str = "",
                     summary["status"] = "running"
                 elif et == "phase_start":
                     current_phase = ev.get("phase")
+                    summary["current_phase"] = current_phase
                     if current_phase and current_phase not in phase_tok:
                         phase_tok[current_phase] = _empty_token_bucket()
                         phase_cost[current_phase] = 0.0
@@ -793,6 +802,9 @@ def summarize_run_events(events_path: Path, subject: str = "",
                         phase_secs[ph] = float(ev.get("seconds") or 0)
                         if not ev.get("ok"):
                             summary["last_failed_phase"] = ph
+                            summary["current_phase"] = ph
+                        elif summary.get("current_phase") == ph:
+                            summary["current_phase"] = None
                 elif et == "agent_event":
                     aev = ev.get("event") or {}
                     if aev.get("type") == "step_finish":
@@ -811,6 +823,9 @@ def summarize_run_events(events_path: Path, subject: str = "",
                     summary["status"] = ev.get("status") or summary["status"]
                     summary["error"] = ev.get("error")
                     summary["ended_at"] = ev.get("time")
+                    if summary["status"] in ("done", "stopped", "error"):
+                        if summary["status"] != "error":
+                            summary["current_phase"] = None
                     stats = ev.get("stats") or {}
                     if stats:
                         if "cost" in stats:

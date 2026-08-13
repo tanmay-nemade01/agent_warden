@@ -265,11 +265,21 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
     gap: 20px;
-    align-items: start;
+    align-items: stretch;
     margin-bottom: 22px;
   }
   .board {
     min-width: 0;
+    position: relative;
+    min-height: 280px;
+  }
+  /* Fill the New job column height so Live session logs sit directly below. */
+  .board-fill {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
   .board-head {
     display: flex;
@@ -277,6 +287,7 @@
     align-items: center;
     gap: 10px 14px;
     margin-bottom: 12px;
+    flex-shrink: 0;
   }
   .board-head h2 {
     margin: 0;
@@ -311,6 +322,11 @@
     color: var(--amber);
     background: var(--amber-soft);
   }
+  .board-stats .stat-pill.queued {
+    border-color: var(--blue);
+    color: var(--blue);
+    background: var(--blue-soft);
+  }
   .board-filters {
     display: flex;
     gap: 6px;
@@ -339,6 +355,9 @@
   @media (max-width: 980px) {
     .workbench { grid-template-columns: 1fr; }
     .ticket-sticky { position: static; }
+    .board { position: static; min-height: 0; }
+    .board-fill { position: static; }
+    .history-list { max-height: min(70vh, 720px); }
     .masthead { flex-wrap: wrap; }
     .meta-panel { max-width: 100%; }
   }
@@ -375,6 +394,14 @@
     margin-bottom: 6px;
   }
   .lbl-row label { margin-bottom: 0; }
+  .inline-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    margin-top: 6px;
+    cursor: pointer;
+  }
   .reset-auto-btn {
     background: none;
     border: none;
@@ -663,6 +690,7 @@
     border: 1px solid currentColor;
   }
   .rstatus.running { color: var(--amber); background: var(--amber-soft); }
+  .rstatus.queued { color: var(--blue); background: var(--blue-soft); }
   .rstatus.done { color: var(--green); background: var(--green-soft); }
   .rstatus.error { color: var(--red); background: var(--red-soft); font-weight: 700; }
   .rstatus.stopped { color: var(--muted); background: var(--paper-2); }
@@ -892,7 +920,15 @@
   .rollup .total { color: var(--ink); font-weight: 500; }
   .rollup .ph { color: var(--muted); }
 
-  .history-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 0; max-height: min(70vh, 720px); overflow: auto; }
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 0;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
   .history-list:empty::after {
     content: "No runs yet — pick transcripts on the right and press Run.";
     display: block; padding: 28px 20px; color: var(--muted);
@@ -929,6 +965,22 @@
   .hcard .htitle { font-family: var(--display); font-weight: 700; font-size: 14.5px; }
   .hcard .hprefix { font-family: var(--mono); font-size: 12px; color: var(--muted); }
   .hcard .hmeta { font-size: 12.5px; color: var(--ink-soft); }
+  .hcard .hmetrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .hcard .hmetric {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    padding: 3px 8px;
+    border: 1.5px solid var(--line);
+    background: var(--surface);
+    color: var(--ink-soft);
+  }
+  .hcard .hmetric.emph { color: var(--ink); border-color: var(--ink); }
   .hcard .hactions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .guess-hint {
     margin-top: 8px; font-size: 12.5px; color: var(--ink-soft);
@@ -1148,6 +1200,7 @@
   }
   .menu.open .menu-pop { display: flex; flex-direction: column; gap: 2px; }
   .menu-pop button { width: 100%; text-align: left; }
+  .menu-pop .menu-note { font-size: 11px; color: var(--ink-soft); padding: 4px 6px; }
   .alive-line { font-family: var(--mono); font-size: 11px; color: var(--amber); }
 </style>
 </head>
@@ -1196,6 +1249,7 @@
 
   <div class="workbench">
     <section class="board" aria-labelledby="board-title">
+      <div class="board-fill">
       <div class="board-head">
         <h2 id="board-title">Runs</h2>
         <div class="board-stats" id="board-stats"></div>
@@ -1204,10 +1258,12 @@
           <button type="button" data-filter="error">Failed</button>
           <button type="button" data-filter="running">Live</button>
           <button type="button" data-filter="done">Done</button>
+          <button type="button" data-filter="queued">Queued</button>
         </div>
         <input id="hfilter" type="text" class="board-search" placeholder="Search runs…" aria-label="Search runs" spellcheck="false">
       </div>
       <div class="history-list is-loading" id="history"></div>
+      </div>
     </section>
 
     <details class="ticket ticket-sticky" id="ticket" open>
@@ -1282,16 +1338,26 @@
         <label for="variant">Reasoning effort</label>
         <select id="variant"></select>
       </div>
+      <div class="field-block">
+        <div class="lbl-row">
+          <label for="docs">Companion docs (Agent 2)</label>
+          <button type="button" id="docs-reset-auto" class="reset-auto-btn" style="display:none;">Reset to auto</button>
+        </div>
+        <select id="docs"></select>
+      </div>
+      <div class="field-block">
+        <div class="lbl-row">
+          <label for="parallel">Max parallel jobs</label>
+          <span class="muted" id="parallel-hint"></span>
+        </div>
+        <input id="parallel" type="number" min="1" max="64" step="1" value="2" title="How many queued jobs may run at once (1-64)">
+        <label class="inline-check" title="Ignores the limit above and runs every selected transcript at the same time">
+          <input type="checkbox" id="parallel-all"> Run all selected in parallel
+        </label>
+      </div>
 
       <details class="more-opts" id="more-opts">
         <summary>More options</summary>
-        <div>
-          <div class="lbl-row">
-            <label for="docs">Companion docs (Agent 2)</label>
-            <button type="button" id="docs-reset-auto" class="reset-auto-btn" style="display:none;">Reset to auto</button>
-          </div>
-          <select id="docs"></select>
-        </div>
         <div>
           <label for="prefix">Lecture prefix</label>
           <input id="prefix" type="text" placeholder="e.g. NLP_Lecture_9" spellcheck="false">
@@ -1398,13 +1464,33 @@ function fmtCost(n) {
   return "$" + v.toFixed(3);
 }
 
-function fmtTok(t) {
+function fmtTokNum(n) {
+  n = Number(n) || 0;
+  if (n >= 10000) return Math.round(n / 1000) + "k";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+  return String(n);
+}
+
+function tokTotals(t) {
   t = t || {};
-  const in_ = t.input || 0, out = t.output || 0, reason = t.reasoning || 0;
-  const total = in_ + out + reason;
+  const input = Number(t.input) || 0;
+  const output = Number(t.output) || 0;
+  const reasoning = Number(t.reasoning) || 0;
+  return { input, output, reasoning, total: input + output + reasoning };
+}
+
+function fmtTok(t) {
+  const { total } = tokTotals(t);
   if (!total) return "0 tok";
-  const k = n => n >= 1000 ? (n/1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
-  return `${k(total)} tok`;
+  return `${fmtTokNum(total)} tok`;
+}
+
+function fmtTokParts(t) {
+  const { input, output, reasoning, total } = tokTotals(t);
+  if (!total) return "";
+  let s = `in ${fmtTokNum(input)} · out ${fmtTokNum(output)}`;
+  if (reasoning) s += ` · think ${fmtTokNum(reasoning)}`;
+  return s;
 }
 
 function emptyStats() {
@@ -1645,6 +1731,7 @@ function renderStepMeta(rid, phase, ev) {
     const t = part.tokens || {};
     div.textContent = `step done · ${part.reason || ""} · in ${t.input||0} / out ${t.output||0} / reasoning ${t.reasoning||0} tok` + (part.cost ? ` · $${Number(part.cost).toFixed(5)}` : "");
     accumulateStep(card, phase, ev);
+    if (!state.replaying) liveHistoryFromCard(rid);
   }
   host.appendChild(div);
   host.scrollTop = host.scrollHeight;
@@ -1913,6 +2000,24 @@ if (docsResetBtn) {
   });
 }
 
+$("parallel")?.addEventListener("change", async () => {
+  const inp = $("parallel");
+  const v = Math.max(1, Math.min(64, Math.round(Number(inp.value) || 1)));
+  inp.value = v;
+  const res = await api("/api/parallel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ max_parallel: v }),
+  });
+  if (res.error) return setStatus(res.error, "error");
+  state.maxParallel = res.max_parallel;
+  const hint = $("parallel-hint");
+  if (hint) hint.textContent = `queued jobs run ${res.max_parallel} at a time`;
+  setStatus(`Max parallel jobs set to ${res.max_parallel}.`, "ok");
+  updateRunEstimate();
+  refreshBatchPreview();
+});
+
 $("tall").addEventListener("click", () => {
   document.querySelectorAll("#tlist label").forEach(lbl => {
     if (lbl.style.display === "none") return;
@@ -2027,6 +2132,20 @@ async function startJobs({ resume = false, retry = false, phases = null,
     ("starting " + Math.max(transcripts.length, 1) + " run(s)…");
   const docsSel = $("docs");
   const docs = docsSel.value ? docsSel.value : undefined;
+  const runAll = $("parallel-all") && $("parallel-all").checked;
+  if (runAll && !resume && !retry && transcripts.length > state.maxParallel) {
+    const boost = Math.min(transcripts.length, 64);
+    const pr = await api("/api/parallel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_parallel: boost }),
+    });
+    if (!pr.error) {
+      state.maxParallel = pr.max_parallel;
+      const inp = $("parallel");
+      if (inp) inp.value = pr.max_parallel;
+    }
+  }
   const body = {
     abbr, prefix, lecture_num: lectureNum, docs, resume, retry,
     model: $("model").value || state.defaultModel,
@@ -2135,34 +2254,161 @@ function lectureLabel(run) {
   return m ? "Lecture " + m[1] : (run.prefix || "Run");
 }
 
+function historyStatusClass(run) {
+  return run.status === "done" ? "done" : run.status === "error" ? "error" :
+    run.status === "stopped" ? "stopped" : run.status === "queued" ? "queued" : "running";
+}
+
+function historyStatusLabel(run) {
+  if (run.status === "error") return "FAILED";
+  if (run.status === "queued") return "QUEUED";
+  if (run.status === "running") {
+    const ph = run.current_phase;
+    return ph ? `RUNNING · ${ph}` : "RUNNING";
+  }
+  return run.status || "unknown";
+}
+
+function historyPhaseBits(run) {
+  return Object.entries(run.phase_stats || {}).map(([n, p]) => {
+    const short = n === "extractor" ? "A1" : n === "enricher" ? "A2" : n === "formatter" ? "A3" : n;
+    const bits = [short];
+    if (p && p.seconds) bits.push(fmtDur(p.seconds));
+    if (p && Number(p.cost) > 0) bits.push(fmtCost(p.cost));
+    return bits.join(" ");
+  }).join(" · ");
+}
+
+function historyMetricsHtml(run) {
+  const toks = tokTotals(run.tokens);
+  const cost = Number(run.cost) || 0;
+  const secs = Number(run.seconds) || 0;
+  const elapsed = (!secs && (run.status === "running" || run.status === "queued") && run.started_at)
+    ? Math.max(0, (Date.now() / 1000) - Number(run.started_at)) : secs;
+  const pills = [];
+  if (elapsed) pills.push(`<span class="hmetric">${esc(fmtDur(elapsed))}</span>`);
+  if (cost > 0 || toks.total > 0 || run.in_flight)
+    pills.push(`<span class="hmetric emph">${esc(fmtCost(cost))}</span>`);
+  if (toks.total > 0 || run.in_flight) {
+    const parts = fmtTokParts(run.tokens);
+    const label = parts ? `${fmtTok(run.tokens)} · ${parts}` : fmtTok(run.tokens);
+    pills.push(`<span class="hmetric emph" title="input / output / reasoning">${esc(label)}</span>`);
+  }
+  if (run.current_phase && run.status === "running")
+    pills.push(`<span class="hmetric emph">${esc(run.current_phase)}</span>`);
+  if (run.last_tool && run.status === "running")
+    pills.push(`<span class="hmetric">${esc(run.last_tool)}</span>`);
+  if (!pills.length) return "";
+  return `<div class="hmetrics">${pills.join("")}</div>`;
+}
+
+function historyMetaHtml(run) {
+  const when = run.ended_at || run.started_at || run.mtime;
+  const whenStr = when ? new Date(when * 1000).toLocaleString() : "";
+  const phaseBits = historyPhaseBits(run);
+  const failBit = run.last_failed_phase ? ` · failed ${esc(run.last_failed_phase)}` : "";
+  const modelBit = run.model
+    ? ` · ${esc(run.model)}${run.variant ? "/" + esc(run.variant) : ""}` : "";
+  return `
+        <div class="hmeta">
+          ${esc(whenStr)}${modelBit}
+          ${phaseBits ? ` · ${esc(phaseBits)}` : ""}${failBit}
+        </div>
+        ${historyMetricsHtml(run)}`;
+}
+
+function applyHistoryCardMeta(el, run) {
+  const stCls = historyStatusClass(run);
+  el.classList.toggle("is-error", stCls === "error");
+  el.classList.toggle("is-running", stCls === "running" || stCls === "queued");
+  const badge = el.querySelector(".rstatus");
+  if (badge) {
+    badge.className = "rstatus " + stCls;
+    badge.textContent = historyStatusLabel(run);
+  }
+  const body = el.querySelector(".hbody");
+  if (!body) return;
+  const herr = run.error ? `<span class="herr">${esc(run.error)}</span>` : "";
+  const meta = body.querySelector(".hmeta");
+  const metrics = body.querySelector(".hmetrics");
+  const tmp = document.createElement("div");
+  tmp.innerHTML = historyMetaHtml(run);
+  const nextMeta = tmp.querySelector(".hmeta");
+  const nextMetrics = tmp.querySelector(".hmetrics");
+  if (meta && nextMeta) meta.replaceWith(nextMeta);
+  else if (nextMeta && !meta) body.insertBefore(nextMeta, body.querySelector(".herr"));
+  if (metrics && nextMetrics) metrics.replaceWith(nextMetrics);
+  else if (nextMetrics && !metrics) {
+    const after = body.querySelector(".hmeta");
+    if (after) after.insertAdjacentElement("afterend", nextMetrics);
+    else body.insertBefore(nextMetrics, body.querySelector(".herr"));
+  } else if (metrics && !nextMetrics) metrics.remove();
+  const errEl = body.querySelector(".herr");
+  if (herr && errEl) errEl.outerHTML = herr;
+  else if (herr && !errEl) body.insertAdjacentHTML("beforeend", herr);
+}
+
+function patchHistoryRun(match, fields) {
+  const list = state.historyRuns || [];
+  const run = list.find(r =>
+    (match.run_id && r.run_id === match.run_id) ||
+    (match.subject && match.prefix && r.subject === match.subject && r.prefix === match.prefix));
+  if (!run) return null;
+  const clean = {};
+  for (const [k, v] of Object.entries(fields || {})) {
+    if (v !== undefined) clean[k] = v;
+  }
+  Object.assign(run, clean);
+  const escSel = s => (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(s) : s;
+  let el = null;
+  if (run.run_id) {
+    el = document.querySelector(`.hcard[data-run-id="${escSel(run.run_id)}"]`);
+  }
+  if (!el) {
+    el = document.querySelector(
+      `.hcard[data-run-key="${escSel((run.subject || "") + "/" + (run.prefix || ""))}"]`);
+  }
+  if (el) applyHistoryCardMeta(el, run);
+  return run;
+}
+
+function liveHistoryFromCard(rid, extra) {
+  extra = extra || {};
+  const card = state.runs[rid];
+  if (!card) {
+    return patchHistoryRun({ run_id: rid }, extra);
+  }
+  const st = card.stats || {};
+  return patchHistoryRun(
+    { run_id: rid, subject: card.subject, prefix: card.prefix },
+    {
+      status: extra.status || "running",
+      in_flight: true,
+      current_phase: extra.current_phase != null ? extra.current_phase : card.phase,
+      cost: st.cost,
+      tokens: st.tokens,
+      seconds: st.seconds,
+      phase_stats: st.phases,
+      last_tool: extra.last_tool,
+      last_failed_phase: extra.last_failed_phase,
+    });
+}
+
 function buildHistoryCard(run) {
     const el = document.createElement("div");
-    const stCls = run.status === "done" ? "done" : run.status === "error" ? "error" :
-      run.status === "stopped" ? "stopped" : "running";
-    el.className = "hcard" + (stCls === "error" ? " is-error" : stCls === "running" ? " is-running" : "");
-    const when = run.ended_at || run.started_at || run.mtime;
-    const whenStr = when ? new Date(when * 1000).toLocaleString() : "";
-    const phaseBits = Object.entries(run.phase_stats || {}).map(([n, p]) => {
-      const short = n === "extractor" ? "A1" : n === "enricher" ? "A2" : "A3";
-      return `${short} ${fmtDur(p.seconds)}`;
-    }).join(" · ");
-    const statusLabel = run.status === "error" ? "FAILED" : (run.status || "unknown");
-    const failBit = run.last_failed_phase ? ` · failed ${esc(run.last_failed_phase)}` : "";
+    const stCls = historyStatusClass(run);
+    el.className = "hcard" + (stCls === "error" ? " is-error"
+      : (stCls === "running" || stCls === "queued") ? " is-running" : "");
+    el.dataset.runId = run.run_id || "";
+    el.dataset.runKey = `${run.subject || ""}/${run.prefix || ""}`;
     el.innerHTML = `
-      <div>
+      <div class="hbody">
         <div class="htop">
           <span class="htitle">${esc(lectureLabel(run))}</span>
           <span class="hprefix">${esc(run.prefix || "")}</span>
-          <span class="rstatus ${stCls}">${esc(statusLabel)}</span>
+          <span class="rstatus ${stCls}">${esc(historyStatusLabel(run))}</span>
         </div>
-        <div class="hmeta">
-          ${esc(whenStr)}
-          ${run.seconds ? ` · ${fmtDur(run.seconds)}` : ""}
-          ${run.cost ? ` · ${fmtCost(run.cost)}` : ""}
-          ${run.tokens ? ` · ${fmtTok(run.tokens)}` : ""}
-          ${run.model ? ` · ${esc(run.model)}${run.variant ? "/" + esc(run.variant) : ""}` : ""}
-          ${phaseBits ? ` · ${esc(phaseBits)}` : ""}${failBit}
-        </div>
+        ${historyMetaHtml(run)}
         ${run.error ? `<span class="herr">${esc(run.error)}</span>` : ""}
       </div>
       <div class="hactions"></div>`;
@@ -2203,13 +2449,20 @@ function buildHistoryCard(run) {
     more.setAttribute("aria-haspopup", "true");
     const pop = document.createElement("div");
     pop.className = "menu-pop";
-    const arch = document.createElement("button");
-    arch.className = "btn small ghost"; arch.type = "button"; arch.textContent = "Archive";
-    arch.addEventListener("click", () => { menu.classList.remove("open"); deletePastRun(run, true); });
-    const del = document.createElement("button");
-    del.className = "btn small danger"; del.type = "button"; del.textContent = "Delete";
-    del.addEventListener("click", () => { menu.classList.remove("open"); deletePastRun(run, false); });
-    pop.append(arch, del);
+    if (run.in_flight) {
+      const note = document.createElement("div");
+      note.className = "menu-note";
+      note.textContent = "Queue job — no artifacts yet.";
+      pop.appendChild(note);
+    } else {
+      const arch = document.createElement("button");
+      arch.className = "btn small ghost"; arch.type = "button"; arch.textContent = "Archive";
+      arch.addEventListener("click", () => { menu.classList.remove("open"); deletePastRun(run, true); });
+      const del = document.createElement("button");
+      del.className = "btn small danger"; del.type = "button"; del.textContent = "Delete";
+      del.addEventListener("click", () => { menu.classList.remove("open"); deletePastRun(run, false); });
+      pop.append(arch, del);
+    }
     more.addEventListener("click", (e) => {
       e.stopPropagation();
       document.querySelectorAll(".menu.open").forEach(m => { if (m !== menu) m.classList.remove("open"); });
@@ -2250,6 +2503,7 @@ async function toggleHistoryLogs(run, card, btn) {
       const p = ev.event.part || {};
       lines.push(`  tool ${p.tool || ""} ${p.title || ""}`);
     } else if (t === "retry_start") lines.push(`  retry ${ev.retry}/${ev.max_retries} ${ev.failed_phase}`);
+    else if (t === "session_continue") lines.push(`  continue session ${ev.continue}/${ev.max_continues} (${ev.reason || "truncated"})`);
     else if (t === "pipeline_end") lines.push(`end ${ev.status}${ev.error ? " · " + ev.error : ""}`);
   }
   const extra = (res.total || 0) > (res.events || []).length
@@ -2268,20 +2522,22 @@ function renderHistory(runs) {
   const all = state.historyRuns.slice();
   const nFail = all.filter(r => r.status === "error").length;
   const nLive = all.filter(r => r.status === "running").length;
+  const nQueued = all.filter(r => r.status === "queued").length;
   const nDone = all.filter(r => r.status === "done").length;
   if (stats) {
     stats.innerHTML =
       (nFail ? `<span class="stat-pill fail">${nFail} failed</span>` : "") +
       (nLive ? `<span class="stat-pill live">${nLive} live</span>` : "") +
+      (nQueued ? `<span class="stat-pill queued">${nQueued} queued</span>` : "") +
       `<span class="stat-pill">${nDone} done</span>` +
       `<span class="stat-pill">${all.length} total</span>`;
   }
-  const rank = s => s === "error" ? 0 : s === "running" ? 1 : s === "stopped" ? 2 : 3;
+  const rank = s => s === "error" ? 0 : (s === "running" || s === "queued") ? 1 : s === "stopped" ? 2 : 3;
   const filt = state.historyFilter || "all";
   const q = (state.historyQuery || "").toLowerCase();
   const shown = all
     .filter(r => filt === "all" ? true : (r.status || "") === filt)
-    .filter(r => !q || `${r.subject} ${r.prefix} ${r.abbr} ${r.error || ""}`.toLowerCase().includes(q))
+    .filter(r => !q || `${r.subject} ${r.prefix} ${r.abbr} ${r.error || ""} ${r.current_phase || ""} ${r.status || ""}`.toLowerCase().includes(q))
     .sort((a, b) => rank(a.status) - rank(b.status) || (Number(b.mtime || 0) - Number(a.mtime || 0)));
   const groups = new Map();
   for (const run of shown) {
@@ -2509,6 +2765,8 @@ async function refreshConfig({ refreshModels = false } = {}) {
   state.backend = cfg.backend || backend;
   state.backends = cfg.backends || [];
   if (cfg.max_parallel) state.maxParallel = cfg.max_parallel;
+  const parallelInput = $("parallel");
+  if (parallelInput) parallelInput.value = state.maxParallel;
   state.defaultModel = cfg.model || (state.backend === "commandcode"
     ? "deepseek/deepseek-v4-flash" : "opencode-go/deepseek-v4-flash");
   state.defaultVariant = cfg.variant || (state.backend === "commandcode" ? "high" : "max");
@@ -2594,6 +2852,7 @@ function handleEvent(ev) {
     const card = ensureRunCard(ev);
     setRunStatus(ev.run_id, "running", "queued");
     $("stop").disabled = false;
+    if (!state.replaying) refreshHistory();
     return;
   }
   if (ev.type === "pipeline_start") {
@@ -2610,6 +2869,7 @@ function handleEvent(ev) {
     $("stop").disabled = false;
     const live = $("live-wrap");
     if (live) live.open = true;
+    if (!state.replaying) refreshHistory();
   }
   if (!ev.run_id || !state.runs[ev.run_id]) return;
   const rid = ev.run_id;
@@ -2633,6 +2893,13 @@ function handleEvent(ev) {
       card.stats.seconds = Number(ev.stats.seconds) || card.stats.seconds;
       renderRollup(card);
     }
+    if (!state.replaying) {
+      liveHistoryFromCard(rid, {
+        status: "running",
+        current_phase: ev.phase || card.phase,
+        last_tool: ev.last_tool || "",
+      });
+    }
     return;
   }
   if (ev.type === "phase_start") {
@@ -2653,6 +2920,9 @@ function handleEvent(ev) {
     state.tools[rid][ev.phase] = {};
     if (!card.stats.phases[ev.phase]) {
       card.stats.phases[ev.phase] = { seconds: 0, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 } };
+    }
+    if (!state.replaying) {
+      liveHistoryFromCard(rid, { status: "running", current_phase: ev.phase, last_tool: "" });
     }
   }
   if (ev.type === "phase_end") {
@@ -2682,6 +2952,13 @@ function handleEvent(ev) {
       card.stats.phases[ev.phase].seconds = ev.seconds;
       renderRollup(card);
     }
+    if (!state.replaying) {
+      liveHistoryFromCard(rid, {
+        status: ev.ok ? "running" : "error",
+        current_phase: ev.ok ? "" : ev.phase,
+        last_failed_phase: ev.ok ? undefined : ev.phase,
+      });
+    }
   }
   if (ev.type === "log") {
     appendLog(rid, ev.phase, ev.line || " ");
@@ -2691,6 +2968,27 @@ function handleEvent(ev) {
   }
   if (ev.type === "gate") {
     renderGate(rid, ev.phase, ev.result);
+  }
+  if (ev.type === "session_continue") {
+    const card = state.runs[rid];
+    if (!card) return;
+    const old = card.el.querySelector(".retry-banner");
+    if (old) old.remove();
+    const banner = document.createElement("div");
+    banner.className = "retry-banner";
+    banner.innerHTML =
+      `<span class="retry-icon">&#x21bb;</span>` +
+      `<span class="retry-text">Thinking hit the output-token cap` +
+      `${ev.reason ? " (" + esc(ev.reason) + ")" : ""} &mdash; continuing the same session` +
+      ` <strong>${ev.continue}/${ev.max_continues}</strong></span>` +
+      `<span class="retry-count">continue ${ev.continue}/${ev.max_continues}</span>`;
+    const phasesGrid = card.el.querySelector(".phases");
+    if (phasesGrid && phasesGrid.nextSibling) {
+      card.el.insertBefore(banner, phasesGrid.nextSibling);
+    } else {
+      card.el.appendChild(banner);
+    }
+    setRunStatus(rid, "running", `continue ${ev.continue}/${ev.max_continues}`);
   }
   if (ev.type === "retry_start") {
     const card = state.runs[rid];

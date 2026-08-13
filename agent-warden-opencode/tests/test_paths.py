@@ -78,6 +78,11 @@ class PermissionShapeTests(unittest.TestCase):
             self.assertEqual(data["permission"]["question"], "deny")
             env = permissions.opencode_env(paths["opencode"])
             self.assertEqual(env["OPENCODE_CONFIG"], str(paths["opencode"]))
+            from app import config as app_config
+            self.assertEqual(
+                env["OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"],
+                str(app_config.OPENCODE_OUTPUT_TOKEN_MAX))
+            self.assertGreaterEqual(app_config.OPENCODE_OUTPUT_TOKEN_MAX, 384000)
 
 
 if __name__ == "__main__":

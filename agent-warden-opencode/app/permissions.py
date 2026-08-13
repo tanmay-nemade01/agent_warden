@@ -90,9 +90,15 @@ def write_job_configs(out_dir: Path) -> dict[str, Path]:
 
 
 def opencode_env(config_path: Path) -> dict[str, str]:
+    from . import config
     blob = json.dumps(opencode_config())
     return {
         "OPENCODE_CONFIG": str(config_path),
         "OPENCODE_CONFIG_CONTENT": blob,
         "OPENCODE_PERMISSION": json.dumps(opencode_permission_block()),
+        # Without this, OpenCode sends max_tokens=32000 even when the
+        # model catalog allows far more (DeepSeek V4 output=384000).
+        # OpenCode still clamps with min(catalog_output, this value).
+        "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX": str(
+            config.OPENCODE_OUTPUT_TOKEN_MAX),
     }
