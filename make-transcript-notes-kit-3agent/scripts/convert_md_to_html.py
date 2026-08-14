@@ -23,6 +23,8 @@ if sys.platform.startswith("win"):
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 
+import uuid
+
 CALLOUT_CLASSES = {
     "key-concept",
     "important-note",
@@ -32,16 +34,28 @@ CALLOUT_CLASSES = {
 }
 
 
+def sanitize_math_block(tok: str) -> str:
+    """Ensure block math \\[ ... \\] does not contain nested \\( or \\) inline delimiters."""
+    if tok.startswith(r"\[") and tok.endswith(r"\]"):
+        inner = tok[2:-2]
+        # Strip nested inline math delimiters inside display math blocks
+        inner_clean = inner.replace(r"\(", "").replace(r"\)", "")
+        return rf"\[{inner_clean}\]"
+    return tok
+
+
 def process_inline(text: str) -> str:
     """Process inline markdown formatting while preserving MathJax delimiters intact."""
     if not text:
         return ""
 
-    tokens = []
+    token_map = {}
 
     def save_token(match):
-        tokens.append(match.group(0))
-        return f"\x00TOK{len(tokens)-1}\x00"
+        tok = match.group(0)
+        token_key = f"__BN_MATH_TOKEN_{uuid.uuid4().hex}__"
+        token_map[token_key] = tok
+        return token_key
 
     # 1. Protect block math \[ ... \] and inline math \( ... \)
     pattern_math = re.compile(r"(\\\(.*?\\\)|\\\[.*?\\\])", re.DOTALL)
@@ -63,12 +77,14 @@ def process_inline(text: str) -> str:
     text = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"<em>\1</em>", text)
 
     # 6. Restore tokens
-    for i, tok in enumerate(tokens):
+    for token_key, tok in token_map.items():
         if tok.startswith("`") and tok.endswith("`"):
             tok_html = f"<code>{tok[1:-1]}</code>"
+        elif tok.startswith(r"\[") and tok.endswith(r"\]"):
+            tok_html = sanitize_math_block(tok)
         else:
             tok_html = tok
-        text = text.replace(f"\x00TOK{i}\x00", tok_html)
+        text = text.replace(token_key, tok_html)
 
     return text
 

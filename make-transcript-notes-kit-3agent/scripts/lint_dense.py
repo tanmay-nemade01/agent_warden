@@ -167,9 +167,32 @@ def check_math_delimiters(text, report):
     dollars = len(re.findall(r"(?<!\\)\$\$?", text))
     if dollars > 0:
         report.failed("math delimiters", f"Found {dollars} raw $ or $$ delimiters. Use only single-backslash \\( ... \\) and \\[ ... \\].")
+
+    # Flag nested inline delimiters in display blocks
+    display_blocks = re.findall(r"\\\[(.*?)\\\]", text, re.DOTALL)
+    nested_in_display = [b for b in display_blocks if r"\(" in b or r"\)" in b]
+    if nested_in_display:
+        sample = nested_in_display[0].strip().replace("\n", " ")
+        if len(sample) > 80:
+            sample = sample[:77] + "..."
+        report.failed("math delimiters", f"Found {len(nested_in_display)} display math block(s) '\\[ ... \\]' containing nested inline delimiters '\\(' or '\\)' (e.g. '{sample}').")
+
+    # Flag nested inline delimiters
+    nested_inline = re.findall(r"\\\([^\)]*?\\\([^\)]*?\\\)?[^\)]*?\\\)", text)
+    if nested_inline:
+        report.failed("math delimiters", f"Found {len(nested_inline)} nested inline math delimiter(s).")
+
+    # Flag placeholder leaks (e.g. \(\pi(a \mid s)\)0 or TOK0)
+    corrupted_tokens = re.findall(r"\\\(.*?\\\)\d+", text)
+    if corrupted_tokens:
+        report.failed("math delimiters", f"Found {len(corrupted_tokens)} corrupted placeholder token(s) (e.g. '{corrupted_tokens[0]}').")
+
+    empty_math = re.findall(r"\\\[\s*\\\]|\\\(\s*\\\)", text)
+    if empty_math:
+        report.failed("math delimiters", f"Found {len(empty_math)} empty math delimiter block(s) ('\\(\\)' or '\\[\\]').")
         
     if report.counts["FAIL"] == 0:
-        report.passed("math delimiters", "Single-backslash math delimiters correctly formatted, no raw dollars/double backslashes found.")
+        report.passed("math delimiters", "Single-backslash math delimiters correctly formatted, no nested delimiters, placeholders, or raw dollars found.")
 
 
 

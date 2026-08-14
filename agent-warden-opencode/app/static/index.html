@@ -1324,6 +1324,8 @@
         <select id="backend">
           <option value="opencode">OpenCode</option>
           <option value="commandcode">Command Code</option>
+          <option value="claude">Claude Code</option>
+          <option value="codex">OpenAI Codex</option>
         </select>
       </div>
       <div class="field-block">
@@ -2647,7 +2649,7 @@ const VARIANT_RANK = ["none", "minimal", "low", "medium", "high", "xhigh",
 
 function preferredVariant(variants, wanted) {
   if (!variants || !variants.length) return "";
-  wanted = wanted || state.defaultVariant || (state.backend === "commandcode" ? "high" : "max");
+  wanted = wanted || state.defaultVariant || (state.backend === "commandcode" || state.backend === "claude" ? "high" : (state.backend === "codex" ? "" : "max"));
   if (variants.includes(wanted)) return wanted;
   let best = variants[0], bestScore = -1;
   for (const v of variants) {
@@ -2767,9 +2769,20 @@ async function refreshConfig({ refreshModels = false } = {}) {
   if (cfg.max_parallel) state.maxParallel = cfg.max_parallel;
   const parallelInput = $("parallel");
   if (parallelInput) parallelInput.value = state.maxParallel;
-  state.defaultModel = cfg.model || (state.backend === "commandcode"
-    ? "deepseek/deepseek-v4-flash" : "opencode-go/deepseek-v4-flash");
-  state.defaultVariant = cfg.variant || (state.backend === "commandcode" ? "high" : "max");
+  const defaultModelFallback = {
+    commandcode: "deepseek/deepseek-v4-flash",
+    claude: "claude-3-7-sonnet",
+    codex: "gpt-5.4",
+    opencode: "opencode-go/deepseek-v4-flash",
+  }[state.backend] || "opencode-go/deepseek-v4-flash";
+  const defaultVariantFallback = {
+    commandcode: "high",
+    claude: "high",
+    codex: "",
+    opencode: "max",
+  }[state.backend] || "max";
+  state.defaultModel = cfg.model || defaultModelFallback;
+  state.defaultVariant = cfg.variant || defaultVariantFallback;
   const bsel = $("backend");
   if (bsel && (cfg.backends || []).length) {
     const prevB = bsel.value || backend;
@@ -2794,7 +2807,8 @@ async function refreshConfig({ refreshModels = false } = {}) {
   } else if (cfg.models_hint) {
     hint.textContent = cfg.models_hint;
   } else {
-    const label = state.backend === "commandcode" ? "Command Code" : "OpenCode";
+    const matchedB = (cfg.backends || []).find(b => b.id === state.backend);
+    const label = matchedB ? matchedB.label : state.backend;
     hint.textContent = `${(cfg.models || []).length} ${label} models`;
   }
   const prevModel = $("model").value;

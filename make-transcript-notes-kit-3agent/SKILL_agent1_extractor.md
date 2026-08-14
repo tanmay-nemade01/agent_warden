@@ -42,6 +42,7 @@ description: >-
 10. **Math is an audit trail, not a paraphrase** — Every reconstructed formula must keep the professor's verbal description next to it. Agent 2 will reconcile your LaTeX against the enrichment docs using that verbal description as the bridge.
 11. **Strict File Attachment Guard Rail** — Focus *only and only* on the raw `.txt` lecture transcript file attached to the prompt/context. You are strictly prohibited from reading or accessing companion documents, slides, textbooks, or other lecture files. Agent 1 operates strictly on the raw transcript. Agent 2 handles all companion documents.
 12. **Strict Script Creation Guard Rail** — You are strictly prohibited from creating or writing any script (Python, Bash, JS, etc.) inside the toolkit folder (`make-transcript-notes-kit-3agent` or its subfolders) during the process. Any intermediate or temporary scripts created in the workspace for testing or content parsing must be cleaned up and deleted before completing the task.
+13. **Formula Completeness & Manifest Ledger** — Write every formula and equation in full LaTeX. Never emit placeholder tokens (e.g. `[EQ1]`, `EQ0`, `[formula]`, or variables with trailing digits like `\pi(a|s)0`) or truncated snippets. In `<LecturePrefix>_extraction_manifest.json`, record every major extracted formula with a unique item ID (e.g. `L.T.formula.1`) and its full LaTeX expression so downstream agents can trace and verify it.
 
 ### Retention priority (ONLY for transcripts exceeding 25,000 words)
 
@@ -99,6 +100,7 @@ Every sentence in the transcript potentially belongs to one or more of these dim
 - **Table computations** — if the professor fills in a table, capture the table structure AND every cell computation
 - **Mentioned examples** — "we could apply this to X" — capture as a seed for Agent 2 to expand
 - **The professor''s narrative while solving** — "now what we do is...", "notice here that...", "this is the tricky part..." — these explain the WHY behind each step
+- **Linguistic / NLP example sentences** — in language, NLP, and grammar lectures, distinguish casual speech disfluencies (stutters like "so so" or "the the", which should be cleaned) from **intentional example sentences** where words repeat deliberately to illustrate lexical or syntactic ambiguity (e.g., "the large can can hold the water", "a water can can hold water", "the man that that boy saw"). In example sentences, preserve all words exactly as studied — never drop an intentionally repeated word.
 - **Error corrections** — if the professor makes a mistake and corrects it, capture both the mistake and the correction (these are excellent learning moments)
 - **Multiple approaches** — if the professor shows two ways to solve the same problem, capture both
 

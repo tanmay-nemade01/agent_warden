@@ -76,6 +76,16 @@ def commandcode_settings() -> dict:
     return {"permissions": commandcode_permissions()}
 
 
+def claude_allowed_tools() -> str:
+    """Allowed tools string for `claude --allowedTools`."""
+    return "Read,Edit,Write,Bash,Glob,Grep"
+
+
+def codex_sandbox_mode() -> str:
+    """Sandbox policy for OpenAI Codex exec."""
+    return "workspace-write"
+
+
 def write_job_configs(out_dir: Path) -> dict[str, Path]:
     """Write per-run config files under the lecture output tree (writable)."""
     job = Path(out_dir) / "_job"

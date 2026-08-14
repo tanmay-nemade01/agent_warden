@@ -139,7 +139,12 @@ After running the conversion script, inspect the generated section HTML files to
 1. **No unclosed tags or tag imbalances** — every opened `<div>`, `<p>`, `<ul>`, `<ol>`, `<li>`, `<table>`, `<blockquote>` tag must be properly closed.
 2. **No nested callouts** — verify that no callout `div` (e.g. `warning-box`) is nested inside another callout `div` (e.g. `key-concept`).
 3. **Heading IDs match inventory** — verify heading IDs match `_inventory.json`.
-4. **MathJax delimiters** — single backslashes only (`\( ... \)` and `\[ ... \]`).
+4. **MathJax delimiters & Formula Integrity:**
+   - Single backslashes only (`\( ... \)` and `\[ ... \]`).
+   - No display math block `\[ ... \]` contains nested inline `\(` or `\)` delimiters.
+   - No leaked placeholder tokens (e.g. `TOK0`, `\pi(a|s)0`, `__BN_MATH_TOKEN`).
+   - No delimiter syntax typos like `]\.` before words.
+   - Ensure all `keyFormula` strings in `<script id="lecture-metadata">` are clean `\[ ... \]` blocks without nested inline delimiters.
 5. **No `*[verify]*` markers** — if any remains, stop and return the section to Agent 2.
 6. **HTML code formatting** — verify HTML is pretty-printed with line breaks and proper block indentation.
 

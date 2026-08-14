@@ -164,6 +164,8 @@ class Pipeline:
         self._phase_bucket: dict | None = None
         self._phase_t0: float | None = None
         self._cc_tools: dict[str, dict] = {}
+        self._claude_tools: dict[str, dict] = {}
+        self._codex_tools: dict[str, dict] = {}
         self._timed_out = False
         self._job_files: dict[str, Path] | None = None
         self._current_phase: str | None = None
@@ -281,6 +283,10 @@ class Pipeline:
         """Run the selected backend; resume the OpenCode session if truncated."""
         if self.backend == config.BACKEND_COMMANDCODE:
             return self._run_commandcode(agent, message, title, extra_env)
+        if self.backend == config.BACKEND_CLAUDE:
+            return self._run_claude(agent, message, title, extra_env)
+        if self.backend == config.BACKEND_CODEX:
+            return self._run_codex(agent, message, title, extra_env)
         self._oc_session_id = None
         code, lines = self._run_opencode(agent, message, title, extra_env)
         n = 0
@@ -439,6 +445,54 @@ class Pipeline:
         self._popen(cmd, stdin_data=message, extra_env=env,
                     cwd=str(config.WORKSPACE))
         return self._stream_process(agent, self._parse_commandcode_line)
+
+    def _run_claude(self, agent: int, message: str, title: str,
+                    extra_env: dict | None = None) -> tuple[int, list[str]]:
+        """Headless Claude Code: `claude -p` with stream-json events."""
+        job = self._ensure_job_files()
+        job["prompt"].write_text(message, encoding="utf-8")
+        argv = config.find_claude_argv()
+        allowed_tools = permissions.claude_allowed_tools()
+        cmd = argv + [
+            "-p",
+            "--output-format", "stream-json",
+            "--model", self.model,
+            "--dangerously-skip-permissions",
+            "--max-turns", str(config.CLAUDE_MAX_TURNS),
+            "--allowedTools", allowed_tools,
+        ]
+        env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
+        if extra_env:
+            env.update(extra_env)
+        self._claude_tools = {}
+        self._log({"type": "phase_cmd", "phase": AGENTS[agent],
+                   "cmd": " ".join(cmd[:10]) + " ..."})
+        self._popen(cmd, stdin_data=message, extra_env=env,
+                    cwd=str(config.WORKSPACE))
+        return self._stream_process(agent, self._parse_claude_line)
+
+    def _run_codex(self, agent: int, message: str, title: str,
+                   extra_env: dict | None = None) -> tuple[int, list[str]]:
+        """Headless OpenAI Codex: `codex exec --json`."""
+        job = self._ensure_job_files()
+        job["prompt"].write_text(message, encoding="utf-8")
+        argv = config.find_codex_argv()
+        cmd = argv + [
+            "exec",
+            "--json",
+            "-m", self.model,
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-C", str(config.WORKSPACE),
+        ]
+        env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
+        if extra_env:
+            env.update(extra_env)
+        self._codex_tools = {}
+        self._log({"type": "phase_cmd", "phase": AGENTS[agent],
+                   "cmd": " ".join(cmd[:10]) + " ..."})
+        self._popen(cmd, stdin_data=message, extra_env=env,
+                    cwd=str(config.WORKSPACE))
+        return self._stream_process(agent, self._parse_codex_line)
 
     @staticmethod
     def _parse_agent_event(line: str) -> dict | None:
@@ -648,6 +702,215 @@ class Pipeline:
                 "cost": self._usage_cost(usage),
             }})
         return out
+
+    def _parse_claude_line(self, line: str) -> list[dict]:
+        """Map one Claude Code NDJSON line to UI agent_event dicts."""
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(raw, dict):
+            return []
+        et = raw.get("type")
+        if not et:
+            return []
+        if et == "message_start":
+            msg = raw.get("message") or {}
+            usage = msg.get("usage") or {}
+            return [{"type": "step_start", "part": {
+                "model": msg.get("model"),
+                "tokens": self._usage_tokens(usage),
+            }}]
+        if et in {"message_delta", "turn_end"}:
+            delta = raw.get("delta") or {}
+            usage = raw.get("usage") or delta.get("usage") or {}
+            return [{"type": "step_finish", "part": {
+                "reason": delta.get("stop_reason") or "end_turn",
+                "tokens": self._usage_tokens(usage),
+                "cost": self._usage_cost(raw),
+            }}]
+        if et in {"result", "cost"}:
+            usage = raw.get("usage") or {}
+            cost = float(raw.get("total_cost_usd") or raw.get("cost") or 0.0)
+            return [{"type": "step_finish", "part": {
+                "reason": "result",
+                "tokens": self._usage_tokens(usage),
+                "cost": cost,
+            }}]
+        if et == "content_block_start":
+            cb = raw.get("content_block") or {}
+            cbt = cb.get("type")
+            if cbt in {"thinking", "reasoning"}:
+                text = cb.get("thinking") or cb.get("text") or ""
+                if text:
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "reasoning", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+            elif cbt == "tool_use":
+                call_id = str(cb.get("id") or "")
+                rec = {
+                    "tool": cb.get("name") or "tool",
+                    "title": cb.get("name") or "",
+                    "input": cb.get("input"),
+                }
+                if call_id:
+                    self._claude_tools[call_id] = rec
+                part = {
+                    "tool": rec["tool"],
+                    "title": rec["title"],
+                    "callID": call_id,
+                    "state": {"status": "running"},
+                }
+                if rec["input"] is not None:
+                    part["state"]["input"] = rec["input"]
+                return [{"type": "tool_use", "part": part}]
+            elif cbt == "text":
+                text = cb.get("text") or ""
+                if text.strip():
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "text", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+        if et == "content_block_delta":
+            delta = raw.get("delta") or {}
+            dt = delta.get("type")
+            if dt in {"thinking_delta"}:
+                text = delta.get("thinking") or ""
+                if text:
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "reasoning", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+            elif dt in {"text_delta"}:
+                text = delta.get("text") or ""
+                if text.strip():
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "text", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+        # Direct tool event forms
+        if et in {"tool_use", "tool_running"}:
+            call_id = str(raw.get("id") or raw.get("toolCallId") or "")
+            part = {
+                "tool": raw.get("name") or raw.get("tool") or "tool",
+                "title": raw.get("name") or raw.get("title") or "",
+                "callID": call_id,
+                "state": {"status": "running"},
+            }
+            if raw.get("input") is not None:
+                part["state"]["input"] = raw.get("input")
+            return [{"type": "tool_use", "part": part}]
+        if et in {"tool_result", "tool_completed", "tool_errored"}:
+            call_id = str(raw.get("tool_use_id") or raw.get("id") or "")
+            out = raw.get("content") or raw.get("output") or raw.get("result") or ""
+            if not isinstance(out, str):
+                try:
+                    out = json.dumps(out, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    out = str(out)
+            trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+            part = {
+                "tool": raw.get("tool") or raw.get("name") or "tool",
+                "title": raw.get("name") or raw.get("title") or "",
+                "callID": call_id,
+                "state": {
+                    "status": "completed" if et != "tool_errored" else "error",
+                    "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                },
+            }
+            if trimmed:
+                part["state"]["output_trimmed"] = True
+            return [{"type": "tool_use", "part": part}]
+        if et == "text":
+            text = raw.get("text") or ""
+            if text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                return [{"type": "text", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }}]
+        return []
+
+    def _parse_codex_line(self, line: str) -> list[dict]:
+        """Map one OpenAI Codex JSONL line to UI agent_event dicts."""
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(raw, dict):
+            return []
+        et = raw.get("type")
+        if not et:
+            return []
+        if et in {"step_start", "turn_start"}:
+            turn = raw.get("turn") or (raw.get("part") or {}).get("turn")
+            return [{"type": "step_start", "part": {"turn": turn}}]
+        if et in {"step_finish", "turn_end"}:
+            usage = raw.get("usage") or (raw.get("part") or {}).get("tokens") or {}
+            reason = (raw.get("stop_reason") or raw.get("reason")
+                      or (raw.get("part") or {}).get("reason") or "stop")
+            return [{"type": "step_finish", "part": {
+                "reason": reason,
+                "tokens": self._usage_tokens(usage),
+                "cost": self._usage_cost(raw),
+            }}]
+        if et in {"tool_use", "tool_call"}:
+            call_id = str(raw.get("call_id") or raw.get("id") or "")
+            rec = {
+                "tool": raw.get("tool") or raw.get("name") or "tool",
+                "title": raw.get("title") or raw.get("tool") or "",
+                "input": raw.get("input") or raw.get("args"),
+            }
+            if call_id:
+                self._codex_tools[call_id] = rec
+            part = {
+                "tool": rec["tool"],
+                "title": rec["title"],
+                "callID": call_id,
+                "state": {"status": "running"},
+            }
+            if rec["input"] is not None:
+                part["state"]["input"] = rec["input"]
+            return [{"type": "tool_use", "part": part}]
+        if et in {"tool_completed", "tool_result", "tool_error"}:
+            call_id = str(raw.get("call_id") or raw.get("id") or "")
+            rec = self._codex_tools.get(call_id) or {
+                "tool": raw.get("tool") or "tool",
+                "title": raw.get("title") or "",
+            }
+            out = raw.get("output") or raw.get("result") or raw.get("error") or ""
+            if not isinstance(out, str):
+                try:
+                    out = json.dumps(out, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    out = str(out)
+            trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+            part = {
+                "tool": rec.get("tool") or "tool",
+                "title": rec.get("title") or "",
+                "callID": call_id,
+                "state": {
+                    "status": "completed" if et != "tool_error" else "error",
+                    "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                },
+            }
+            if trimmed:
+                part["state"]["output_trimmed"] = True
+            return [{"type": "tool_use", "part": part}]
+        if et in {"text", "message"}:
+            text = raw.get("text") or raw.get("content") or ""
+            if text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                return [{"type": "text", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }}]
+        return []
 
     def _accumulate_stats(self, phase: str, event: dict):
         if event.get("type") != "step_finish":

@@ -30,8 +30,12 @@ Agent 4 (enhancer) is intentionally skipped, per the toolkit's own guidance.
 ## Requirements
 
 - Python 3.10+ (stdlib only — no pip installs)
-- [opencode CLI](https://opencode.ai) and/or [Command Code CLI](https://commandcode.ai/docs/reference/cli) (`cmdc` on Windows) on PATH, authenticated
-- An authenticated provider for the backend you pick in the UI
+- One or more supported agent CLIs on PATH:
+  - [OpenCode CLI](https://opencode.ai) (`opencode`)
+  - [Command Code CLI](https://commandcode.ai/docs/reference/cli) (`cmdc` / `command-code`)
+  - [Claude Code CLI](https://code.claude.com) (`claude`)
+  - [OpenAI Codex CLI](https://platform.openai.com) (`codex`)
+- An authenticated provider or API key for the backend you pick in the UI
 
 ## Run
 
@@ -52,11 +56,12 @@ Open http://127.0.0.1:8787
 2. Optionally adjust which agents to run (1–3). If prior artifacts exist for the
    prefix, a **Resume** / **Retry failed** banner appears.
 3. Press **Run pipeline**. Each phase streams its live agent session — thinking
-   blocks, tool calls, messages, and step/token metadata. OpenCode uses
-   `opencode run --format json --thinking`. Command Code uses
-   `cmdc -p --output-format json --yolo` ([headless mode](https://commandcode.ai/docs/headless));
-   the CLI is slow to start. Gates show PASS/FAIL under each
-   phase; failing gates trigger fix sessions (max 2) before the phase reports.
+   blocks, tool calls, messages, and step/token metadata.
+   - **OpenCode** uses `opencode run --format json --thinking`.
+   - **Command Code** uses `cmdc -p --output-format json --yolo`.
+   - **Claude Code** uses `claude -p --output-format stream-json --dangerously-skip-permissions`.
+   - **OpenAI Codex** uses `codex exec --json --dangerously-bypass-approvals-and-sandbox`.
+   Gates show PASS/FAIL under each phase; failing gates trigger fix sessions (max 2) before the phase reports.
    If a stage still fails, that stage is retried automatically up to 3 times
    (each transcript file has its own budget). **Failed runs** sit at the top
    of the page after those retries are exhausted.
@@ -66,16 +71,19 @@ Open http://127.0.0.1:8787
    so logs come back. Companion docs auto-select when a matching
    `companion_docs/<ABBR>` folder exists.
 
-## Model
+## Model & Backends
 
-The job ticket has an **Agent backend** dropdown. Default is **OpenCode**
-(`opencode-go/deepseek-v4-flash`, effort `max`). Command Code defaults to
-`deepseek/deepseek-v4-flash` with effort `high` (that CLI has no `max`).
+The job ticket has an **Agent backend** dropdown supporting 4 backends:
+- **OpenCode** — Default: `opencode-go/deepseek-v4-flash` (effort: `max`)
+- **Command Code** — Default: `deepseek/deepseek-v4-flash` (effort: `high`)
+- **Claude Code** — Default: `claude-3-7-sonnet` (effort: `high`)
+- **OpenAI Codex** — Default: `gpt-5.4` (standard model selection)
 
 On each UI load the server discovers OpenCode models via
 `opencode models opencode-go --verbose`. Command Code's `--list-models` is slow,
 so the UI starts from the DeepSeek V4 Flash default until you click
-**refresh models**.
+**refresh models**. Claude Code and OpenAI Codex provide catalog fallback presets
+covering their flagship and lightweight models.
 
 ## Layout
 

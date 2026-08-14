@@ -497,6 +497,8 @@ def check_metadata(raw, parser, report):
             echecks.append("missing 'mustKnow'")
         if "keyFormula" not in entry or not entry["keyFormula"]:
             echecks.append("missing 'keyFormula'")
+        elif r"\[" in entry["keyFormula"] and (r"\(" in entry["keyFormula"] or r"\)" in entry["keyFormula"]):
+            echecks.append("keyFormula has nested '\\(' or '\\)' inside '\\[' block — use clean LaTeX without nested delimiters")
         if "commonPitfall" not in entry or not entry["commonPitfall"]:
             echecks.append("missing 'commonPitfall'")
         if "quickCheck" not in entry or not entry["quickCheck"]:
@@ -598,13 +600,36 @@ def check_math(raw, report):
         )
         failed = True
 
-    # 3. Nested/double delimiter check (e.g., \[\[ or \]\] or \(\( or \)\))
+    # 3. Nested/double delimiter check (e.g., \[\[ or \]\] or \(\( or \)\) or \( inside \[)
     nested_hits = re.findall(r"\\\[\s*\\\[|\\\]\s*\\\]|\\\(\s*\\\(|\\\)\s*\\\)", visible)
     if nested_hits:
         report.failed(
             "math delimiters",
             f"Found {len(nested_hits)} nested or double math delimiters in the body (e.g. '\\\\[\\\\[' or '\\\\]\\\\]'). "
             "Use single delimiters like '\\[' and '\\]' instead."
+        )
+        failed = True
+
+    # 3b. Nested inline \( inside display math \[ ... \]
+    display_blocks = re.findall(r"\\\[(.*?)\\\]", visible, re.DOTALL)
+    nested_in_display = [b for b in display_blocks if r"\(" in b or r"\)" in b]
+    if nested_in_display:
+        sample = nested_in_display[0].strip().replace("\n", " ")
+        if len(sample) > 80:
+            sample = sample[:77] + "..."
+        report.failed(
+            "math delimiters",
+            f"Found {len(nested_in_display)} display math block(s) '\\[ ... \\]' containing nested inline delimiters '\\(' or '\\)' (e.g., '{sample}'). "
+            "Math inside display blocks must not be wrapped with inline '\\( ... \\)' delimiters."
+        )
+        failed = True
+
+    # 3c. Nested inline math \( ( \( ... \) ) \)
+    nested_inline = re.findall(r"\\\([^\)]*?\\\([^\)]*?\\\)?[^\)]*?\\\)", visible)
+    if nested_inline:
+        report.failed(
+            "math delimiters",
+            f"Found {len(nested_inline)} nested inline math delimiter(s) in the body."
         )
         failed = True
 
@@ -625,9 +650,73 @@ def check_math(raw, report):
         )
         failed = True
 
+    # 5. Placeholder & corrupted token leak check (e.g. \(\pi(a \mid s)\)0 or TOK0 or __BN_MATH_TOKEN)
+    corrupted_tokens = re.findall(r"\\\(.*?\\\)\d+", visible)
+    if corrupted_tokens:
+        sample = corrupted_tokens[0]
+        report.failed(
+            "math completeness",
+            f"Found {len(corrupted_tokens)} corrupted math placeholder token(s) (e.g. '{sample}'). "
+            "A placeholder or equation token leaked into the final output without being replaced with its full LaTeX equation."
+        )
+        failed = True
+
+    raw_tokens = re.findall(r"\b(?:TOK|__BN_MATH_TOKEN_[A-Za-z0-9_]+)\b", visible)
+    if raw_tokens:
+        report.failed(
+            "math completeness",
+            f"Found {len(raw_tokens)} un-substituted token string(s) (e.g. '{raw_tokens[0]}') in visible HTML."
+        )
+        failed = True
+
+    empty_math = re.findall(r"\\\[\s*\\\]|\\\(\s*\\\)", visible)
+    if empty_math:
+        report.failed(
+            "math completeness",
+            f"Found {len(empty_math)} empty math delimiter block(s) ('\\(\\)' or '\\[\\]')."
+        )
+        failed = True
+
+    # 6. Syntax typos like ']. ' or '\right]. ' before capitalized words
+    syntax_typos = re.findall(r"(?:\\right\]|\])\.\s+[A-Z]", visible)
+    if syntax_typos:
+        report.warned(
+            "math syntax",
+            f"Found {len(syntax_typos)} potential delimiter syntax typo(s) like '].' instead of '\\).' or ')' (e.g. '{syntax_typos[0]}')."
+        )
+
+    # 7. Unbalanced \left and \right in math blocks
+    unbalanced_lr = 0
+    for block in math_blocks:
+        lefts = len(re.findall(r"\\left\b", block))
+        rights = len(re.findall(r"\\right\b", block))
+        if lefts != rights:
+            unbalanced_lr += 1
+    if unbalanced_lr > 0:
+        report.warned(
+            "math syntax",
+            f"Found {unbalanced_lr} math block(s) with mismatched '\\left' and '\\right' counts."
+        )
+
+    # 8. Major concept equation completeness check
+    named_eq_boxes = re.finditer(r'<div class="([^"]*(?:key-concept|important-note|example-box)[^"]*)">(.*?)</div>', visible, re.DOTALL)
+    missing_eq_boxes = []
+    for m in named_eq_boxes:
+        c_body = m.group(2)
+        if re.search(r'<strong>\s*(?:.*?(?:Optimality Equation|Expected Update Equation|Update Rule|Extraction Formula))\s*:?\s*</strong>', c_body, re.I):
+            if not re.search(r'\\\[.+?\\\]', c_body, re.DOTALL):
+                title_match = re.search(r'<strong>(.*?)</strong>', c_body)
+                title = title_match.group(1) if title_match else "Equation block"
+                missing_eq_boxes.append(title)
+    if missing_eq_boxes:
+        report.warned(
+            "equation completeness",
+            f"{len(missing_eq_boxes)} named equation callout box(es) appear to lack a display equation '\\[ ... \\]': {', '.join(missing_eq_boxes[:3])}"
+        )
+
     if not failed:
         report.passed("math delimiters",
-                      "No invalid math delimiters, split tags, nested delimiters, or raw HTML-breaking character issues found.")
+                      "No invalid math delimiters, split tags, nested delimiters, leaked tokens, or raw HTML-breaking character issues found.")
 
 
 def check_pii_and_secrets(raw, report):

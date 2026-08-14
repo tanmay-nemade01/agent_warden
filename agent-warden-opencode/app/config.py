@@ -27,6 +27,8 @@ DOCS_DIR = (WORKSPACE / "companion_docs"
 
 BACKEND_OPENCODE = "opencode"
 BACKEND_COMMANDCODE = "commandcode"
+BACKEND_CLAUDE = "claude"
+BACKEND_CODEX = "codex"
 DEFAULT_BACKEND = BACKEND_OPENCODE
 
 BACKENDS = {
@@ -46,6 +48,22 @@ BACKENDS = {
         "provider": "commandcode",
         "effort_variants": ["low", "medium", "high"],
     },
+    BACKEND_CLAUDE: {
+        "id": BACKEND_CLAUDE,
+        "label": "Claude Code",
+        "model": "claude-3-7-sonnet",
+        "variant": "high",
+        "provider": "anthropic",
+        "effort_variants": ["low", "medium", "high", "max"],
+    },
+    BACKEND_CODEX: {
+        "id": BACKEND_CODEX,
+        "label": "OpenAI Codex",
+        "model": "gpt-5.4",
+        "variant": "",
+        "provider": "openai",
+        "effort_variants": [],
+    },
 }
 
 # OpenCode defaults (kept as top-level names for existing callers).
@@ -57,6 +75,8 @@ MAX_STAGE_RETRIES = 3       # after a phase fails, retry that phase this many ti
 MAX_PARALLEL_RUNS = 2       # in-flight CLI agents; extras wait for a slot
 PHASE_TIMEOUT_SECONDS = 6 * 60 * 60  # generous ceiling; notes take a while
 COMMANDCODE_MAX_TURNS = 250
+CLAUDE_MAX_TURNS = 250
+CODEX_MAX_TURNS = 250
 # OpenCode sends min(model.limit.output, this env). Default 32k is far
 # too small for max-effort thinking (finish reason length/unknown, 0
 # output tokens). DeepSeek V4 catalog output is 384k; 128k still truncated
@@ -73,6 +93,10 @@ def normalize_backend(backend: str | None) -> str:
     raw = (backend or DEFAULT_BACKEND).strip().lower().replace("-", "").replace("_", "")
     if raw in {"commandcode", "cmdc", "cc"}:
         return BACKEND_COMMANDCODE
+    if raw in {"claude", "claudecode", "anthropic"}:
+        return BACKEND_CLAUDE
+    if raw in {"codex", "openaicodex", "openai"}:
+        return BACKEND_CODEX
     if raw in {"opencode", "oc"}:
         return BACKEND_OPENCODE
     return DEFAULT_BACKEND
@@ -154,6 +178,8 @@ def default_docs_dir(abbr: str, subject: str = "") -> Path | None:
 
 _OPENCODE_EXE: str | None = None
 _COMMANDCODE_ARGV: list[str] | None = None
+_CLAUDE_ARGV: list[str] | None = None
+_CODEX_ARGV: list[str] | None = None
 _MODELS_CACHE: dict[str, dict] = {}
 _MODELS_CACHE_AT: dict[str, float] = {}
 _MODELS_CACHE_TTL = 300.0  # seconds (OpenCode)
@@ -240,6 +266,80 @@ def find_commandcode_argv() -> list[str]:
     return _COMMANDCODE_ARGV
 
 
+def find_claude_argv() -> list[str]:
+    """Argv prefix for Claude Code, skipping PowerShell shims."""
+    global _CLAUDE_ARGV
+    if _CLAUDE_ARGV:
+        return _CLAUDE_ARGV
+    for name in ("claude.exe", "claude.cmd", "claude"):
+        found = shutil.which(name)
+        if found:
+            path = Path(found)
+            if path.suffix.lower() == ".ps1":
+                cmd = path.with_suffix(".cmd")
+                if cmd.is_file():
+                    path = cmd
+            _CLAUDE_ARGV = [str(path)]
+            return _CLAUDE_ARGV
+    # Check WinGet and AppData locations
+    pkg_roots = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Claude",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages",
+        Path(os.environ.get("APPDATA", "")) / "npm",
+    ]
+    for root in pkg_roots:
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            for f in ("claude.exe", "claude.cmd"):
+                if f in filenames:
+                    p = Path(dirpath) / f
+                    _CLAUDE_ARGV = [str(p)]
+                    return _CLAUDE_ARGV
+            dirnames[:] = [d for d in dirnames if d not in {"__pycache__", ".git"}]
+    _CLAUDE_ARGV = ["claude"]
+    return _CLAUDE_ARGV
+
+
+def find_claude() -> str:
+    return find_claude_argv()[0]
+
+
+def find_codex_argv() -> list[str]:
+    """Argv prefix for OpenAI Codex CLI."""
+    global _CODEX_ARGV
+    if _CODEX_ARGV:
+        return _CODEX_ARGV
+    for name in ("codex.exe", "codex.cmd", "codex"):
+        found = shutil.which(name)
+        if found:
+            path = Path(found)
+            if path.suffix.lower() == ".ps1":
+                cmd = path.with_suffix(".cmd")
+                if cmd.is_file():
+                    path = cmd
+            _CODEX_ARGV = [str(path)]
+            return _CODEX_ARGV
+    # Check OpenAI Codex installer paths
+    pkg_roots = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "OpenAI" / "Codex" / "bin",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages",
+    ]
+    for root in pkg_roots:
+        if not root.is_dir():
+            continue
+        for candidate in (root / "codex.exe", root / "codex.cmd"):
+            if candidate.is_file():
+                _CODEX_ARGV = [str(candidate)]
+                return _CODEX_ARGV
+    _CODEX_ARGV = ["codex"]
+    return _CODEX_ARGV
+
+
+def find_codex() -> str:
+    return find_codex_argv()[0]
+
+
 def _parse_models_verbose(stdout: str) -> list[dict]:
     """Parse `opencode models <provider> --verbose` (id line + JSON blob)."""
     import re
@@ -310,6 +410,113 @@ def preferred_variant(variants: list[str],
 
 def _fallback_models(backend: str) -> list[dict]:
     meta = backend_meta(backend)
+    backend_id = meta["id"]
+    if backend_id == BACKEND_CLAUDE:
+        return [
+            {
+                "id": "claude-3-7-sonnet",
+                "name": "Claude 3.7 Sonnet",
+                "family": "claude-sonnet",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "claude-3-5-sonnet",
+                "name": "Claude 3.5 Sonnet",
+                "family": "claude-sonnet",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "claude-3-5-haiku",
+                "name": "Claude 3.5 Haiku",
+                "family": "claude-haiku",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "claude-3-opus",
+                "name": "Claude 3 Opus",
+                "family": "claude-opus",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+        ]
+    if backend_id == BACKEND_CODEX:
+        return [
+            {
+                "id": "gpt-5.4",
+                "name": "GPT-5.4",
+                "family": "gpt-5",
+                "status": "active",
+                "reasoning": True,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "gpt-5.4-mini",
+                "name": "GPT-5.4 Mini",
+                "family": "gpt-5",
+                "status": "active",
+                "reasoning": True,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "gpt-4o",
+                "name": "GPT-4o",
+                "family": "gpt-4o",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "gpt-4o-mini",
+                "name": "GPT-4o Mini",
+                "family": "gpt-4o",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "o3-mini",
+                "name": "o3-mini",
+                "family": "o3",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high"],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "codex-local",
+                "name": "Codex Local (Ollama)",
+                "family": "local",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+        ]
     return [{
         "id": meta["model"],
         "name": "DeepSeek V4 Flash",
@@ -503,6 +710,42 @@ def _list_commandcode_models(refresh: bool, timeout: float) -> dict:
     }
 
 
+def _list_claude_models(refresh: bool, timeout: float) -> dict:
+    meta = backend_meta(BACKEND_CLAUDE)
+    models = _fallback_models(BACKEND_CLAUDE)
+    argv = find_claude_argv()
+    default_model = meta["model"]
+    variants = next((m["variants"] for m in models if m["id"] == default_model),
+                    list(meta["effort_variants"]))
+    return {
+        "ok": True,
+        "backend": BACKEND_CLAUDE,
+        "provider": meta["provider"],
+        "models": models,
+        "default_model": default_model,
+        "default_variant": preferred_variant(variants, meta["variant"]),
+        "error": None,
+    }
+
+
+def _list_codex_models(refresh: bool, timeout: float) -> dict:
+    meta = backend_meta(BACKEND_CODEX)
+    models = _fallback_models(BACKEND_CODEX)
+    argv = find_codex_argv()
+    default_model = meta["model"]
+    variants = next((m["variants"] for m in models if m["id"] == default_model),
+                    list(meta["effort_variants"]))
+    return {
+        "ok": True,
+        "backend": BACKEND_CODEX,
+        "provider": meta["provider"],
+        "models": models,
+        "default_model": default_model,
+        "default_variant": preferred_variant(variants, meta["variant"]),
+        "error": None,
+    }
+
+
 def list_models(provider: str | None = None, refresh: bool = False,
                 timeout: float | None = None, backend: str | None = None) -> dict:
     """Discover models for a backend.
@@ -524,6 +767,12 @@ def list_models(provider: str | None = None, refresh: bool = False,
     if backend == BACKEND_COMMANDCODE:
         result = _list_commandcode_models(
             refresh=refresh, timeout=timeout if timeout is not None else 180.0)
+    elif backend == BACKEND_CLAUDE:
+        result = _list_claude_models(
+            refresh=refresh, timeout=timeout if timeout is not None else 30.0)
+    elif backend == BACKEND_CODEX:
+        result = _list_codex_models(
+            refresh=refresh, timeout=timeout if timeout is not None else 30.0)
     else:
         result = _list_opencode_models(
             provider=provider, refresh=refresh,
