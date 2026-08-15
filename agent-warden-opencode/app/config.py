@@ -74,6 +74,12 @@ MAX_FIX_ROUNDS = 3          # 1 initial attempt + up to 2 gate-fix sessions per 
 MAX_STAGE_RETRIES = 3       # after a phase fails, retry that phase this many times
 MAX_PARALLEL_RUNS = 2       # in-flight CLI agents; extras wait for a slot
 PHASE_TIMEOUT_SECONDS = 6 * 60 * 60  # generous ceiling; notes take a while
+# Kill an agent phase if it produces no output for this long. Healthy runs
+# stream events continuously; the longest observed quiet stretch (a single
+# max-effort thinking block) was ~11 min. A hung provider request emits
+# nothing for 60+ min (idle TCP connection, no client-side timeout), so 15
+# minutes separates legitimate thinking from a dead session.
+PHASE_STALL_TIMEOUT_SECONDS = 15 * 60
 COMMANDCODE_MAX_TURNS = 250
 CLAUDE_MAX_TURNS = 250
 CODEX_MAX_TURNS = 250

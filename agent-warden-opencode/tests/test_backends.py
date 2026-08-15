@@ -1,10 +1,51 @@
 from __future__ import annotations
 
 import json
+import threading
+import time as _time
 from pathlib import Path
 
 from app import config, permissions
 from app.pipeline import Pipeline
+
+
+def test_stall_watchdog_kills_silent_agent(monkeypatch):
+    """A phase with no output past the stall threshold is killed and flagged,
+    so the retry machinery can resume instead of waiting out the 6h ceiling."""
+
+    class FakeProc:
+        def __init__(self):
+            self._dead = False
+
+        def poll(self):
+            return 0 if self._dead else None
+
+    monkeypatch.setattr(config, "PHASE_STALL_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(config, "PHASE_TIMEOUT_SECONDS", 3600)
+
+    p = Pipeline.__new__(Pipeline)
+    p._timed_out = False
+    p._stalled = False
+    p._current_phase = "extractor"
+    p._last_tool = "bash"
+    p._last_activity = _time.time() - 10  # silent far beyond the threshold
+    events: list[dict] = []
+    p._log = events.append
+    proc = FakeProc()
+
+    def fake_kill():
+        proc._dead = True
+
+    p._kill = fake_kill
+
+    watcher = threading.Thread(target=p._timeout_watch, args=(proc,))
+    watcher.start()
+    watcher.join(timeout=10)
+
+    assert watcher.is_alive() is False
+    assert p._stalled is True
+    assert p._timed_out is False
+    assert any(e.get("type") == "phase_stall" for e in events)
 
 
 def test_normalize_backend():

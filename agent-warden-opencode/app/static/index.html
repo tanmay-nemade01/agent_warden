@@ -354,6 +354,7 @@
     gap: 6px;
     width: 100%;
   }
+  .phase-nav[hidden] { display: none; }
   .phase-nav button {
     font-family: var(--mono);
     font-size: 11px;
@@ -376,7 +377,6 @@
   .phase-nav button.active[data-phase="extractor"] { border-color: var(--blue); color: var(--blue); }
   .phase-nav button.active[data-phase="enricher"] { border-color: var(--teal); color: var(--teal); }
   .phase-nav button.active[data-phase="formatter"] { border-color: var(--violet); color: var(--violet); }
-  .phase-nav button.active[data-phase="queued"] { border-color: var(--muted); color: var(--muted); }
   .phase-nav button .phase-nav-count {
     font-family: var(--mono);
     font-size: 10px;
@@ -2871,22 +2871,17 @@ async function toggleHistoryLogs(run, card, btn) {
 function renderPhaseNav(liveRuns) {
   const nav = $("phase-nav");
   if (!nav) return;
-  nav.hidden = !liveRuns.length;
+  nav.hidden = state.historyFilter !== "running" || !liveRuns.length;
   nav.innerHTML = "";
-  if (!liveRuns.length) return;
+  if (nav.hidden) return;
   const specs = [
     { key: "all", label: "All" },
     { key: "extractor", label: "Extractor" },
     { key: "enricher", label: "Enricher" },
     { key: "formatter", label: "Formatter" },
-    { key: "queued", label: "Queued" },
   ];
-  const isQueued = r => r.status === "queued" || !["extractor", "enricher", "formatter"].includes(r.current_phase);
   for (const s of specs) {
-    let count;
-    if (s.key === "all") count = liveRuns.length;
-    else if (s.key === "queued") count = liveRuns.filter(isQueued).length;
-    else count = liveRuns.filter(r => r.current_phase === s.key).length;
+    const count = s.key === "all" ? liveRuns.length : liveRuns.filter(r => r.current_phase === s.key).length;
     const b = document.createElement("button");
     b.type = "button";
     b.dataset.phase = s.key;
@@ -2904,14 +2899,9 @@ function renderPhaseNav(liveRuns) {
 
 function renderRunningPhaseSubgroups(runningRuns, host) {
   const sel = state.phaseFilter || "all";
-  let shown;
-  if (sel === "queued") {
-    shown = runningRuns.filter(r => r.status === "queued" || !["extractor", "enricher", "formatter"].includes(r.current_phase));
-  } else if (sel === "all") {
-    shown = runningRuns;
-  } else {
-    shown = runningRuns.filter(r => r.current_phase === sel);
-  }
+  const shown = sel === "all"
+    ? runningRuns
+    : runningRuns.filter(r => r.current_phase === sel);
   if (!shown.length) {
     const empty = document.createElement("div");
     empty.className = "hgroup-phase-empty";
@@ -2958,12 +2948,11 @@ function renderHistory(runs) {
   }
 
   if (filt === "all") {
+    $("phase-nav").hidden = true;
     const liveRuns = filtered.filter(r => r.status === "running" || r.status === "queued");
     const pastRuns = filtered.filter(r => r.status !== "running" && r.status !== "queued");
-    renderPhaseNav(liveRuns);
 
     if (liveRuns.length > 0) {
-      renderPhaseNav(liveRuns);
       const liveWrap = document.createElement("div");
       liveWrap.className = "hgroup";
       const liveTitle = document.createElement("div");

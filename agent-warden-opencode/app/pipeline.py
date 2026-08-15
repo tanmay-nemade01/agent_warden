@@ -90,6 +90,14 @@ phase's gates. Do not restart from scratch. Do not re-read the skill \
 unless a needed file is missing. When finished, print exactly: PHASE_COMPLETE
 """
 
+_RESUME_AFTER_STALL = """\
+Your previous turn stalled (no model output for a long time) and was \
+interrupted. Continue the same work from where you left off: write the \
+required output files now, then run this phase's gates. Do not restart \
+from scratch. Do not re-read the skill unless a needed file is missing. \
+When finished, print exactly: PHASE_COMPLETE
+"""
+
 
 def is_truncated_step(reason: str | None, tokens: dict | None = None) -> bool:
     """True when a step ended because the model hit max_tokens (or dropped)."""
@@ -167,6 +175,9 @@ class Pipeline:
         self._claude_tools: dict[str, dict] = {}
         self._codex_tools: dict[str, dict] = {}
         self._timed_out = False
+        self._stalled = False
+        self._last_activity = 0.0
+        self._resume_session: str | None = None
         self._job_files: dict[str, Path] | None = None
         self._current_phase: str | None = None
         self._last_tool: str = ""
@@ -238,10 +249,21 @@ class Pipeline:
     def _timeout_watch(self, proc: subprocess.Popen):
         deadline = time.time() + config.PHASE_TIMEOUT_SECONDS
         while proc.poll() is None:
-            if time.time() >= deadline:
+            now = time.time()
+            if now >= deadline:
                 self._timed_out = True
                 self._log({"type": "phase_timeout",
                            "seconds": config.PHASE_TIMEOUT_SECONDS})
+                self._kill()
+                return
+            if (self._last_activity
+                    and now - self._last_activity > config.PHASE_STALL_TIMEOUT_SECONDS):
+                self._stalled = True
+                self._log({"type": "phase_stall",
+                           "seconds": config.PHASE_STALL_TIMEOUT_SECONDS,
+                           "phase": self._current_phase,
+                           "last_activity": self._last_activity,
+                           "last_tool": self._last_tool})
                 self._kill()
                 return
             time.sleep(1.0)
@@ -271,6 +293,8 @@ class Pipeline:
         else:
             kwargs["start_new_session"] = True
         self._timed_out = False
+        self._stalled = False
+        self._last_activity = time.time()
         self.proc = subprocess.Popen(cmd, **kwargs)
         if stdin_data is not None and self.proc.stdin is not None:
             try:
@@ -291,7 +315,18 @@ class Pipeline:
         if self.backend == config.BACKEND_CODEX:
             return self._run_codex(agent, message, title, extra_env)
         self._oc_session_id = None
-        code, lines = self._run_opencode(agent, message, title, extra_env)
+        resume = self._resume_session
+        self._resume_session = None
+        if resume:
+            self._log({
+                "type": "session_resume",
+                "phase": AGENTS[agent],
+                "session": resume,
+                "reason": "stall retry",
+            })
+        code, lines = self._run_opencode(
+            agent, _RESUME_AFTER_STALL if resume else message,
+            title, extra_env, session_id=resume)
         n = 0
         while (not self.stop_flag
                and is_truncated_step(self._last_step_reason,
@@ -341,6 +376,7 @@ class Pipeline:
         try:
             assert self.proc is not None and self.proc.stdout is not None
             for raw in self.proc.stdout:
+                self._last_activity = time.time()
                 line = raw.rstrip("\r\n")
                 lines.append(line)
                 self._note_opencode_meta(line)
@@ -373,6 +409,11 @@ class Pipeline:
             raise PhaseError(
                 f"{AGENTS[agent]} exceeded "
                 f"{config.PHASE_TIMEOUT_SECONDS}s timeout")
+        if self._stalled:
+            raise PhaseError(
+                f"{AGENTS[agent]} produced no output for "
+                f"{config.PHASE_STALL_TIMEOUT_SECONDS}s — "
+                f"provider request hung")
         return code, lines
 
     def _run_opencode(self, agent: int, message: str, title: str,
@@ -1296,6 +1337,12 @@ class Pipeline:
                        else f"{type(exc).__name__}: {exc}")
                 self.stage_retries[num] += 1
                 if self.stage_retries[num] <= max_retries:
+                    # If the phase died on a silent provider hang, keep the
+                    # OpenCode session so the retry resumes work instead of
+                    # restarting the extractor from scratch.
+                    if (self._stalled and self.backend == config.BACKEND_OPENCODE
+                            and self._oc_session_id):
+                        self._resume_session = self._oc_session_id
                     self._log({
                         "type": "retry_start",
                         "retry": self.stage_retries[num],
