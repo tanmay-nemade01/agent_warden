@@ -170,9 +170,12 @@ class Pipeline:
         self._job_files: dict[str, Path] | None = None
         self._current_phase: str | None = None
         self._last_tool: str = ""
-        self._oc_session_id: str | None = None
         self._last_step_reason: str = ""
         self._last_step_tokens: dict = {}
+        self.stage_retries: dict[int, int] = {1: 0, 2: 0, 3: 0}
+
+    def get_phase_retries(self) -> dict[str, int]:
+        return {AGENTS[k]: self.stage_retries.get(k, 0) for k in (1, 2, 3)}
 
 
     # ------------------------------------------------------------------ utils
@@ -938,10 +941,12 @@ class Pipeline:
         secs = round(time.time() - (self._phase_t0 or time.time()), 1)
         bucket = self._phase_bucket or {
             "cost": 0.0, "tokens": {"input": 0, "output": 0, "reasoning": 0}}
+        agent_num = {v: k for k, v in AGENTS.items()}.get(phase)
         out = {
             "seconds": secs,
             "cost": round(float(bucket["cost"]), 6),
             "tokens": dict(bucket["tokens"]),
+            "retries": self.stage_retries.get(agent_num, 0) if agent_num else 0,
         }
         self.stats["phases"][phase] = out
         self._phase_bucket = None
@@ -957,11 +962,19 @@ class Pipeline:
             total_secs = round(sum(
                 float((p or {}).get("seconds") or 0)
                 for p in self.stats["phases"].values()), 1)
+        phases_out = {}
+        for p_name, p_val in self.stats["phases"].items():
+            p_dict = dict(p_val or {})
+            agent_num = {v: k for k, v in AGENTS.items()}.get(p_name)
+            if "retries" not in p_dict and agent_num:
+                p_dict["retries"] = self.stage_retries.get(agent_num, 0)
+            phases_out[p_name] = p_dict
         return {
             "seconds": total_secs,
             "cost": round(float(self.stats["cost"]), 6),
             "tokens": dict(self.stats["tokens"]),
-            "phases": dict(self.stats["phases"]),
+            "phases": phases_out,
+            "phase_retries": self.get_phase_retries(),
         }
 
     def _kill(self):
@@ -1208,9 +1221,10 @@ class Pipeline:
                    "transcript": self.transcript, "phases": self.phases,
                    "backend": self.backend,
                    "model": self.model, "variant": self.variant,
-                   "stage_retries": max_retries})
+                   "stage_retries": max_retries,
+                   "phase_retries": self.get_phase_retries()})
 
-        stage_retries = {num: 0 for num in (1, 2, 3)}
+        self.stage_retries = {num: 0 for num in (1, 2, 3)}
         runners = {
             1: self._phase_extractor,
             2: self._phase_enricher,
@@ -1223,14 +1237,16 @@ class Pipeline:
             try:
                 self._current_phase = name
                 self._log({"type": "phase_start", "phase": name,
-                           "attempt": stage_retries[num] + 1,
-                           "max_retries": max_retries})
+                           "attempt": self.stage_retries[num] + 1,
+                           "max_retries": max_retries,
+                           "phase_retries": self.get_phase_retries()})
                 self._begin_phase_stats(name)
                 done = runners[num]()
                 phase_stats = self._end_phase_stats(name)
                 self._log({"type": "phase_end", "phase": name,
                            "ok": done, "seconds": phase_stats["seconds"],
-                           "stats": phase_stats})
+                           "stats": phase_stats,
+                           "phase_retries": self.get_phase_retries()})
                 if self.stop_flag:
                     self._log({"type": "pipeline_end", "status": "stopped",
                                "stats": self._stats_snapshot()})
@@ -1243,22 +1259,24 @@ class Pipeline:
                     self._log({"type": "pipeline_end", "status": "stopped",
                                "stats": self._stats_snapshot()})
                     return
-                stage_retries[2] += 1
+                self.stage_retries[2] += 1
                 err = str(exc)
                 self._log({
                     "type": "bounce_to_enricher",
                     "from_phase": name,
-                    "retry": stage_retries[2],
+                    "retry": self.stage_retries[2],
                     "max_retries": max_retries,
                     "error": err,
+                    "phase_retries": self.get_phase_retries(),
                 })
-                if stage_retries[2] > max_retries:
+                if self.stage_retries[2] > max_retries:
                     self._log({
                         "type": "retry_exhausted",
-                        "retries": stage_retries[2] - 1,
+                        "retries": self.stage_retries[2] - 1,
                         "max_retries": max_retries,
                         "failed_phase": "enricher",
                         "error": err,
+                        "phase_retries": self.get_phase_retries(),
                     })
                     self._log({"type": "pipeline_end", "status": "error",
                                "error": err, "retries_exhausted": True,
@@ -1276,23 +1294,25 @@ class Pipeline:
                     return
                 err = (str(exc) if isinstance(exc, PhaseError)
                        else f"{type(exc).__name__}: {exc}")
-                stage_retries[num] += 1
-                if stage_retries[num] <= max_retries:
+                self.stage_retries[num] += 1
+                if self.stage_retries[num] <= max_retries:
                     self._log({
                         "type": "retry_start",
-                        "retry": stage_retries[num],
+                        "retry": self.stage_retries[num],
                         "max_retries": max_retries,
                         "failed_phase": name,
                         "resuming_from": name,
                         "error": err,
+                        "phase_retries": self.get_phase_retries(),
                     })
                     continue
                 self._log({
                     "type": "retry_exhausted",
-                    "retries": stage_retries[num] - 1,
+                    "retries": self.stage_retries[num] - 1,
                     "max_retries": max_retries,
                     "failed_phase": name,
                     "error": err,
+                    "phase_retries": self.get_phase_retries(),
                 })
                 self._log({"type": "pipeline_end", "status": "error",
                            "error": err, "retries_exhausted": True,

@@ -1003,6 +1003,7 @@ def summarize_run_events(events_path: Path, subject: str = "",
         "cost": 0.0,
         "tokens": _empty_token_bucket(),
         "phase_stats": {},
+        "phase_retries": {"extractor": 0, "enricher": 0, "formatter": 0},
         "last_failed_phase": None,
         "model": None,
         "variant": None,
@@ -1026,6 +1027,8 @@ def summarize_run_events(events_path: Path, subject: str = "",
                 except ValueError:
                     continue
                 et = ev.get("type")
+                if ev.get("phase_retries") and isinstance(ev["phase_retries"], dict):
+                    summary["phase_retries"].update(ev["phase_retries"])
                 if et == "pipeline_start":
                     summary["subject"] = ev.get("subject") or summary["subject"]
                     summary["prefix"] = ev.get("prefix") or summary["prefix"]
@@ -1054,6 +1057,10 @@ def summarize_run_events(events_path: Path, subject: str = "",
                             summary["current_phase"] = ph
                         elif summary.get("current_phase") == ph:
                             summary["current_phase"] = None
+                elif et in ("retry_start", "bounce_to_enricher"):
+                    failed_ph = ev.get("failed_phase") or current_phase
+                    if failed_ph:
+                        summary["phase_retries"][failed_ph] = summary["phase_retries"].get(failed_ph, 0) + 1
                 elif et == "agent_event":
                     aev = ev.get("event") or {}
                     if aev.get("type") == "step_finish":
@@ -1088,6 +1095,8 @@ def summarize_run_events(events_path: Path, subject: str = "",
                             summary["seconds"] = float(stats["seconds"] or 0)
                         if "phases" in stats:
                             summary["phase_stats"] = stats["phases"]
+                        if "phase_retries" in stats and isinstance(stats["phase_retries"], dict):
+                            summary["phase_retries"].update(stats["phase_retries"])
     except OSError:
         pass
 
@@ -1097,7 +1106,12 @@ def summarize_run_events(events_path: Path, subject: str = "",
                 "seconds": secs,
                 "cost": round(phase_cost.get(ph, 0.0), 6),
                 "tokens": phase_tok.get(ph, _empty_token_bucket()),
+                "retries": summary["phase_retries"].get(ph, 0),
             }
+    else:
+        for ph, p_stats in summary["phase_stats"].items():
+            if isinstance(p_stats, dict) and "retries" not in p_stats:
+                p_stats["retries"] = summary["phase_retries"].get(ph, 0)
     if not summary["seconds"]:
         summary["seconds"] = round(sum(phase_secs.values()), 1)
         if summary["started_at"] and summary["ended_at"]:

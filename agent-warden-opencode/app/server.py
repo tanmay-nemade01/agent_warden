@@ -184,6 +184,13 @@ def inflight_summary(run: dict) -> dict:
         phase = getattr(pipeline, "_current_phase", None)
     tokens = stats.get("tokens") or {"input": 0, "output": 0, "reasoning": 0}
     abbr = run.get("abbr") or config.abbr_for_subject(run.get("subject", ""))
+    get_retries = getattr(pipeline, "get_phase_retries", None) if pipeline else None
+    phase_retries = (
+        (get_retries() if callable(get_retries) else None)
+        or stats.get("phase_retries")
+        or run.get("phase_retries")
+        or {"extractor": 0, "enricher": 0, "formatter": 0}
+    )
     return {
         "run_id": run.get("run_id"),
         "subject": run.get("subject", ""),
@@ -201,6 +208,7 @@ def inflight_summary(run: dict) -> dict:
         "tokens": tokens,
         "seconds": float(stats.get("seconds") or 0),
         "phase_stats": stats.get("phases") or {},
+        "phase_retries": phase_retries,
         "model": getattr(pipeline, "model", None) if pipeline else run.get("model"),
         "variant": getattr(pipeline, "variant", None) if pipeline else run.get("variant"),
         "backend": getattr(pipeline, "backend", None) if pipeline else run.get("backend"),
@@ -736,6 +744,13 @@ class Handler(BaseHTTPRequestHandler):
                     _run["last_failed_phase"] = ev.get("phase")
                 elif _run.get("current_phase") == ev.get("phase"):
                     _run["current_phase"] = None
+            elif et in ("retry_start", "bounce_to_enricher"):
+                if ev.get("phase_retries"):
+                    _run["phase_retries"] = dict(ev["phase_retries"])
+                elif ev.get("failed_phase"):
+                    ph = ev.get("failed_phase")
+                    _run.setdefault("phase_retries", {"extractor": 0, "enricher": 0, "formatter": 0})
+                    _run["phase_retries"][ph] = _run["phase_retries"].get(ph, 0) + 1
             elif et == "heartbeat":
                 if ev.get("phase"):
                     _run["current_phase"] = ev.get("phase")

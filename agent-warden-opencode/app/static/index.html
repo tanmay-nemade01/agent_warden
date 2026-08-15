@@ -939,10 +939,9 @@
     border: 2px solid var(--ink);
     box-shadow: 2px 2px 0 color-mix(in srgb, var(--ink) 55%, transparent);
     padding: 12px 14px;
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 10px 16px;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     animation: rise 0.4s ease-out both;
   }
   .hcard.is-error {
@@ -954,9 +953,20 @@
   .hcard.is-running {
     border-color: var(--amber);
   }
+  .hcard .hmain {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .hcard .hbody {
+    flex: 1;
+    min-width: 240px;
+  }
   .hcard .herr {
     display: block;
-    margin-top: 4px;
+    margin-top: 6px;
     color: var(--red);
     font-size: 12.5px;
     font-weight: 600;
@@ -979,9 +989,189 @@
     border: 1.5px solid var(--line);
     background: var(--surface);
     color: var(--ink-soft);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
   }
   .hcard .hmetric.emph { color: var(--ink); border-color: var(--ink); }
-  .hcard .hactions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .hcard .hmetric.phase-pill { color: var(--amber); border-color: var(--amber); background: var(--amber-soft); font-weight: 600; }
+  .hcard .hmetric.retry-pill { color: var(--amber); border-color: var(--amber); background: var(--amber-soft); font-weight: 600; }
+  .hcard .hactions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
+
+  /* —— Collapsed Run Details Dropdown —— */
+  .hdetails {
+    width: 100%;
+    margin-top: 4px;
+    border-top: 1px dashed var(--line);
+    padding-top: 6px;
+  }
+  .hdetails-summary {
+    cursor: pointer;
+    user-select: none;
+    font-size: 11.5px;
+    font-family: var(--mono);
+    color: var(--signal);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    transition: color 0.15s ease;
+  }
+  .hdetails-summary:hover {
+    color: var(--ink);
+  }
+  .hdetails-summary::-webkit-details-marker { display: none; }
+  .hdetails-summary .chevron {
+    display: inline-block;
+    transition: transform 0.2s ease;
+    font-size: 10px;
+    line-height: 1;
+  }
+  .hdetails[open] > .hdetails-summary .chevron {
+    transform: rotate(90deg);
+  }
+  .hdetails-summary .hdetails-label {
+    font-weight: 600;
+  }
+  .hdetails-summary .hdetails-brief {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .hdetails-body {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    animation: rise 0.2s ease-out both;
+  }
+  .phase-breakdown-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+  }
+  .phase-mini-card {
+    background: var(--surface);
+    border: 1.5px solid var(--line);
+    padding: 8px 10px;
+    font-size: 11.5px;
+  }
+  .phase-mini-card.is-current {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 1px var(--amber-soft);
+  }
+  .phase-mini-card .pmc-title {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 5px;
+  }
+  .phase-mini-card .pmc-stats {
+    font-family: var(--mono);
+    color: var(--ink-soft);
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .phase-mini-card .pmc-stats .desc-sub {
+    font-size: 10px;
+    line-height: 1.3;
+  }
+  .retry-tag {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .retry-tag.has-retries {
+    background: var(--amber-soft);
+    color: var(--amber);
+    border-color: var(--amber);
+    font-weight: 700;
+  }
+  .hdetails-meta {
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    padding: 8px 10px;
+    font-size: 11.5px;
+    font-family: var(--mono);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--ink-soft);
+  }
+  .hdetails-meta .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: space-between;
+  }
+  .hdetails-meta .meta-row.error-note {
+    color: var(--red);
+    font-weight: 600;
+  }
+  .hdetails-meta code {
+    font-family: var(--mono);
+    color: var(--violet);
+  }
+
+  /* —— Phase Sub-groups for Running Runs —— */
+  .hgroup-phase {
+    margin-bottom: 14px;
+    border-left: 3px solid var(--signal);
+    padding-left: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .hgroup-phase.phase-extractor { border-left-color: var(--blue); }
+  .hgroup-phase.phase-enricher { border-left-color: var(--teal); }
+  .hgroup-phase.phase-formatter { border-left-color: var(--violet); }
+  .hgroup-phase.phase-queued { border-left-color: var(--muted); }
+  .hgroup-phase-title {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .hgroup-phase-title .phase-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 7px;
+    border: 1px solid currentColor;
+    background: var(--surface);
+  }
+  .hgroup-phase-title .retries-summary {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .hgroup-phase-empty {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    padding: 10px 14px;
+    border: 1px dashed var(--line);
+    background: var(--surface-2);
+  }
   .guess-hint {
     margin-top: 8px; font-size: 12.5px; color: var(--ink-soft);
     min-height: 1.2em;
@@ -2265,10 +2455,20 @@ function historyStatusLabel(run) {
   if (run.status === "error") return "FAILED";
   if (run.status === "queued") return "QUEUED";
   if (run.status === "running") {
-    const ph = run.current_phase;
-    return ph ? `RUNNING · ${ph}` : "RUNNING";
+    const ph = run.current_phase ? run.current_phase.toUpperCase() : "RUNNING";
+    return `RUNNING · ${ph}`;
   }
   return run.status || "unknown";
+}
+
+function getRunPhaseRetries(run) {
+  const r = run.phase_retries || {};
+  const ps = run.phase_stats || {};
+  return {
+    extractor: Number(r.extractor != null ? r.extractor : (ps.extractor && ps.extractor.retries) || 0),
+    enricher: Number(r.enricher != null ? r.enricher : (ps.enricher && ps.enricher.retries) || 0),
+    formatter: Number(r.formatter != null ? r.formatter : (ps.formatter && ps.formatter.retries) || 0),
+  };
 }
 
 function historyPhaseBits(run) {
@@ -2281,23 +2481,67 @@ function historyPhaseBits(run) {
   }).join(" · ");
 }
 
+function historyPhaseCardsHtml(run) {
+  const ps = run.phase_stats || {};
+  const retries = getRunPhaseRetries(run);
+  const phases = [
+    { key: "extractor", name: "Agent 1 · Extractor", desc: "Transcript → Dense draft" },
+    { key: "enricher", name: "Agent 2 · Enricher", desc: "Dense draft → Enriched draft" },
+    { key: "formatter", name: "Agent 3 · Formatter", desc: "Enriched draft → Final HTML" },
+  ];
+
+  return phases.map(ph => {
+    const data = ps[ph.key] || {};
+    const ret = retries[ph.key] || 0;
+    const isCur = run.status === "running" && run.current_phase === ph.key;
+    const isFailed = run.last_failed_phase === ph.key;
+    const isDone = Boolean(data.seconds > 0 || (run.status === "done" && data.cost != null));
+    const dotCls = isCur ? "dot running" : isFailed ? "dot failed" : isDone ? "dot passed" : "dot pending";
+    const toks = data.tokens || {};
+    const tokCount = tokTotals(toks);
+    const tokStr = tokCount.total > 0
+      ? `in ${fmtTok(toks.input || 0)} / out ${fmtTok(toks.output || 0)} / reas ${fmtTok(toks.reasoning || 0)}`
+      : "";
+    const durStr = data.seconds ? fmtDur(data.seconds) : (isCur ? "in progress…" : "—");
+    const costStr = Number(data.cost) > 0 ? fmtCost(data.cost) : (isCur ? "$0.00" : "—");
+
+    const retTag = ret > 0
+      ? `<span class="retry-tag has-retries" title="${ret} auto-retry attempts during this phase">↺ ${ret} ${ret === 1 ? 'retry' : 'retries'}</span>`
+      : `<span class="retry-tag" title="0 auto-retries">0 retries</span>`;
+
+    return `
+      <div class="phase-mini-card ${isCur ? 'is-current' : ''}">
+        <div class="pmc-title">
+          <span><span class="${dotCls}"></span> ${esc(ph.name)}</span>
+          ${retTag}
+        </div>
+        <div class="pmc-stats">
+          <span>⏱ ${esc(durStr)} · 💰 ${esc(costStr)}</span>
+          ${tokStr ? `<span class="muted">${esc(tokStr)}</span>` : `<span class="muted desc-sub">${esc(ph.desc)}</span>`}
+        </div>
+      </div>`;
+  }).join("");
+}
+
 function historyMetricsHtml(run) {
   const toks = tokTotals(run.tokens);
   const cost = Number(run.cost) || 0;
   const secs = Number(run.seconds) || 0;
   const elapsed = (!secs && (run.status === "running" || run.status === "queued") && run.started_at)
     ? Math.max(0, (Date.now() / 1000) - Number(run.started_at)) : secs;
+  const retries = getRunPhaseRetries(run);
+  const totalRetries = retries.extractor + retries.enricher + retries.formatter;
   const pills = [];
   if (elapsed) pills.push(`<span class="hmetric">${esc(fmtDur(elapsed))}</span>`);
   if (cost > 0 || toks.total > 0 || run.in_flight)
     pills.push(`<span class="hmetric emph">${esc(fmtCost(cost))}</span>`);
   if (toks.total > 0 || run.in_flight) {
-    const parts = fmtTokParts(run.tokens);
-    const label = parts ? `${fmtTok(run.tokens)} · ${parts}` : fmtTok(run.tokens);
-    pills.push(`<span class="hmetric emph" title="input / output / reasoning">${esc(label)}</span>`);
+    pills.push(`<span class="hmetric emph" title="Total tokens">${esc(fmtTok(run.tokens))}</span>`);
   }
   if (run.current_phase && run.status === "running")
-    pills.push(`<span class="hmetric emph">${esc(run.current_phase)}</span>`);
+    pills.push(`<span class="hmetric phase-pill">${esc(run.current_phase)}</span>`);
+  if (totalRetries > 0)
+    pills.push(`<span class="hmetric retry-pill" title="Total auto-retries across phases">↺ ${totalRetries} ${totalRetries === 1 ? 'retry' : 'retries'}</span>`);
   if (run.last_tool && run.status === "running")
     pills.push(`<span class="hmetric">${esc(run.last_tool)}</span>`);
   if (!pills.length) return "";
@@ -2308,15 +2552,47 @@ function historyMetaHtml(run) {
   const when = run.ended_at || run.started_at || run.mtime;
   const whenStr = when ? new Date(when * 1000).toLocaleString() : "";
   const phaseBits = historyPhaseBits(run);
-  const failBit = run.last_failed_phase ? ` · failed ${esc(run.last_failed_phase)}` : "";
-  const modelBit = run.model
-    ? ` · ${esc(run.model)}${run.variant ? "/" + esc(run.variant) : ""}` : "";
+  const failBit = run.last_failed_phase ? `failed at ${esc(run.last_failed_phase)}` : "";
+  const modelBit = [
+    run.backend ? esc(run.backend) : "",
+    run.model ? `${esc(run.model)}${run.variant ? " (" + esc(run.variant) + ")" : ""}` : "",
+  ].filter(Boolean).join(" · ");
+  const phaseCards = historyPhaseCardsHtml(run);
+  const retries = getRunPhaseRetries(run);
+  const totalRetries = retries.extractor + retries.enricher + retries.formatter;
+
+  const briefSummary = [
+    phaseBits || "",
+    totalRetries > 0 ? `↺ ${totalRetries} ${totalRetries === 1 ? 'retry' : 'retries'}` : "",
+  ].filter(Boolean).join(" · ");
+
   return `
-        <div class="hmeta">
-          ${esc(whenStr)}${modelBit}
-          ${phaseBits ? ` · ${esc(phaseBits)}` : ""}${failBit}
+    <div class="hsummary-bar">
+      ${historyMetricsHtml(run)}
+    </div>
+    <details class="hdetails">
+      <summary class="hdetails-summary">
+        <span class="chevron">&#x25B8;</span>
+        <span class="hdetails-label">Details &amp; Phase Breakdown</span>
+        ${briefSummary ? `<span class="hdetails-brief">· ${esc(briefSummary)}</span>` : ""}
+      </summary>
+      <div class="hdetails-body">
+        <div class="phase-breakdown-grid">
+          ${phaseCards}
         </div>
-        ${historyMetricsHtml(run)}`;
+        <div class="hdetails-meta">
+          <div class="meta-row">
+            ${modelBit ? `<span><strong>Model:</strong> ${modelBit}</span>` : ""}
+            ${whenStr ? `<span><strong>Time:</strong> ${esc(whenStr)}</span>` : ""}
+          </div>
+          <div class="meta-row">
+            <span><strong>Tokens:</strong> total ${esc(fmtTok(run.tokens))} · ${esc(fmtTokParts(run.tokens) || "0 in / 0 out")}</span>
+            ${run.last_tool ? `<span><strong>Last tool:</strong> <code>${esc(run.last_tool)}</code></span>` : ""}
+          </div>
+          ${failBit ? `<div class="meta-row error-note"><span><strong>Issue:</strong> ${esc(failBit)}${run.error ? ` — ${esc(run.error)}` : ""}</span></div>` : ""}
+        </div>
+      </div>
+    </details>`;
 }
 
 function applyHistoryCardMeta(el, run) {
@@ -2330,24 +2606,36 @@ function applyHistoryCardMeta(el, run) {
   }
   const body = el.querySelector(".hbody");
   if (!body) return;
+
+  const prevDetails = body.querySelector(".hdetails");
+  const wasOpen = prevDetails ? prevDetails.open : false;
+
   const herr = run.error ? `<span class="herr">${esc(run.error)}</span>` : "";
-  const meta = body.querySelector(".hmeta");
-  const metrics = body.querySelector(".hmetrics");
+  const existingErr = body.querySelector(".herr");
+
   const tmp = document.createElement("div");
   tmp.innerHTML = historyMetaHtml(run);
-  const nextMeta = tmp.querySelector(".hmeta");
-  const nextMetrics = tmp.querySelector(".hmetrics");
-  if (meta && nextMeta) meta.replaceWith(nextMeta);
-  else if (nextMeta && !meta) body.insertBefore(nextMeta, body.querySelector(".herr"));
-  if (metrics && nextMetrics) metrics.replaceWith(nextMetrics);
-  else if (nextMetrics && !metrics) {
-    const after = body.querySelector(".hmeta");
-    if (after) after.insertAdjacentElement("afterend", nextMetrics);
-    else body.insertBefore(nextMetrics, body.querySelector(".herr"));
-  } else if (metrics && !nextMetrics) metrics.remove();
-  const errEl = body.querySelector(".herr");
-  if (herr && errEl) errEl.outerHTML = herr;
-  else if (herr && !errEl) body.insertAdjacentHTML("beforeend", herr);
+
+  const newSummary = tmp.querySelector(".hsummary-bar");
+  const newDetails = tmp.querySelector(".hdetails");
+  if (wasOpen && newDetails) newDetails.open = true;
+
+  const oldSummary = body.querySelector(".hsummary-bar");
+  const oldDetails = body.querySelector(".hdetails");
+
+  if (oldSummary && newSummary) oldSummary.replaceWith(newSummary);
+  else if (newSummary && !oldSummary) {
+    const after = body.querySelector(".htop");
+    if (after) after.insertAdjacentElement("afterend", newSummary);
+    else body.appendChild(newSummary);
+  }
+
+  if (oldDetails && newDetails) oldDetails.replaceWith(newDetails);
+  else if (newDetails && !oldDetails) body.appendChild(newDetails);
+
+  if (herr && existingErr) existingErr.outerHTML = herr;
+  else if (herr && !existingErr) body.insertAdjacentHTML("beforeend", herr);
+  else if (!herr && existingErr) existingErr.remove();
 }
 
 function patchHistoryRun(match, fields) {
@@ -2391,6 +2679,7 @@ function liveHistoryFromCard(rid, extra) {
       tokens: st.tokens,
       seconds: st.seconds,
       phase_stats: st.phases,
+      phase_retries: extra.phase_retries || card.phase_retries || { extractor: 0, enricher: 0, formatter: 0 },
       last_tool: extra.last_tool,
       last_failed_phase: extra.last_failed_phase,
     });
@@ -2404,16 +2693,18 @@ function buildHistoryCard(run) {
     el.dataset.runId = run.run_id || "";
     el.dataset.runKey = `${run.subject || ""}/${run.prefix || ""}`;
     el.innerHTML = `
-      <div class="hbody">
-        <div class="htop">
-          <span class="htitle">${esc(lectureLabel(run))}</span>
-          <span class="hprefix">${esc(run.prefix || "")}</span>
-          <span class="rstatus ${stCls}">${esc(historyStatusLabel(run))}</span>
+      <div class="hmain">
+        <div class="hbody">
+          <div class="htop">
+            <span class="htitle">${esc(lectureLabel(run))}</span>
+            <span class="hprefix">${esc(run.prefix || "")}</span>
+            <span class="rstatus ${stCls}">${esc(historyStatusLabel(run))}</span>
+          </div>
+          ${historyMetaHtml(run)}
+          ${run.error ? `<span class="herr">${esc(run.error)}</span>` : ""}
         </div>
-        ${historyMetaHtml(run)}
-        ${run.error ? `<span class="herr">${esc(run.error)}</span>` : ""}
-      </div>
-      <div class="hactions"></div>`;
+        <div class="hactions"></div>
+      </div>`;
     const actions = el.querySelector(".hactions");
     if (run.html_url) {
       const a = document.createElement("a");
@@ -2505,6 +2796,7 @@ async function toggleHistoryLogs(run, card, btn) {
       const p = ev.event.part || {};
       lines.push(`  tool ${p.tool || ""} ${p.title || ""}`);
     } else if (t === "retry_start") lines.push(`  retry ${ev.retry}/${ev.max_retries} ${ev.failed_phase}`);
+    else if (t === "bounce_to_enricher") lines.push(`  bounce to enricher retry ${ev.retry}/${ev.max_retries}`);
     else if (t === "session_continue") lines.push(`  continue session ${ev.continue}/${ev.max_continues} (${ev.reason || "truncated"})`);
     else if (t === "pipeline_end") lines.push(`end ${ev.status}${ev.error ? " · " + ev.error : ""}`);
   }
@@ -2512,6 +2804,61 @@ async function toggleHistoryLogs(run, card, btn) {
     ? `\n… ${res.total - res.events.length} older events omitted`
     : "";
   panel.textContent = (lines.join("\n") || "No events in this run.") + extra;
+}
+
+function renderRunningPhaseSubgroups(runningRuns, host) {
+  const phaseSpecs = [
+    { key: "extractor", name: "Agent 1 · Extractor", cls: "phase-extractor" },
+    { key: "enricher", name: "Agent 2 · Enricher", cls: "phase-enricher" },
+    { key: "formatter", name: "Agent 3 · Formatter", cls: "phase-formatter" },
+  ];
+
+  for (const ps of phaseSpecs) {
+    const matching = runningRuns.filter(r => r.current_phase === ps.key);
+    const totalRetries = matching.reduce((sum, r) => {
+      const ret = getRunPhaseRetries(r);
+      return sum + (ret[ps.key] || 0);
+    }, 0);
+
+    const wrap = document.createElement("div");
+    wrap.className = `hgroup-phase ${ps.cls}`;
+    const header = document.createElement("div");
+    header.className = "hgroup-phase-title";
+    const retStr = totalRetries > 0 ? ` · ↺ ${totalRetries} auto-${totalRetries === 1 ? 'retry' : 'retries'}` : "";
+    header.innerHTML = `
+      <span class="dot ${matching.length ? 'running' : 'pending'}"></span>
+      <span>${esc(ps.name)}</span>
+      <span class="phase-badge">${matching.length} active</span>
+      <span class="retries-summary">${retStr}</span>
+    `;
+    wrap.appendChild(header);
+
+    if (matching.length > 0) {
+      for (const run of matching) wrap.appendChild(buildHistoryCard(run));
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "hgroup-phase-empty";
+      empty.textContent = `No active runs in ${ps.key}.`;
+      wrap.appendChild(empty);
+    }
+    host.appendChild(wrap);
+  }
+
+  const queued = runningRuns.filter(r => r.status === "queued" || !["extractor", "enricher", "formatter"].includes(r.current_phase));
+  if (queued.length > 0) {
+    const wrap = document.createElement("div");
+    wrap.className = "hgroup-phase phase-queued";
+    const header = document.createElement("div");
+    header.className = "hgroup-phase-title";
+    header.innerHTML = `
+      <span class="dot pending"></span>
+      <span>Queued / Starting</span>
+      <span class="phase-badge">${queued.length} queued</span>
+    `;
+    wrap.appendChild(header);
+    for (const run of queued) wrap.appendChild(buildHistoryCard(run));
+    host.appendChild(wrap);
+  }
 }
 
 function renderHistory(runs) {
@@ -2537,12 +2884,54 @@ function renderHistory(runs) {
   const rank = s => s === "error" ? 0 : (s === "running" || s === "queued") ? 1 : s === "stopped" ? 2 : 3;
   const filt = state.historyFilter || "all";
   const q = (state.historyQuery || "").toLowerCase();
-  const shown = all
+  const filtered = all
     .filter(r => filt === "all" ? true : (r.status || "") === filt)
     .filter(r => !q || `${r.subject} ${r.prefix} ${r.abbr} ${r.error || ""} ${r.current_phase || ""} ${r.status || ""}`.toLowerCase().includes(q))
     .sort((a, b) => rank(a.status) - rank(b.status) || (Number(b.mtime || 0) - Number(a.mtime || 0)));
+
+  if (filt === "running") {
+    renderRunningPhaseSubgroups(filtered, host);
+    updateRunEstimate();
+    return;
+  }
+
+  if (filt === "all") {
+    const liveRuns = filtered.filter(r => r.status === "running" || r.status === "queued");
+    const pastRuns = filtered.filter(r => r.status !== "running" && r.status !== "queued");
+
+    if (liveRuns.length > 0) {
+      const liveWrap = document.createElement("div");
+      liveWrap.className = "hgroup";
+      const liveTitle = document.createElement("div");
+      liveTitle.className = "hgroup-title";
+      liveTitle.innerHTML = `Live Runs <span>${liveRuns.length}</span>`;
+      liveWrap.appendChild(liveTitle);
+      renderRunningPhaseSubgroups(liveRuns, liveWrap);
+      host.appendChild(liveWrap);
+    }
+
+    const groups = new Map();
+    for (const run of pastRuns) {
+      const key = run.subject || "Other";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(run);
+    }
+    for (const [subj, list] of groups) {
+      const wrap = document.createElement("div");
+      wrap.className = "hgroup";
+      const title = document.createElement("div");
+      title.className = "hgroup-title";
+      title.innerHTML = `${esc(subj)} <span>${list.length}</span>`;
+      wrap.appendChild(title);
+      for (const run of list) wrap.appendChild(buildHistoryCard(run));
+      host.appendChild(wrap);
+    }
+    updateRunEstimate();
+    return;
+  }
+
   const groups = new Map();
-  for (const run of shown) {
+  for (const run of filtered) {
     const key = run.subject || "Other";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(run);
@@ -2936,7 +3325,12 @@ function handleEvent(ev) {
       card.stats.phases[ev.phase] = { seconds: 0, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 } };
     }
     if (!state.replaying) {
-      liveHistoryFromCard(rid, { status: "running", current_phase: ev.phase, last_tool: "" });
+      liveHistoryFromCard(rid, {
+        status: "running",
+        current_phase: ev.phase,
+        phase_retries: ev.phase_retries || (card ? card.phase_retries : null),
+        last_tool: ""
+      });
     }
   }
   if (ev.type === "phase_end") {
@@ -2948,6 +3342,7 @@ function handleEvent(ev) {
         seconds: ev.stats.seconds || ev.seconds || 0,
         cost: ev.stats.cost || 0,
         tokens: ev.stats.tokens || { input: 0, output: 0, reasoning: 0 },
+        retries: ev.stats.retries || (card.phase_retries && card.phase_retries[ev.phase]) || 0,
       };
       card.stats.cost = 0;
       card.stats.tokens = { input: 0, output: 0, reasoning: 0 };
@@ -2971,6 +3366,7 @@ function handleEvent(ev) {
         status: ev.ok ? "running" : "error",
         current_phase: ev.ok ? "" : ev.phase,
         last_failed_phase: ev.ok ? undefined : ev.phase,
+        phase_retries: ev.phase_retries || (card ? card.phase_retries : null),
       });
     }
   }
@@ -2982,6 +3378,21 @@ function handleEvent(ev) {
   }
   if (ev.type === "gate") {
     renderGate(rid, ev.phase, ev.result);
+  }
+  if (ev.type === "bounce_to_enricher") {
+    const card = state.runs[rid];
+    if (card) {
+      card.phase_retries = card.phase_retries || { extractor: 0, enricher: 0, formatter: 0 };
+      card.phase_retries.enricher = (card.phase_retries.enricher || 0) + 1;
+      if (ev.phase_retries) card.phase_retries = Object.assign({}, ev.phase_retries);
+      if (!state.replaying) {
+        liveHistoryFromCard(rid, {
+          status: "running",
+          current_phase: "enricher",
+          phase_retries: card.phase_retries,
+        });
+      }
+    }
   }
   if (ev.type === "session_continue") {
     const card = state.runs[rid];
@@ -3007,6 +3418,16 @@ function handleEvent(ev) {
   if (ev.type === "retry_start") {
     const card = state.runs[rid];
     if (!card) return;
+    card.phase_retries = card.phase_retries || { extractor: 0, enricher: 0, formatter: 0 };
+    if (ev.failed_phase) card.phase_retries[ev.failed_phase] = (card.phase_retries[ev.failed_phase] || 0) + 1;
+    if (ev.phase_retries) card.phase_retries = Object.assign({}, ev.phase_retries);
+    if (!state.replaying) {
+      liveHistoryFromCard(rid, {
+        status: "running",
+        current_phase: ev.failed_phase || ev.resuming_from,
+        phase_retries: card.phase_retries,
+      });
+    }
     // Remove any previous retry banner
     const old = card.el.querySelector(".retry-banner");
     if (old) old.remove();
@@ -3071,7 +3492,17 @@ function handleEvent(ev) {
       if (ev.stats.phases) {
         for (const [k, v] of Object.entries(ev.stats.phases)) card.stats.phases[k] = v;
       }
+      if (ev.stats.phase_retries) {
+        card.phase_retries = Object.assign({}, ev.stats.phase_retries);
+      }
       renderRollup(card);
+    }
+    if (!state.replaying) {
+      liveHistoryFromCard(rid, {
+        status: cls,
+        current_phase: cls === "done" ? "" : (card.phase || ""),
+        phase_retries: card.phase_retries,
+      });
     }
     if (ev.status === "error" && !state.replaying) {
       const retryMsg = ev.retries_exhausted ? " (all retries exhausted — use manual retry)" : "";

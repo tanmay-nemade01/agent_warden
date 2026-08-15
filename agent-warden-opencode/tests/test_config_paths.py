@@ -75,6 +75,35 @@ class SummarizeRunTests(unittest.TestCase):
             self.assertEqual(summary["current_phase"], "enricher")
             self.assertEqual(summary["tokens"]["input"], 100)
             self.assertGreater(summary["cost"], 0)
+            self.assertIn("phase_retries", summary)
+
+    def test_phase_retries_parsed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            out = root / "CV" / "CV_Lecture_2"
+            out.mkdir(parents=True)
+            path = out / "CV_Lecture_2_run_events.jsonl"
+            events = [
+                {"type": "pipeline_start", "subject": "CV",
+                 "prefix": "CV_Lecture_2", "phases": [1, 2, 3], "time": 1},
+                {"type": "phase_start", "phase": "extractor"},
+                {"type": "retry_start", "failed_phase": "extractor", "retry": 1, "max_retries": 2},
+                {"type": "phase_end", "phase": "extractor", "ok": True, "seconds": 15},
+                {"type": "phase_start", "phase": "enricher"},
+                {"type": "bounce_to_enricher", "from_phase": "enricher", "retry": 1, "max_retries": 2},
+                {"type": "pipeline_end", "status": "done", "stats": {
+                    "phase_retries": {"extractor": 1, "enricher": 1, "formatter": 0}
+                }},
+            ]
+            path.write_text("\n".join(json.dumps(e) for e in events) + "\n",
+                            encoding="utf-8")
+            with patch.object(config, "OUTPUTS_DIR", root):
+                summary = config.summarize_run_events(
+                    path, "CV", "CV_Lecture_2")
+            self.assertEqual(summary["phase_retries"]["extractor"], 1)
+            self.assertEqual(summary["phase_retries"]["enricher"], 1)
+            self.assertEqual(summary["phase_retries"]["formatter"], 0)
+            self.assertEqual(summary["phase_stats"]["extractor"]["retries"], 1)
 
 
 if __name__ == "__main__":

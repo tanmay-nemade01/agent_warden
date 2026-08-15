@@ -108,6 +108,45 @@ class InFlightSummaryTests(unittest.TestCase):
         self.assertEqual(payload["last_tool"], "read")
         self.assertEqual(payload["model"], "test-model")
         self.assertTrue(payload["in_flight"])
+        self.assertIn("phase_retries", payload)
+
+    def test_pipeline_phase_retries(self):
+        class FakePipeWithRetries:
+            model = "test-model"
+            variant = "max"
+            backend = "opencode"
+            _current_phase = "enricher"
+            _last_tool = "read"
+
+            def get_phase_retries(self):
+                return {"extractor": 1, "enricher": 2, "formatter": 0}
+
+            def _stats_snapshot(self):
+                return {
+                    "seconds": 25.0,
+                    "cost": 0.05,
+                    "tokens": {"input": 500, "output": 100, "reasoning": 0},
+                    "phases": {
+                        "extractor": {"seconds": 10, "cost": 0.02, "retries": 1},
+                        "enricher": {"seconds": 15, "cost": 0.03, "retries": 2},
+                    },
+                    "phase_retries": {"extractor": 1, "enricher": 2, "formatter": 0},
+                }
+
+        payload = inflight_summary({
+            "run_id": "run_retry_1",
+            "subject": "NLP",
+            "prefix": "NLP_Lecture_1",
+            "abbr": "NLP",
+            "phases": [1, 2, 3],
+            "t0": 100.0,
+            "active": True,
+            "current_phase": "enricher",
+            "pipeline": FakePipeWithRetries(),
+        })
+        self.assertEqual(payload["phase_retries"]["extractor"], 1)
+        self.assertEqual(payload["phase_retries"]["enricher"], 2)
+        self.assertEqual(payload["phase_retries"]["formatter"], 0)
 
     def test_queued_without_pipeline(self):
         payload = inflight_summary({
@@ -123,6 +162,7 @@ class InFlightSummaryTests(unittest.TestCase):
         self.assertEqual(payload["status"], "queued")
         self.assertIsNone(payload["current_phase"])
         self.assertEqual(payload["cost"], 0.0)
+        self.assertIn("phase_retries", payload)
 
 
 if __name__ == "__main__":
