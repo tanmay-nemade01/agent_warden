@@ -4,6 +4,7 @@ import json
 import threading
 import time as _time
 from pathlib import Path
+from unittest.mock import patch
 
 from app import config, permissions
 from app.pipeline import Pipeline
@@ -398,5 +399,31 @@ def test_resolve_model_choice_multi_provider():
         "xiaomi/mimo-v2.5", "medium", catalog=catalog, backend="opencode")
     assert model == "xiaomi/mimo-v2.5"
     assert variant == ""
+
+
+def test_parse_agent_event_error_capture(tmp_path):
+    transcript = tmp_path / "dummy_transcript.txt"
+    transcript.write_text("Hello", encoding="utf-8")
+    with patch("app.config.TRANSCRIPTS_DIR", tmp_path), \
+         patch("app.config.OUTPUTS_DIR", tmp_path):
+        pipeline = Pipeline("dummy_subject", "DS", "dummy_prefix", "1", str(transcript))
+    
+    error_line = json.dumps({
+        "type": "error",
+        "timestamp": 123456789,
+        "error": {
+            "name": "APIError",
+            "data": {
+                "message": "Invalid API Key",
+                "statusCode": 401,
+            }
+        }
+    })
+    ev = pipeline._parse_agent_event(error_line)
+    assert ev is not None
+    assert ev["type"] == "text"
+    assert "Invalid API Key" in ev["part"]["text"]
+    assert pipeline._last_agent_error == "OpenCode error: Invalid API Key"
+
 
 

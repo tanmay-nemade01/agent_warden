@@ -180,6 +180,7 @@ class Pipeline:
         self._last_tool: str = ""
         self._last_step_reason: str = ""
         self._last_step_tokens: dict = {}
+        self._last_agent_error: str | None = None
         self.stage_retries: dict[int, int] = {1: 0, 2: 0, 3: 0}
 
     def get_phase_retries(self) -> dict[str, int]:
@@ -305,6 +306,7 @@ class Pipeline:
     def _run_agent(self, agent: int, message: str, title: str,
                    extra_env: dict | None = None) -> tuple[int, list[str]]:
         """Run the selected backend; resume the OpenCode session if truncated."""
+        self._last_agent_error = None
         if self.backend == config.BACKEND_COMMANDCODE:
             return self._run_commandcode(agent, message, title, extra_env)
         if self.backend == config.BACKEND_CLAUDE:
@@ -533,8 +535,7 @@ class Pipeline:
                     cwd=str(config.WORKSPACE))
         return self._stream_process(agent, self._parse_codex_line)
 
-    @staticmethod
-    def _parse_agent_event(line: str) -> dict | None:
+    def _parse_agent_event(self, line: str) -> dict | None:
         """Parse one `opencode run --format json` line into a UI-safe event.
 
         Keeps the event shape (`type`, `part`) but truncates the payload
@@ -547,6 +548,18 @@ class Pipeline:
         if not isinstance(raw, dict) or not raw.get("type"):
             return None
         ev_type = raw.get("type")
+        if ev_type == "error":
+            err_data = raw.get("error") or {}
+            err_msg = ""
+            if isinstance(err_data, dict):
+                err_msg = (err_data.get("data", {}).get("message")
+                           or err_data.get("message")
+                           or json.dumps(err_data))
+            else:
+                err_msg = str(err_data)
+            self._last_agent_error = f"OpenCode error: {err_msg}"
+            return {"type": "text", "part": {"text": f"Error: {err_msg}", "trimmed": False},
+                    "ts": raw.get("timestamp")}
         if ev_type not in {"step_start", "step_finish", "reasoning",
                            "tool_use", "text"}:
             return None
@@ -627,6 +640,16 @@ class Pipeline:
         et = ev.get("type")
         if not et:
             return []
+        if et in {"run_error", "error"}:
+            err_data = ev.get("error") or raw.get("error") or {}
+            err_msg = ""
+            if isinstance(err_data, dict):
+                err_msg = err_data.get("message") or json.dumps(err_data)
+            else:
+                err_msg = str(err_data)
+            self._last_agent_error = f"Command Code error: {err_msg}"
+            return [{"type": "text", "part": {
+                "text": f"Error: {err_msg}", "trimmed": False}}]
         if et == "turn_start":
             return [{"type": "step_start", "part": {
                 "turn": ev.get("turnNumber")}}]
@@ -715,6 +738,7 @@ class Pipeline:
         text = raw.get("finalText") or ""
         if raw.get("subtype") == "error":
             err = raw.get("error") or "command-code error"
+            self._last_agent_error = f"Command Code error: {err}"
             text = text or str(err)
         if not isinstance(text, str) or not text.strip():
             usage = raw.get("usage") or {}
@@ -1054,16 +1078,17 @@ class Pipeline:
 
     def _fail_if_stale(self, agent: int, code: int, before: dict[str, float | None],
                        paths: list[Path]) -> None:
+        err_suffix = f" ({self._last_agent_error})" if self._last_agent_error else ""
         missing = [p.name for p in paths if not p.is_file()]
         if missing:
             raise PhaseError(
-                f"{AGENTS[agent]} exited {code} without producing "
+                f"{AGENTS[agent]} exited {code}{err_suffix} without producing "
                 + ", ".join(missing))
         after = self._mtime_map(paths)
         unchanged = all(before.get(str(p)) == after.get(str(p)) for p in paths)
         if unchanged and code != 0:
             raise PhaseError(
-                f"{AGENTS[agent]} exited {code} without updating artifacts "
+                f"{AGENTS[agent]} exited {code}{err_suffix} without updating artifacts "
                 f"(refusing to gate stale files)")
 
     # ---------------------------------------------------------------- phases
