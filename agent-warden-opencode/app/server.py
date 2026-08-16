@@ -421,7 +421,8 @@ class Handler(BaseHTTPRequestHandler):
             refresh = (query.get("refresh") or ["0"])[0] in (
                 "1", "true", "yes")
             backend = (query.get("backend") or [None])[0]
-            return self._json(config.list_models(refresh=refresh, backend=backend))
+            provider = (query.get("provider") or [None])[0]
+            return self._json(config.list_models(provider=provider, refresh=refresh, backend=backend))
         if path == "/api/docs":
             return self._json(self._docs_folders())
         if path == "/api/parallel":

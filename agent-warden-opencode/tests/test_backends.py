@@ -292,3 +292,111 @@ Docs:  https://commandcode.ai/docs/reference/cli/models
     assert gpt["reasoning"] is False
     assert gpt["variants"] == []
 
+
+def test_parse_opencode_models_multi_provider():
+    sample_verbose = """deepseek/deepseek-v4-flash
+{
+  "id": "deepseek-v4-flash",
+  "providerID": "deepseek",
+  "name": "DeepSeek V4 Flash",
+  "family": "deepseek-flash",
+  "status": "active",
+  "capabilities": {
+    "reasoning": true
+  },
+  "variants": {
+    "low": {"reasoningEffort": "low"},
+    "high": {"reasoningEffort": "high"},
+    "max": {"reasoningEffort": "max"}
+  }
+}
+xiaomi/mimo-v2.5
+{
+  "id": "mimo-v2.5",
+  "providerID": "xiaomi",
+  "name": "MiMo-V2.5",
+  "family": "mimo",
+  "status": "active",
+  "capabilities": {
+    "reasoning": true
+  },
+  "variants": {
+    "low": {"reasoningEffort": "low"},
+    "medium": {"reasoningEffort": "medium"},
+    "high": {"reasoningEffort": "high"}
+  }
+}
+opencode-go/glm-5.2
+{
+  "id": "glm-5.2",
+  "providerID": "opencode-go",
+  "name": "GLM 5.2",
+  "status": "active",
+  "capabilities": {
+    "reasoning": false
+  }
+}
+"""
+    models = config._parse_models_verbose(sample_verbose)
+    assert len(models) == 3
+
+    ds = next(m for m in models if m["id"] == "deepseek/deepseek-v4-flash")
+    assert ds["name"] == "DeepSeek V4 Flash"
+    assert ds["provider"] == "deepseek"
+    assert ds["reasoning"] is True
+    assert ds["variants"] == ["low", "high", "max"]
+
+    xm = next(m for m in models if m["id"] == "xiaomi/mimo-v2.5")
+    assert xm["name"] == "MiMo-V2.5"
+    assert xm["provider"] == "xiaomi"
+    assert xm["reasoning"] is True
+    assert xm["variants"] == []
+
+    glm = next(m for m in models if m["id"] == "opencode-go/glm-5.2")
+    assert glm["name"] == "GLM 5.2"
+    assert glm["provider"] == "opencode-go"
+    assert glm["reasoning"] is False
+
+
+def test_resolve_model_choice_multi_provider():
+    catalog = {
+        "ok": True,
+        "backend": config.BACKEND_OPENCODE,
+        "provider": "",
+        "default_model": "opencode-go/deepseek-v4-flash",
+        "default_variant": "max",
+        "models": [
+            {
+                "id": "deepseek/deepseek-v4-flash",
+                "name": "DeepSeek V4 Flash",
+                "provider": "deepseek",
+                "variants": ["low", "high", "max"],
+            },
+            {
+                "id": "xiaomi/mimo-v2.5",
+                "name": "MiMo-V2.5",
+                "provider": "xiaomi",
+                "variants": [],
+            },
+            {
+                "id": "opencode-go/deepseek-v4-flash",
+                "name": "DeepSeek V4 Flash",
+                "provider": "opencode-go",
+                "variants": ["low", "high", "max"],
+            },
+        ],
+    }
+
+    # Resolve DeepSeek provider
+    model, variant = config.resolve_model_choice(
+        "deepseek/deepseek-v4-flash", "high", catalog=catalog, backend="opencode")
+    assert model == "deepseek/deepseek-v4-flash"
+    assert variant == "high"
+
+    # Resolve Xiaomi provider (no reasoning effort variant)
+    model, variant = config.resolve_model_choice(
+        "xiaomi/mimo-v2.5", "medium", catalog=catalog, backend="opencode")
+    assert model == "xiaomi/mimo-v2.5"
+    assert variant == ""
+
+

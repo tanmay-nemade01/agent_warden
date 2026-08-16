@@ -347,7 +347,7 @@ def find_codex() -> str:
 
 
 def _parse_models_verbose(stdout: str) -> list[dict]:
-    """Parse `opencode models <provider> --verbose` (id line + JSON blob)."""
+    """Parse `opencode models [provider] --verbose` (id line + JSON blob)."""
     import re
     models: list[dict] = []
     lines = (stdout or "").splitlines()
@@ -363,9 +363,17 @@ def _parse_models_verbose(stdout: str) -> list[dict]:
         while i < len(lines) and not lines[i].strip():
             i += 1
         if i >= len(lines) or not lines[i].strip().startswith("{"):
+            provider_id = model_id.split("/", 1)[0] if "/" in model_id else ""
             models.append({
-                "id": model_id, "name": model_id.split("/", 1)[-1],
-                "variants": [], "reasoning": False, "status": "unknown",
+                "id": model_id,
+                "name": model_id.split("/", 1)[-1],
+                "provider": provider_id,
+                "family": "",
+                "variants": [],
+                "reasoning": False,
+                "status": "unknown",
+                "cost": {},
+                "limit": {},
             })
             continue
         blob: list[str] = []
@@ -380,19 +388,32 @@ def _parse_models_verbose(stdout: str) -> list[dict]:
         try:
             meta = json.loads("\n".join(blob))
         except ValueError:
+            provider_id = model_id.split("/", 1)[0] if "/" in model_id else ""
             models.append({
-                "id": model_id, "name": model_id.split("/", 1)[-1],
-                "variants": [], "reasoning": False, "status": "unknown",
+                "id": model_id,
+                "name": model_id.split("/", 1)[-1],
+                "provider": provider_id,
+                "family": "",
+                "variants": [],
+                "reasoning": False,
+                "status": "unknown",
+                "cost": {},
+                "limit": {},
             })
             continue
         variants = meta.get("variants") or {}
         variant_ids = list(variants.keys()) if isinstance(variants, dict) else []
         caps = meta.get("capabilities") or {}
+        provider_id = meta.get("providerID") or (model_id.split("/", 1)[0] if "/" in model_id else "")
+        family = meta.get("family") or ""
+        # Xiaomi / MiMo models do not support reasoning effort variants
+        if provider_id.startswith("xiaomi") or family.lower() == "mimo" or "mimo" in model_id.lower():
+            variant_ids = []
         models.append({
-            "id": f"{meta.get('providerID') or model_id.split('/', 1)[0]}/"
-                  f"{meta.get('id') or model_id.split('/', 1)[-1]}",
+            "id": f"{provider_id}/{meta.get('id') or model_id.split('/', 1)[-1]}" if provider_id else model_id,
             "name": meta.get("name") or model_id.split("/", 1)[-1],
-            "family": meta.get("family") or "",
+            "provider": provider_id,
+            "family": family,
             "status": meta.get("status") or "active",
             "reasoning": bool(caps.get("reasoning")),
             "variants": variant_ids,
@@ -739,19 +760,23 @@ def _parse_commandcode_models(stdout: str, effort_variants: list[str]) -> list[d
     return models
 
 
-def _list_opencode_models(provider: str, refresh: bool, timeout: float) -> dict:
+def _list_opencode_models(provider: str | None = None, refresh: bool = False,
+                          timeout: float = 45.0) -> dict:
     import subprocess
 
     fallback = _fallback_models(BACKEND_OPENCODE)
     exe = find_opencode()
     if not exe:
         return {
-            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider,
+            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider or "",
             "models": fallback, "default_model": MODEL,
             "default_variant": VARIANT,
             "error": "opencode executable not found",
         }
-    cmd = [exe, "models", provider, "--verbose"]
+    cmd = [exe, "models"]
+    if provider:
+        cmd.append(str(provider))
+    cmd.append("--verbose")
     if refresh:
         cmd.append("--refresh")
     try:
@@ -761,28 +786,31 @@ def _list_opencode_models(provider: str, refresh: bool, timeout: float) -> dict:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {
-            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider,
+            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider or "",
             "models": fallback, "default_model": MODEL,
             "default_variant": VARIANT,
             "error": f"{type(exc).__name__}: {exc}",
         }
     models = _parse_models_verbose(proc.stdout or "")
     models = [m for m in models
-              if (m.get("status") or "active") in {"active", "unknown"}]
+              if (m.get("status") or "active") in {"active", "unknown", "beta"}]
     if not models:
         err = (proc.stderr or "").strip() or f"exit {proc.returncode}"
         return {
-            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider,
+            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider or "",
             "models": fallback, "default_model": MODEL,
             "default_variant": VARIANT,
             "error": f"no models parsed ({err})",
         }
     ids = {m["id"] for m in models}
-    default_model = MODEL if MODEL in ids else models[0]["id"]
+    default_model = MODEL if MODEL in ids else (
+        "deepseek/deepseek-v4-flash" if "deepseek/deepseek-v4-flash" in ids
+        else models[0]["id"]
+    )
     variants = next((m["variants"] for m in models if m["id"] == default_model),
                     [])
     return {
-        "ok": True, "backend": BACKEND_OPENCODE, "provider": provider,
+        "ok": True, "backend": BACKEND_OPENCODE, "provider": provider or "",
         "models": models, "default_model": default_model,
         "default_variant": preferred_variant(variants, VARIANT),
         "error": None,
@@ -895,8 +923,9 @@ def list_models(provider: str | None = None, refresh: bool = False,
     """
     backend = normalize_backend(backend)
     meta = backend_meta(backend)
-    provider = provider or meta["provider"]
-    cache_key = f"{backend}:{provider}"
+    # OpenCode lists models across all providers if provider is None.
+    effective_provider = provider if backend == BACKEND_OPENCODE else (provider or meta.get("provider", ""))
+    cache_key = f"{backend}:{effective_provider or 'all'}"
     ttl = (_COMMANDCODE_MODELS_TTL if backend == BACKEND_COMMANDCODE
            else _MODELS_CACHE_TTL)
     cached = _cache_get(cache_key, ttl, refresh)
@@ -932,6 +961,10 @@ def resolve_model_choice(model: str | None = None,
         prefixed = f"{catalog.get('provider') or meta['provider']}/{chosen}"
         if prefixed in models:
             chosen = prefixed
+        else:
+            suffix_match = next((m_id for m_id in models if m_id.endswith(f"/{chosen}")), None)
+            if suffix_match:
+                chosen = suffix_match
     row = models.get(chosen)
     if row is None:
         # Unknown to catalog — still allow explicit provider/model strings.

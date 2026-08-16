@@ -3110,19 +3110,68 @@ function preferredVariant(variants, wanted) {
   return best;
 }
 
+function formatProviderGroupLabel(key) {
+  if (!key) return "Default";
+  const map = {
+    "deepseek": "DeepSeek",
+    "xiaomi": "Xiaomi",
+    "xiaomi-token-plan-sgp": "Xiaomi (Token Plan SGP)",
+    "opencode-go": "OpenCode Go",
+    "opencode": "OpenCode Free",
+    "openai": "OpenAI",
+    "anthropic": "Anthropic",
+    "google": "Google",
+    "moonshotai": "Moonshot AI",
+    "minimax": "MiniMax",
+    "zai": "ZAI",
+    "open source": "Open Source",
+  };
+  const lower = key.toLowerCase();
+  if (map[lower]) return map[lower];
+  return key.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
 function fillModelSelect(prefer) {
   const sel = $("model");
   const prev = prefer || sel.value || state.defaultModel;
   const models = state.models || [];
-  sel.innerHTML = models.map(m => {
-    const label = m.name ? `${m.name}` : m.id;
-    const effort = (m.variants || []).length
-      ? ` · ${(m.variants || []).join("/")}` : "";
-    const titleAttr = m.description ? ` title="${esc(m.description)}"` : "";
-    return `<option value="${esc(m.id)}"${titleAttr}>${esc(label)}${esc(effort)}</option>`;
-  }).join("");
   if (!models.length) {
     sel.innerHTML = `<option value="${esc(state.defaultModel)}">${esc(state.defaultModel)}</option>`;
+  } else {
+    // Group models by provider (OpenCode) or family/provider (others)
+    const groups = {};
+    for (const m of models) {
+      let g = "";
+      if (state.backend === "opencode") {
+        g = m.provider || (m.id.includes("/") ? m.id.split("/")[0] : "") || "Default";
+      } else {
+        g = m.family || (m.id.includes("/") ? m.id.split("/")[0] : "") || "Default";
+      }
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(m);
+    }
+    const groupKeys = Object.keys(groups);
+    if (groupKeys.length > 1) {
+      sel.innerHTML = groupKeys.map(grpKey => {
+        const groupLabel = formatProviderGroupLabel(grpKey);
+        const opts = groups[grpKey].map(m => {
+          const label = m.name ? `${m.name}` : m.id;
+          const effort = (m.variants || []).length
+            ? ` · ${(m.variants || []).join("/")}` : "";
+          const titleAttr = m.description ? ` title="${esc(m.description)}"` : "";
+          return `<option value="${esc(m.id)}"${titleAttr}>${esc(label)}${esc(effort)}</option>`;
+        }).join("");
+        return `<optgroup label="${esc(groupLabel)}">${opts}</optgroup>`;
+      }).join("");
+    } else {
+      sel.innerHTML = models.map(m => {
+        const label = m.name ? `${m.name}` : m.id;
+        const effort = (m.variants || []).length
+          ? ` · ${(m.variants || []).join("/")}` : "";
+        const titleAttr = m.description ? ` title="${esc(m.description)}"` : "";
+        return `<option value="${esc(m.id)}"${titleAttr}>${esc(label)}${esc(effort)}</option>`;
+      }).join("");
+    }
   }
   if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
   else if (state.defaultModel && [...sel.options].some(o => o.value === state.defaultModel))
