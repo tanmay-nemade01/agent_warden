@@ -552,12 +552,95 @@ def _cache_put(key: str, result: dict) -> dict:
     return result
 
 
+_SPECIAL_MODEL_WORDS = {
+    "gpt": "GPT",
+    "glm": "GLM",
+    "mimo": "MiMo",
+    "minimax": "MiniMax",
+    "deepseek": "DeepSeek",
+    "qwen": "Qwen",
+    "gemini": "Gemini",
+    "claude": "Claude",
+    "kimi": "Kimi",
+    "grok": "Grok",
+    "fugu": "Fugu",
+    "muse": "Muse",
+    "inkling": "Inkling",
+    "laguna": "Laguna",
+    "nemotron": "Nemotron",
+    "step": "Step",
+    "hy3": "HY3",
+    "moe": "MoE",
+    "xai": "xAI",
+    "zai": "ZAI",
+    "openai": "OpenAI",
+    "meta": "Meta",
+    "google": "Google",
+    "sakana": "Sakana",
+    "moonshotai": "Moonshot",
+    "xiaomi": "Xiaomi",
+    "tencent": "Tencent",
+    "nvidia": "Nvidia",
+    "stepfun": "StepFun",
+    "llama": "Llama",
+    "mistral": "Mistral",
+    "cohere": "Cohere",
+    "command": "Command",
+}
+
+
+def _format_commandcode_model_name(token: str) -> str:
+    """Format a Command Code model ID/token into a human-readable display name."""
+    import re
+    if "/" in token:
+        _, model_part = token.split("/", 1)
+    else:
+        model_part = token
+
+    # Handle claude version patterns like 'claude-sonnet-4-6' -> 'claude-sonnet-4.6'
+    model_clean = re.sub(r"(\d+)-(\d+)", r"\1.\2", model_part)
+
+    # Handle qwen pattern like 'qwen3.7-max' -> 'qwen-3.7-max'
+    model_clean = re.sub(r"^(qwen)(\d+(?:\.\d+)?)", r"\1-\2", model_clean, flags=re.IGNORECASE)
+
+    # Handle gpt-5.4 -> GPT-5.4
+    if re.match(r"^gpt-\d", model_clean, re.IGNORECASE):
+        parts = model_clean.split("-", 2)
+        if len(parts) == 2:
+            return f"GPT-{parts[1]}"
+        elif len(parts) >= 3:
+            sub = " ".join(p.capitalize() for p in parts[2].split("-"))
+            return f"GPT-{parts[1]} {sub}"
+
+    parts = re.split(r"[-_]", model_clean)
+    formatted = []
+    for p in parts:
+        lower = p.lower()
+        if lower in _SPECIAL_MODEL_WORDS:
+            formatted.append(_SPECIAL_MODEL_WORDS[lower])
+        elif re.match(r"^[vkm]\d+(\.\d+)?$", lower):
+            formatted.append(p[0].upper() + p[1:])
+        elif lower.isdigit() or re.match(r"^\d+(\.\d+)+$", lower):
+            formatted.append(p)
+        elif re.match(r"^\d+[a-z]$", lower):
+            formatted.append(p.upper())
+        elif re.match(r"^\d+[a-z]\d+[a-z]$", lower):
+            formatted.append(p)
+        else:
+            formatted.append(p.capitalize())
+
+    return " ".join(formatted)
+
+
 def _parse_commandcode_models(stdout: str, effort_variants: list[str]) -> list[dict]:
-    """Parse `cmdc --list-models` (copy-pasteable ids, possibly with ANSI)."""
+    """Parse `cmdc --list-models` (copy-pasteable ids, descriptions, section headers)."""
     import re
     ansi = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
     id_re = re.compile(r"^[\w.-]+(?:/[\w.@+-]+)?$")
-    skip = {"model", "models", "id", "name", "provider", "available", "copy"}
+    skip = {
+        "model", "models", "id", "name", "provider", "available", "copy",
+        "pass", "cmdc", "docs", "docs:", "updated", "open", "source",
+    }
     models: list[dict] = []
     seen: set[str] = set()
     text = stdout or ""
@@ -569,40 +652,89 @@ def _parse_commandcode_models(stdout: str, effort_variants: list[str]) -> list[d
             for row in rows:
                 if isinstance(row, str):
                     mid = row.strip()
-                    name = mid.split("/", 1)[-1]
+                    name = _format_commandcode_model_name(mid)
+                    desc = ""
+                    family = ""
                 elif isinstance(row, dict):
                     mid = str(row.get("id") or row.get("model") or "").strip()
-                    name = str(row.get("name") or mid.split("/", 1)[-1])
+                    name = str(row.get("name") or _format_commandcode_model_name(mid))
+                    desc = str(row.get("description") or "")
+                    family = str(row.get("family") or "")
                 else:
                     continue
                 if not mid or mid in seen:
                     continue
                 seen.add(mid)
+                desc_lower = desc.lower()
+                mid_lower = mid.lower()
+                has_reasoning = (
+                    "reasoning" in desc_lower
+                    or "thinking" in desc_lower
+                    or "hybrid-attention" in desc_lower
+                    or "thought" in desc_lower
+                    or "deepseek" in mid_lower
+                    or "claude" in mid_lower
+                    or "o1" in mid_lower
+                    or "o3" in mid_lower
+                    or "fable" in mid_lower
+                )
                 models.append({
-                    "id": mid, "name": name, "family": "",
-                    "status": "active", "reasoning": True,
-                    "variants": list(effort_variants), "cost": {}, "limit": {},
+                    "id": mid, "name": name, "family": family,
+                    "description": desc,
+                    "status": "active", "reasoning": has_reasoning,
+                    "variants": list(effort_variants) if has_reasoning else [], "cost": {}, "limit": {},
                 })
             if models:
                 return models
         except ValueError:
             pass
+
+    current_family = ""
     for line in text.splitlines():
         line = ansi.sub("", line).strip()
         if not line or set(line) <= {"-", "=", " "}:
             continue
-        token = line.split()[0].strip("`,;|")
+        # Track section headers (e.g. "Open Source", "Anthropic", "OpenAI", etc.)
+        if not any(c in line for c in ["/", ":", "--"]) and len(line.split()) <= 3 and not re.search(r"\d", line):
+            if line.lower() not in skip and not line.lower().startswith("available"):
+                current_family = line
+                continue
+
+        tokens = line.split()
+        token = tokens[0].strip("`,;|")
         if token.lower() in skip or not id_re.match(token):
+            continue
+        # Skip header/footer lines that aren't model IDs (must have a slash or contain digits/hyphens)
+        if "/" not in token and not re.search(r"[-0-9]", token):
             continue
         if token in seen:
             continue
         seen.add(token)
-        rest = line[len(line.split()[0]):].strip(" -|")
-        name = rest or token.split("/", 1)[-1]
+        rest = line[len(tokens[0]):].strip(" -|")
+        name = _format_commandcode_model_name(token)
+        desc_lower = rest.lower()
+        token_lower = token.lower()
+        has_reasoning = (
+            "reasoning" in desc_lower
+            or "thinking" in desc_lower
+            or "hybrid-attention" in desc_lower
+            or "thought" in desc_lower
+            or "deepseek" in token_lower
+            or "claude" in token_lower
+            or "o1" in token_lower
+            or "o3" in token_lower
+            or "fable" in token_lower
+        )
         models.append({
-            "id": token, "name": name, "family": "",
-            "status": "active", "reasoning": True,
-            "variants": list(effort_variants), "cost": {}, "limit": {},
+            "id": token,
+            "name": name,
+            "family": current_family,
+            "description": rest,
+            "status": "active",
+            "reasoning": has_reasoning,
+            "variants": list(effort_variants) if has_reasoning else [],
+            "cost": {},
+            "limit": {},
         })
     return models
 

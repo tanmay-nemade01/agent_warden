@@ -222,3 +222,73 @@ def test_parse_codex_events():
     assert events[0]["type"] == "step_finish"
     assert events[0]["part"]["tokens"]["input"] == 200
     assert events[0]["part"]["tokens"]["output"] == 100
+
+
+def test_format_commandcode_model_name():
+    assert config._format_commandcode_model_name("deepseek/deepseek-v4-flash") == "DeepSeek V4 Flash"
+    assert config._format_commandcode_model_name("moonshotai/kimi-k3") == "Kimi K3"
+    assert config._format_commandcode_model_name("claude-sonnet-5") == "Claude Sonnet 5"
+    assert config._format_commandcode_model_name("claude-sonnet-4-6") == "Claude Sonnet 4.6"
+    assert config._format_commandcode_model_name("gpt-5.4") == "GPT-5.4"
+    assert config._format_commandcode_model_name("gpt-5.4-mini") == "GPT-5.4 Mini"
+    assert config._format_commandcode_model_name("google/gemini-3.7-flash") == "Gemini 3.7 Flash"
+    assert config._format_commandcode_model_name("qwen/qwen3.7-max") == "Qwen 3.7 Max"
+    assert config._format_commandcode_model_name("zai-org/glm-5.2") == "GLM 5.2"
+
+
+def test_parse_commandcode_models():
+    sample_output = """Available models  ·  55 models
+
+Open Source
+
+deepseek/deepseek-v4-pro             hybrid-attention long-context reasoning
+deepseek/deepseek-v4-flash           fast hybrid-attention reasoning (default)
+moonshotai/kimi-k3                   long-horizon coding & knowledge work with 1M context
+
+Anthropic
+
+claude-sonnet-5                      best combo of speed & intelligence (recommended)
+claude-opus-5                        most intelligent Opus for agents and coding
+
+OpenAI
+
+gpt-5.4                              frontier model for general complex work
+gpt-5.4-mini                         fast, cost-effective model for everyday tasks
+
+Pass the full id, or just the short name after the last "/":
+cmdc --model moonshotai/kimi-k2.5
+Docs:  https://commandcode.ai/docs/reference/cli/models
+"""
+    variants = ["low", "medium", "high"]
+    models = config._parse_commandcode_models(sample_output, variants)
+    assert len(models) == 7
+
+    # Check DeepSeek V4 Flash (reasoning model)
+    ds = next(m for m in models if m["id"] == "deepseek/deepseek-v4-flash")
+    assert ds["name"] == "DeepSeek V4 Flash"
+    assert ds["family"] == "Open Source"
+    assert "fast hybrid-attention" in ds["description"]
+    assert ds["reasoning"] is True
+    assert ds["variants"] == variants
+
+    # Check Kimi K3 (non-reasoning model)
+    kimi = next(m for m in models if m["id"] == "moonshotai/kimi-k3")
+    assert kimi["name"] == "Kimi K3"
+    assert kimi["reasoning"] is False
+    assert kimi["variants"] == []
+
+    # Check Claude Sonnet 5
+    cs = next(m for m in models if m["id"] == "claude-sonnet-5")
+    assert cs["name"] == "Claude Sonnet 5"
+    assert cs["family"] == "Anthropic"
+    assert "best combo of speed" in cs["description"]
+    assert cs["reasoning"] is True
+
+    # Check GPT-5.4
+    gpt = next(m for m in models if m["id"] == "gpt-5.4")
+    assert gpt["name"] == "GPT-5.4"
+    assert gpt["family"] == "OpenAI"
+    assert "frontier model" in gpt["description"]
+    assert gpt["reasoning"] is False
+    assert gpt["variants"] == []
+

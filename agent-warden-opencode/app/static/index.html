@@ -3118,7 +3118,8 @@ function fillModelSelect(prefer) {
     const label = m.name ? `${m.name}` : m.id;
     const effort = (m.variants || []).length
       ? ` · ${(m.variants || []).join("/")}` : "";
-    return `<option value="${esc(m.id)}">${esc(label)}${esc(effort)}</option>`;
+    const titleAttr = m.description ? ` title="${esc(m.description)}"` : "";
+    return `<option value="${esc(m.id)}"${titleAttr}>${esc(label)}${esc(effort)}</option>`;
   }).join("");
   if (!models.length) {
     sel.innerHTML = `<option value="${esc(state.defaultModel)}">${esc(state.defaultModel)}</option>`;

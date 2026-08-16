@@ -151,11 +151,8 @@ class Pipeline:
         self.docs_dir = docs_dir
         self.run_id = run_id or f"{abbr}:{prefix}"
         self.backend = config.normalize_backend(backend)
-        bmeta = config.backend_meta(self.backend)
-        self.model = (model or bmeta["model"]).strip() or bmeta["model"]
-        # Empty string means "no --variant" / "--effort" (model has no knobs).
-        self.variant = (bmeta["variant"] if variant is None
-                        else str(variant).strip())
+        self.model, self.variant = config.resolve_model_choice(
+            model, variant, backend=self.backend)
         out = confine(config.OUTPUTS_DIR, subject, prefix)
         if out is None:
             raise PhaseError("invalid subject or prefix")
@@ -464,7 +461,6 @@ class Pipeline:
         job = self._ensure_job_files()
         job["prompt"].write_text(message, encoding="utf-8")
         argv = config.find_commandcode_argv()
-        cc_perms = permissions.commandcode_permissions()
         cmd = argv + [
             "-p",
             "--output-format", "json",
@@ -476,7 +472,6 @@ class Pipeline:
             "--no-skills",
             "--max-turns", str(config.COMMANDCODE_MAX_TURNS),
             "-n", title,
-            "--config", "permissions=" + json.dumps(cc_perms),
         ]
         if self.variant:
             cmd.extend(["--effort", self.variant])
