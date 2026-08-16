@@ -52,6 +52,7 @@ ADAPTATION_BY_AGENT = {
 - Transcript (read-only): {transcript}
 - Write only: dense draft and extraction manifest under the output directory.
 - Do not read companion docs. Do not touch topic_mappings/.
+- **Pre-check optimization**: Before extracting from scratch, check if the required output files ({dense} and {manifest}) already exist. Run the dense lint gate (`python make-transcript-notes-kit-3agent/scripts/lint_dense.py {dense} --lecture-num {lecture_num} --phase dense`) and the manifest verifier (`python make-transcript-notes-kit-3agent/scripts/verify_manifest.py {manifest} {dense} --phase dense`). If both pass with no FAIL markers, do not regenerate or overwrite them; verify them and print `PHASE_COMPLETE` immediately.
 """,
     2: _COMMON_ADAPT + """
 ## Agent 2 scope
@@ -60,6 +61,7 @@ ADAPTATION_BY_AGENT = {
 - Write: enriched draft, sections/, and topic mapping YAML **only** via
   `python make-transcript-notes-kit-3agent/scripts/update_topic_mapping.py`.
 - Do not rewrite toolkit scripts. Do not edit the original transcript.
+- **Pre-check optimization**: Before enriching from scratch, check if the enriched draft ({enriched}) already exists. Verify that no `*[verify]*` markers remain, and run the enriched lint gate (`python make-transcript-notes-kit-3agent/scripts/lint_dense.py {enriched} --lecture-num {lecture_num} --phase enriched`) and manifest verifier (`python make-transcript-notes-kit-3agent/scripts/verify_manifest.py {manifest} {enriched} --phase enriched`). If all gates pass, ensure the topic mapping is updated and print `PHASE_COMPLETE` immediately without re-enriching from scratch.
 """,
     3: _COMMON_ADAPT + """
 ## Agent 3 scope
@@ -69,6 +71,7 @@ ADAPTATION_BY_AGENT = {
 - You are a renderer. If placeholders, TODOs, or `*[verify]*` remain, stop
   and leave them in place so the orchestrator can return the work to Agent 2.
   Do not invent missing instructional content.
+- **Pre-check optimization**: Before rendering from scratch, check if the output HTML ({html}) already exists. Run lint.py (`python make-transcript-notes-kit-3agent/scripts/lint.py {html}`) and the manifest verifier (`python make-transcript-notes-kit-3agent/scripts/verify_manifest.py {manifest} {html} --phase html`). If both gates pass with no FAIL markers, do not regenerate; print `PHASE_COMPLETE` immediately.
 """,
 }
 
@@ -220,6 +223,10 @@ class Pipeline:
         if agent == 2:
             docs_note = (f"- Enrichment docs directory: {self._docs_line()} "
                          "(read-only; use only files relevant to this lecture)\n")
+        dense = self.out / f"{self.prefix}_notes_dense.md"
+        manifest = self.out / f"{self.prefix}_extraction_manifest.json"
+        enriched = self.out / f"{self.prefix}_notes_enriched.md"
+        html = self.out / f"{self.prefix}_notes" / f"{self.prefix}_notes.html"
         adapt = ADAPTATION_BY_AGENT[agent].format(
             workspace=config.WORKSPACE,
             transcript=self.transcript,
@@ -229,6 +236,10 @@ class Pipeline:
             subject=self.subject,
             abbr=self.abbr,
             docs_line=self._docs_line(),
+            dense=dense,
+            manifest=manifest,
+            enriched=enriched,
+            html=html,
         )
         return (f"Read the skill file at {skill} and follow its instructions "
                 f"exactly. It defines your role and the complete process.\n\n"
@@ -1096,11 +1107,26 @@ class Pipeline:
         dense = self.out / f"{self.prefix}_notes_dense.md"
         manifest = self.out / f"{self.prefix}_extraction_manifest.json"
         self.out.mkdir(parents=True, exist_ok=True)
+
+        # Pre-check: if existing outputs already pass all gates, skip agent run.
+        if dense.is_file() and manifest.is_file():
+            g_lint = gates.gate_lint_dense(str(dense), self.lecture_num, "dense")
+            g_man = gates.gate_verify_manifest(str(manifest), str(dense), "dense")
+            if g_lint.passed and g_man.passed:
+                self._log({"type": "gate", "phase": AGENTS[1],
+                           "gate": "lint_dense", "result": gates.dump(g_lint)})
+                self._log({"type": "gate", "phase": AGENTS[1],
+                           "gate": "verify_manifest", "result": gates.dump(g_man)})
+                self._log({"type": "log", "phase": AGENTS[1],
+                           "line": f"[Pre-check] Existing outputs ({dense.name}, {manifest.name}) verified and passed all gates. Skipping agent run."})
+                return True
+
         targets = [dense, manifest]
         before = self._mtime_map(targets)
         msg = self._agent_message(1, (
-            f"Process the transcript into {dense} and {manifest} as the skill "
-            "specifies, then run the dense-draft lint gate and the manifest "
+            f"Check if {dense} and {manifest} already exist and pass all checks. "
+            "If not, process the transcript into {dense} and {manifest} as the "
+            "skill specifies, then run the dense-draft lint gate and the manifest "
             "verifier yourself until both pass."))
         code, _ = self._run_agent(1, msg, f"extractor {self.prefix}")
         if self.stop_flag:
@@ -1119,9 +1145,28 @@ class Pipeline:
         enriched = self.out / f"{self.prefix}_notes_enriched.md"
         if not dense.is_file():
             raise PhaseError(f"missing {dense.name} — run the extractor first")
+
+        # Pre-check: if enriched draft already exists and passes all gates (no bounce/verify markers), skip agent run.
+        if enriched.is_file() and manifest.is_file():
+            g_lint = gates.gate_lint_dense(str(enriched), self.lecture_num, "enriched")
+            g_man = gates.gate_verify_manifest(str(manifest), str(enriched), "enriched")
+            bounced = self._should_bounce_to_enricher([
+                ("lint_dense", g_lint),
+                ("verify_manifest", g_man),
+            ])
+            if g_lint.passed and g_man.passed and not bounced:
+                self._log({"type": "gate", "phase": AGENTS[2],
+                           "gate": "lint_dense", "result": gates.dump(g_lint)})
+                self._log({"type": "gate", "phase": AGENTS[2],
+                           "gate": "verify_manifest", "result": gates.dump(g_man)})
+                self._log({"type": "log", "phase": AGENTS[2],
+                           "line": f"[Pre-check] Existing output ({enriched.name}) verified and passed all gates. Skipping agent run."})
+                return True
+
         before = self._mtime_map([enriched])
         msg = self._agent_message(2, (
-            f"Enrich {dense} (manifest: {manifest}) into {enriched} exactly as "
+            f"Check if {enriched} already exists and passes all checks. If not, "
+            f"enrich {dense} (manifest: {manifest}) into {enriched} exactly as "
             "the skill specifies — split, enrich each section, assemble, bind "
             "summaries, update the topic mapping YAML, then run the enriched "
             "lint and manifest verifier until both pass."))
@@ -1142,9 +1187,24 @@ class Pipeline:
         html = self.out / f"{self.prefix}_notes" / f"{self.prefix}_notes.html"
         if not enriched.is_file():
             raise PhaseError(f"missing {enriched.name} — run the enricher first")
+
+        # Pre-check: if HTML notes already exist and pass all gates, skip agent run.
+        if html.is_file() and manifest.is_file():
+            g_lint = gates.gate_lint_html(str(html))
+            g_man = gates.gate_verify_manifest(str(manifest), str(html), "html")
+            if g_lint.passed and g_man.passed:
+                self._log({"type": "gate", "phase": AGENTS[3],
+                           "gate": "lint_html", "result": gates.dump(g_lint)})
+                self._log({"type": "gate", "phase": AGENTS[3],
+                           "gate": "verify_manifest", "result": gates.dump(g_man)})
+                self._log({"type": "log", "phase": AGENTS[3],
+                           "line": f"[Pre-check] Existing output ({html.name}) verified and passed all gates. Skipping agent run."})
+                return True
+
         before = self._mtime_map([html])
         msg = self._agent_message(3, (
-            f"Format {enriched} into {html} exactly as the skill specifies — "
+            f"Check if {html} already exists and passes all checks. If not, "
+            f"format {enriched} into {html} exactly as the skill specifies — "
             "split, convert sections, assemble the body, fill the "
             f"templates/notes.html placeholders including metadata, exam "
             "revision and prerequisite knowledge from the topic mapping YAML, "
