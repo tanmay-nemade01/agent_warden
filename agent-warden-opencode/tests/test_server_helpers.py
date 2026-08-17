@@ -165,5 +165,48 @@ class InFlightSummaryTests(unittest.TestCase):
         self.assertIn("phase_retries", payload)
 
 
+class WorkerStopCleanupTests(unittest.TestCase):
+    def test_stopped_queued_job_cleans_up_state(self):
+        import time
+        from unittest.mock import MagicMock
+        from app import server
+
+        rid = "test_cleanup_run"
+        mock_pipe = MagicMock()
+        mock_pipe.stop_flag = True
+        run = {
+            "run_id": rid,
+            "subject": "NLP",
+            "prefix": "NLP_Lecture_Test",
+            "active": False,
+            "pipeline": mock_pipe,
+        }
+        with server.STATE_LOCK:
+            server.STATE["runs"][rid] = run
+
+        handler = server.Handler.__new__(server.Handler)
+        spec = {
+            "subject": "NLP",
+            "abbr": "NLP",
+            "prefix": "NLP_Lecture_Test",
+            "lecture_num": "1",
+            "transcript": "dummy.txt",
+            "phases": [1],
+            "model": "m",
+            "variant": "v",
+            "backend": "opencode",
+            "docs": None,
+        }
+
+        with patch("app.server.Pipeline", return_value=mock_pipe):
+            handler._launch_job(spec, rid, run)
+            # Give the worker thread a moment to run and exit
+            time.sleep(0.1)
+
+        with server.STATE_LOCK:
+            self.assertNotIn(rid, server.STATE["runs"])
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -770,17 +770,19 @@ class Handler(BaseHTTPRequestHandler):
         def worker(_rid=run_id, _p=pipeline, _run=run):
             emit({"type": "queued", "run_id": _rid,
                   "subject": _run["subject"], "prefix": _run["prefix"]})
-            while True:
-                if _p.stop_flag:
-                    BUS.publish({"type": "pipeline_end", "run_id": _rid,
-                                 "status": "stopped"})
-                    return
-                if try_acquire_slot():
-                    break
-                time.sleep(0.25)
-            with STATE_LOCK:
-                _run["active"] = True
+            slot_acquired = False
             try:
+                while True:
+                    if _p.stop_flag:
+                        BUS.publish({"type": "pipeline_end", "run_id": _rid,
+                                     "status": "stopped"})
+                        return
+                    if try_acquire_slot():
+                        slot_acquired = True
+                        break
+                    time.sleep(0.25)
+                with STATE_LOCK:
+                    _run["active"] = True
                 if _p.stop_flag:
                     BUS.publish({"type": "pipeline_end", "run_id": _rid,
                                  "status": "stopped"})
@@ -791,7 +793,8 @@ class Handler(BaseHTTPRequestHandler):
                              "status": "error",
                              "error": f"{type(exc).__name__}: {exc}"})
             finally:
-                release_slot()
+                if slot_acquired:
+                    release_slot()
                 with STATE_LOCK:
                     STATE["runs"].pop(_rid, None)
                 BUS.publish({"type": "idle", "run_id": _rid})

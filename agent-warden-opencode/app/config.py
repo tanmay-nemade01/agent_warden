@@ -29,6 +29,8 @@ BACKEND_OPENCODE = "opencode"
 BACKEND_COMMANDCODE = "commandcode"
 BACKEND_CLAUDE = "claude"
 BACKEND_CODEX = "codex"
+BACKEND_REASONIX = "reasonix"
+BACKEND_PI = "pi"
 DEFAULT_BACKEND = BACKEND_OPENCODE
 
 BACKENDS = {
@@ -64,6 +66,22 @@ BACKENDS = {
         "provider": "openai",
         "effort_variants": [],
     },
+    BACKEND_REASONIX: {
+        "id": BACKEND_REASONIX,
+        "label": "Reasonix",
+        "model": "deepseek/deepseek-v4-flash",
+        "variant": "high",
+        "provider": "deepseek",
+        "effort_variants": ["low", "medium", "high", "max"],
+    },
+    BACKEND_PI: {
+        "id": BACKEND_PI,
+        "label": "Pi Harness",
+        "model": "deepseek/deepseek-v4-flash",
+        "variant": "high",
+        "provider": "openrouter",
+        "effort_variants": ["low", "medium", "high", "max"],
+    },
 }
 
 # OpenCode defaults (kept as top-level names for existing callers).
@@ -83,6 +101,8 @@ PHASE_STALL_TIMEOUT_SECONDS = 15 * 60
 COMMANDCODE_MAX_TURNS = 250
 CLAUDE_MAX_TURNS = 250
 CODEX_MAX_TURNS = 250
+REASONIX_MAX_TURNS = 250
+PI_MAX_TURNS = 250
 # OpenCode sends min(model.limit.output, this env). Default 32k is far
 # too small for max-effort thinking (finish reason length/unknown, 0
 # output tokens). DeepSeek V4 catalog output is 384k; 128k still truncated
@@ -103,6 +123,10 @@ def normalize_backend(backend: str | None) -> str:
         return BACKEND_CLAUDE
     if raw in {"codex", "openaicodex", "openai"}:
         return BACKEND_CODEX
+    if raw in {"reasonix", "rx", "deepseekreasonix"}:
+        return BACKEND_REASONIX
+    if raw in {"pi", "piharness", "picodingagent"}:
+        return BACKEND_PI
     if raw in {"opencode", "oc"}:
         return BACKEND_OPENCODE
     return DEFAULT_BACKEND
@@ -186,6 +210,8 @@ _OPENCODE_EXE: str | None = None
 _COMMANDCODE_ARGV: list[str] | None = None
 _CLAUDE_ARGV: list[str] | None = None
 _CODEX_ARGV: list[str] | None = None
+_REASONIX_ARGV: list[str] | None = None
+_PI_ARGV: list[str] | None = None
 _MODELS_CACHE: dict[str, dict] = {}
 _MODELS_CACHE_AT: dict[str, float] = {}
 _MODELS_CACHE_TTL = 300.0  # seconds (OpenCode)
@@ -346,13 +372,89 @@ def find_codex() -> str:
     return find_codex_argv()[0]
 
 
+def find_reasonix_argv() -> list[str]:
+    """Argv prefix for Reasonix CLI, skipping PowerShell shims."""
+    global _REASONIX_ARGV
+    if _REASONIX_ARGV:
+        return _REASONIX_ARGV
+    for name in ("reasonix.exe", "reasonix.cmd", "reasonix"):
+        found = shutil.which(name)
+        if found:
+            path = Path(found)
+            if path.suffix.lower() == ".ps1":
+                cmd = path.with_suffix(".cmd")
+                if cmd.is_file():
+                    path = cmd
+            _REASONIX_ARGV = [str(path)]
+            return _REASONIX_ARGV
+    pkg_roots = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Reasonix",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages",
+        Path(os.environ.get("APPDATA", "")) / "npm",
+    ]
+    for root in pkg_roots:
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            for f in ("reasonix.exe", "reasonix.cmd"):
+                if f in filenames:
+                    p = Path(dirpath) / f
+                    _REASONIX_ARGV = [str(p)]
+                    return _REASONIX_ARGV
+            dirnames[:] = [d for d in dirnames if d not in {"__pycache__", ".git"}]
+    _REASONIX_ARGV = ["reasonix"]
+    return _REASONIX_ARGV
+
+
+def find_reasonix() -> str:
+    return find_reasonix_argv()[0]
+
+
+def find_pi_argv() -> list[str]:
+    """Argv prefix for Pi Harness CLI, skipping PowerShell shims."""
+    global _PI_ARGV
+    if _PI_ARGV:
+        return _PI_ARGV
+    for name in ("pi.exe", "pi.cmd", "pi"):
+        found = shutil.which(name)
+        if found:
+            path = Path(found)
+            if path.suffix.lower() == ".ps1":
+                cmd = path.with_suffix(".cmd")
+                if cmd.is_file():
+                    path = cmd
+            _PI_ARGV = [str(path)]
+            return _PI_ARGV
+    pkg_roots = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Pi",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages",
+        Path(os.environ.get("APPDATA", "")) / "npm",
+    ]
+    for root in pkg_roots:
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            for f in ("pi.exe", "pi.cmd"):
+                if f in filenames:
+                    p = Path(dirpath) / f
+                    _PI_ARGV = [str(p)]
+                    return _PI_ARGV
+            dirnames[:] = [d for d in dirnames if d not in {"__pycache__", ".git"}]
+    _PI_ARGV = ["pi"]
+    return _PI_ARGV
+
+
+def find_pi() -> str:
+    return find_pi_argv()[0]
+
+
 def _parse_models_verbose(stdout: str) -> list[dict]:
     """Parse `opencode models [provider] --verbose` (id line + JSON blob)."""
     import re
     models: list[dict] = []
     lines = (stdout or "").splitlines()
     i = 0
-    id_re = re.compile(r"^[\w.-]+/[\w.@+-]+$")
+    id_re = re.compile(r"^[\w.~@+-]+/[\w.~@+:/-]+$")
     while i < len(lines):
         line = lines[i].strip()
         if not id_re.match(line):
@@ -539,6 +641,122 @@ def _fallback_models(backend: str) -> list[dict]:
                 "family": "local",
                 "status": "active",
                 "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+        ]
+    if backend_id == BACKEND_REASONIX:
+        return [
+            {
+                "id": "deepseek/deepseek-v4-flash",
+                "name": "DeepSeek V4 Flash (Prefix-Cache)",
+                "family": "deepseek-flash",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "deepseek/deepseek-v4-pro",
+                "name": "DeepSeek V4 Pro",
+                "family": "deepseek-pro",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "deepseek/deepseek-reasoner",
+                "name": "DeepSeek Reasoner (R1)",
+                "family": "deepseek-r1",
+                "status": "active",
+                "reasoning": True,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "deepseek/deepseek-chat",
+                "name": "DeepSeek Chat (V3)",
+                "family": "deepseek-v3",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+        ]
+    if backend_id == BACKEND_PI:
+        return [
+            {
+                "id": "deepseek/deepseek-v4-flash",
+                "name": "DeepSeek V4 Flash",
+                "family": "deepseek",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 384000},
+            },
+            {
+                "id": "~deepseek/deepseek-v4-flash-latest",
+                "name": "DeepSeek V4 Flash Latest",
+                "family": "deepseek",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 384000},
+            },
+            {
+                "id": "deepseek/deepseek-v4-flash-0731",
+                "name": "DeepSeek V4 Flash (0731 Snapshot)",
+                "family": "deepseek",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 393200},
+            },
+            {
+                "id": "deepseek/deepseek-v4-pro",
+                "name": "DeepSeek V4 Pro",
+                "family": "deepseek",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 384000},
+            },
+            {
+                "id": "claude-3-7-sonnet",
+                "name": "Claude 3.7 Sonnet",
+                "family": "anthropic",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "claude-3-5-sonnet",
+                "name": "Claude 3.5 Sonnet",
+                "family": "anthropic",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "gpt-5.4",
+                "name": "GPT-5.4",
+                "family": "openai",
+                "status": "active",
+                "reasoning": True,
                 "variants": [],
                 "cost": {},
                 "limit": {},
@@ -912,6 +1130,249 @@ def _list_codex_models(refresh: bool, timeout: float) -> dict:
     }
 
 
+def _list_reasonix_models(refresh: bool, timeout: float) -> dict:
+    import subprocess
+    meta = backend_meta(BACKEND_REASONIX)
+    fallback = _fallback_models(BACKEND_REASONIX)
+    argv = find_reasonix_argv()
+    if not argv:
+        return {
+            "ok": False, "backend": BACKEND_REASONIX,
+            "provider": meta["provider"], "models": fallback,
+            "default_model": meta["model"], "default_variant": meta["variant"],
+            "error": "reasonix executable not found",
+        }
+    cmd = argv + ["doctor", "--json"]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        default_model = meta["model"]
+        variants = next((m["variants"] for m in fallback if m["id"] == default_model),
+                        list(meta["effort_variants"]))
+        return {
+            "ok": True, "backend": BACKEND_REASONIX,
+            "provider": meta["provider"], "models": fallback,
+            "default_model": default_model,
+            "default_variant": preferred_variant(variants, meta["variant"]),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    if proc.returncode == 0 and proc.stdout:
+        try:
+            data = json.loads(proc.stdout)
+            providers = data.get("providers") or []
+            models = []
+            default_model = (data.get("config") or {}).get("default_model") or ""
+            for p in providers:
+                p_name = p.get("name") or ""
+                p_model = p.get("model") or p_name
+                p_models = p.get("models") or [p_model]
+                is_def = bool(p.get("is_default"))
+                key_present = bool(p.get("key_present"))
+                for m_id in p_models:
+                    model_id = p_name if len(p_models) == 1 else m_id
+                    models.append({
+                        "id": model_id,
+                        "name": f"{p_name} ({m_id})" if p_name != m_id else p_name,
+                        "family": p.get("kind") or "reasonix",
+                        "provider": p_name,
+                        "status": "active" if key_present else "missing_key",
+                        "reasoning": True,
+                        "variants": list(meta["effort_variants"]),
+                        "cost": {},
+                        "limit": {"context": p.get("context_window") or 1000000},
+                    })
+                    if is_def and not default_model:
+                        default_model = model_id
+            if models:
+                if not default_model or not any(m["id"] == default_model for m in models):
+                    default_model = models[0]["id"]
+                variants = next((m["variants"] for m in models if m["id"] == default_model),
+                                list(meta["effort_variants"]))
+                return {
+                    "ok": True,
+                    "backend": BACKEND_REASONIX,
+                    "provider": meta["provider"],
+                    "models": models,
+                    "default_model": default_model,
+                    "default_variant": preferred_variant(variants, meta["variant"]),
+                    "error": None,
+                }
+        except (ValueError, KeyError):
+            pass
+
+    default_model = meta["model"]
+    variants = next((m["variants"] for m in fallback if m["id"] == default_model),
+                    list(meta["effort_variants"]))
+    return {
+        "ok": True,
+        "backend": BACKEND_REASONIX,
+        "provider": meta["provider"],
+        "models": fallback,
+        "default_model": default_model,
+        "default_variant": preferred_variant(variants, meta["variant"]),
+        "error": None,
+    }
+
+
+def _parse_human_tokens(s: str) -> int:
+    """Convert human token representations like '1.0M', '384K', '393.2K' into integers."""
+    if not s or not isinstance(s, str):
+        return 0
+    clean = s.strip().upper()
+    try:
+        if clean.endswith("M"):
+            return int(float(clean[:-1]) * 1_000_000)
+        if clean.endswith("K"):
+            return int(float(clean[:-1]) * 1_000)
+        return int(float(clean))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _format_pi_model_name(token: str) -> tuple[str, str]:
+    """Format a Pi Harness model token into (family, human-readable display name)."""
+    import re
+    is_latest = token.startswith("~") or token.endswith("-latest") or ":latest" in token
+    raw = token.lstrip("~")
+    family = raw.split("/")[0] if "/" in raw else ""
+    model_part = raw.split("/", 1)[-1] if "/" in raw else raw
+
+    snapshot = ""
+    m_snap = re.search(r"[-_](\d{4}|\d{8}|\d{2}-\d{2})$", model_part)
+    if m_snap:
+        snapshot = m_snap.group(1)
+        model_part = model_part[:m_snap.start()]
+
+    name = _format_commandcode_model_name(model_part)
+    if is_latest and not name.endswith("Latest"):
+        name = f"{name} Latest"
+    elif snapshot:
+        name = f"{name} ({snapshot} Snapshot)"
+
+    return family or "pi", name
+
+
+def _parse_pi_models(stdout: str, effort_variants: list[str]) -> list[dict]:
+    """Parse `pi --list-models` tabular output into catalog model dicts."""
+    import re
+    ansi = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+    models: list[dict] = []
+    seen: set[str] = set()
+
+    for line in (stdout or "").splitlines():
+        line = ansi.sub("", line).strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        # Skip table header
+        if parts[0].lower() == "provider" and parts[1].lower() == "model":
+            continue
+
+        provider_col = parts[0]
+        model_token = parts[1]
+        context_str = parts[2]
+        max_out_str = parts[3]
+        thinking_str = parts[4].lower()
+
+        if model_token in seen:
+            continue
+        seen.add(model_token)
+
+        family, name = _format_pi_model_name(model_token)
+        has_reasoning = thinking_str == "yes"
+        ctx = _parse_human_tokens(context_str)
+        max_out = _parse_human_tokens(max_out_str)
+
+        models.append({
+            "id": model_token,
+            "name": name,
+            "family": family,
+            "provider": provider_col,
+            "status": "active",
+            "reasoning": has_reasoning,
+            "variants": list(effort_variants) if has_reasoning else [],
+            "cost": {},
+            "limit": {
+                "context": ctx or 1000000,
+                "output": max_out or 384000,
+            },
+        })
+
+    return models
+
+
+def _list_pi_models(refresh: bool, timeout: float) -> dict:
+    import subprocess
+    meta = backend_meta(BACKEND_PI)
+    fallback = _fallback_models(BACKEND_PI)
+    argv = find_pi_argv()
+    if not argv:
+        return {
+            "ok": False,
+            "backend": BACKEND_PI,
+            "provider": meta["provider"],
+            "models": fallback,
+            "default_model": meta["model"],
+            "default_variant": meta["variant"],
+            "error": "pi executable not found",
+        }
+    cmd = argv + ["--list-models"]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        default_model = meta["model"]
+        variants = next((m["variants"] for m in fallback if m["id"] == default_model),
+                        list(meta["effort_variants"]))
+        return {
+            "ok": True,
+            "backend": BACKEND_PI,
+            "provider": meta["provider"],
+            "models": fallback,
+            "default_model": default_model,
+            "default_variant": preferred_variant(variants, meta["variant"]),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    if proc.returncode == 0 and proc.stdout:
+        models = _parse_pi_models(proc.stdout, list(meta["effort_variants"]))
+        if models:
+            ids = {m["id"] for m in models}
+            default_model = meta["model"] if meta["model"] in ids else (
+                "deepseek/deepseek-v4-flash" if "deepseek/deepseek-v4-flash" in ids
+                else ("~deepseek/deepseek-v4-flash-latest" if "~deepseek/deepseek-v4-flash-latest" in ids else models[0]["id"])
+            )
+            variants = next((m["variants"] for m in models if m["id"] == default_model),
+                            list(meta["effort_variants"]))
+            return {
+                "ok": True,
+                "backend": BACKEND_PI,
+                "provider": meta["provider"],
+                "models": models,
+                "default_model": default_model,
+                "default_variant": preferred_variant(variants, meta["variant"]),
+                "error": None,
+            }
+    default_model = meta["model"]
+    variants = next((m["variants"] for m in fallback if m["id"] == default_model),
+                    list(meta["effort_variants"]))
+    return {
+        "ok": True,
+        "backend": BACKEND_PI,
+        "provider": meta["provider"],
+        "models": fallback,
+        "default_model": default_model,
+        "default_variant": preferred_variant(variants, meta["variant"]),
+        "error": None,
+    }
+
+
 def list_models(provider: str | None = None, refresh: bool = False,
                 timeout: float | None = None, backend: str | None = None) -> dict:
     """Discover models for a backend.
@@ -939,6 +1400,12 @@ def list_models(provider: str | None = None, refresh: bool = False,
             refresh=refresh, timeout=timeout if timeout is not None else 30.0)
     elif backend == BACKEND_CODEX:
         result = _list_codex_models(
+            refresh=refresh, timeout=timeout if timeout is not None else 30.0)
+    elif backend == BACKEND_REASONIX:
+        result = _list_reasonix_models(
+            refresh=refresh, timeout=timeout if timeout is not None else 30.0)
+    elif backend == BACKEND_PI:
+        result = _list_pi_models(
             refresh=refresh, timeout=timeout if timeout is not None else 30.0)
     else:
         result = _list_opencode_models(

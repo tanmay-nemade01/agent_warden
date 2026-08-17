@@ -86,6 +86,16 @@ def codex_sandbox_mode() -> str:
     return "workspace-write"
 
 
+def reasonix_auto_flag() -> str:
+    """Auto confirmation flag for unattended Reasonix runs."""
+    return "-y"
+
+
+def pi_sandbox_args() -> list[str]:
+    """Non-interactive JSON mode arguments for Pi Harness."""
+    return ["--print", "--mode", "json", "--no-session", "--approve"]
+
+
 def write_job_configs(out_dir: Path) -> dict[str, Path]:
     """Write per-run config files under the lecture output tree (writable)."""
     job = Path(out_dir) / "_job"

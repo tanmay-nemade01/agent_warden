@@ -324,6 +324,10 @@ class Pipeline:
             return self._run_claude(agent, message, title, extra_env)
         if self.backend == config.BACKEND_CODEX:
             return self._run_codex(agent, message, title, extra_env)
+        if self.backend == config.BACKEND_REASONIX:
+            return self._run_reasonix(agent, message, title, extra_env)
+        if self.backend == config.BACKEND_PI:
+            return self._run_pi(agent, message, title, extra_env)
         self._oc_session_id = None
         resume = self._resume_session
         self._resume_session = None
@@ -398,10 +402,14 @@ class Pipeline:
                             self._last_tool = str(
                                 part.get("tool") or part.get("title") or "")
                         self._accumulate_stats(AGENTS[agent], event)
-                        self._log({"type": "agent_event",
-                                   "phase": AGENTS[agent],
-                                   "event": event})
-                elif line.strip():
+                        if event.get("type") == "log":
+                            self._log({"type": "log", "phase": AGENTS[agent],
+                                       "line": event.get("line", "")})
+                        else:
+                            self._log({"type": "agent_event",
+                                       "phase": AGENTS[agent],
+                                       "event": event})
+                elif line.strip() and not line.lstrip().startswith("{"):
                     self._log({"type": "log", "phase": AGENTS[agent],
                                "line": line})
                 if self.stop_flag:
@@ -546,6 +554,52 @@ class Pipeline:
                     cwd=str(config.WORKSPACE))
         return self._stream_process(agent, self._parse_codex_line)
 
+    def _run_reasonix(self, agent: int, message: str, title: str,
+                      extra_env: dict | None = None) -> tuple[int, list[str]]:
+        """Headless Reasonix: `reasonix -p --output-format stream-json`."""
+        job = self._ensure_job_files()
+        job["prompt"].write_text(message, encoding="utf-8")
+        argv = config.find_reasonix_argv()
+        cmd = argv + [
+            "-p",
+            "--output-format", "stream-json",
+            "-y",
+            "--model", self.model,
+            "--dir", str(config.WORKSPACE),
+        ]
+        if self.variant:
+            cmd.extend(["--effort", self.variant])
+        env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
+        if extra_env:
+            env.update(extra_env)
+        self._reasonix_thinking = ""
+        self._log({"type": "phase_cmd", "phase": AGENTS[agent],
+                   "cmd": " ".join(cmd[:10]) + " ..."})
+        self._popen(cmd, stdin_data=message, extra_env=env,
+                    cwd=str(config.WORKSPACE))
+        return self._stream_process(agent, self._parse_reasonix_line)
+
+    def _run_pi(self, agent: int, message: str, title: str,
+                extra_env: dict | None = None) -> tuple[int, list[str]]:
+        """Headless Pi Harness: `pi --print --mode json`."""
+        job = self._ensure_job_files()
+        job["prompt"].write_text(message, encoding="utf-8")
+        argv = config.find_pi_argv()
+        cmd = argv + permissions.pi_sandbox_args() + [
+            "--model", self.model,
+        ]
+        if self.variant:
+            cmd.extend(["--thinking", self.variant])
+        env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
+        if extra_env:
+            env.update(extra_env)
+        self._pi_tools = {}
+        self._log({"type": "phase_cmd", "phase": AGENTS[agent],
+                   "cmd": " ".join(cmd[:10]) + " ..."})
+        self._popen(cmd, stdin_data=message, extra_env=env,
+                    cwd=str(config.WORKSPACE))
+        return self._stream_process(agent, self._parse_pi_line)
+
     def _parse_agent_event(self, line: str) -> dict | None:
         """Parse one `opencode run --format json` line into a UI-safe event.
 
@@ -619,19 +673,37 @@ class Pipeline:
             "output": g("output", "outputTokens", "output_tokens",
                         "completionTokens", "completion_tokens"),
             "reasoning": g("reasoning", "reasoningTokens", "reasoning_tokens",
-                           "cacheReadTokens"),
+                           "cacheRead", "cacheReadTokens", "cache_read_input_tokens",
+                           "cacheHitTokens", "cache_hit_tokens",
+                           "prompt_cache_hit_tokens"),
         }
 
     @staticmethod
     def _usage_cost(usage) -> float:
         if not isinstance(usage, dict):
             return 0.0
-        for k in ("cost", "total_cost", "totalCost"):
+        cost_val = usage.get("cost")
+        if isinstance(cost_val, dict):
+            for k in ("total", "totalCost", "total_cost"):
+                if cost_val.get(k) is not None:
+                    try:
+                        return float(cost_val[k] or 0)
+                    except (TypeError, ValueError):
+                        pass
+        for k in ("cost", "total_cost", "totalCost", "total_cost_usd"):
             if usage.get(k) is not None:
+                val = usage[k]
+                if isinstance(val, dict):
+                    for dk in ("total", "totalCost", "total_cost"):
+                        if val.get(dk) is not None:
+                            try:
+                                return float(val[dk] or 0)
+                            except (TypeError, ValueError):
+                                pass
                 try:
-                    return float(usage[k] or 0)
+                    return float(val or 0)
                 except (TypeError, ValueError):
-                    return 0.0
+                    pass
         return 0.0
 
     def _parse_commandcode_line(self, line: str) -> list[dict]:
@@ -986,11 +1058,346 @@ class Pipeline:
                 }}]
         return []
 
+    def _flush_reasonix_thinking(self) -> list[dict]:
+        """Flush any accumulated Reasonix reasoning as one plain log line."""
+        thinking = getattr(self, "_reasonix_thinking", "") or ""
+        self._reasonix_thinking = ""
+        if not thinking.strip():
+            return []
+        return [{"type": "log", "line": thinking.strip()[:self.EVENT_TEXT_CAP]}]
+
+    def _parse_reasonix_line(self, line: str) -> list[dict]:
+        """Map Reasonix stream-json frames to plain raw log lines.
+
+        Reasonix output is printed only into the per-agent live session log as
+        plain text lines — no structured thinking/tool/step blocks.
+        """
+        events: list[dict] = []
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            text = line.strip()
+            if text:
+                events.append({"type": "log", "line": text[:self.EVENT_TEXT_CAP]})
+            return events
+        if not isinstance(raw, dict):
+            return events
+
+        if raw.get("type") == "result":
+            if raw.get("is_error"):
+                err = raw.get("result") or "Reasonix error"
+                self._last_agent_error = f"Reasonix error: {err}"
+                events.append({"type": "log", "line": f"Error: {err}"})
+                return events
+            usage = raw.get("usage") or {}
+            if usage:
+                toks = self._usage_tokens(usage)
+                events.append({
+                    "type": "log",
+                    "line": (f"done · {raw.get('subtype') or 'result'} · "
+                             f"in {toks['input']} / out {toks['output']} / "
+                             f"reasoning {toks['reasoning']} tok"),
+                    "part": {"tokens": toks, "cost": self._usage_cost(raw)},
+                })
+            return events
+
+        et = raw.get("kind") or raw.get("type") or raw.get("event")
+        if not et:
+            return events
+
+        if et in {"run_error", "error", "error_during_execution"}:
+            err_data = raw.get("error") or raw.get("message") or raw.get("result") or {}
+            err_msg = err_data.get("message") if isinstance(err_data, dict) else str(err_data)
+            self._last_agent_error = f"Reasonix error: {err_msg}"
+            events.append({"type": "log", "line": f"Error: {err_msg}"})
+            return events
+
+        if et in {"turn_started", "turn_start", "step_start"}:
+            events.extend(self._flush_reasonix_thinking())
+            events.append({"type": "log", "line":
+                           f"— turn {raw.get('turn') or raw.get('turnNumber') or 1} —"})
+            return events
+
+        if et in {"usage", "turn_end", "step_finish"}:
+            events.extend(self._flush_reasonix_thinking())
+            usage = raw.get("usage") or raw.get("tokens") or {}
+            toks = self._usage_tokens(usage)
+            if toks.get("input") or toks.get("output") or toks.get("reasoning"):
+                events.append({
+                    "type": "log",
+                    "line": (f"step done · "
+                             f"{raw.get('stopReason') or raw.get('reason') or 'stop'} · "
+                             f"in {toks['input']} / out {toks['output']} / "
+                             f"reasoning {toks['reasoning']} tok"),
+                    "part": {"tokens": toks, "cost": self._usage_cost(raw)},
+                })
+            return events
+
+        if et in {"thinking", "reasoning"}:
+            chunk = raw.get("text") or raw.get("thinking") or raw.get("content") or ""
+            if isinstance(chunk, str) and chunk:
+                self._reasonix_thinking = getattr(self, "_reasonix_thinking", "") + chunk
+            return events
+
+        if et in {"message"}:
+            events.extend(self._flush_reasonix_thinking())
+            text = raw.get("text") or raw.get("content") or ""
+            if isinstance(text, list):
+                text = "".join(
+                    (p.get("text") or "") if isinstance(p, dict) else str(p)
+                    for p in text)
+            if isinstance(text, str) and text.strip():
+                events.append({"type": "log",
+                               "line": text.strip()[:self.EVENT_TEXT_CAP]})
+            return events
+
+        if et in {"text"}:
+            # Streaming deltas — full text is emitted on kind: "message"
+            return events
+
+        if et in {"turn_phase", "stream_attempt", "session_start", "session_end"}:
+            # Internal Reasonix control frames
+            return events
+
+        if et in {"tool_running", "tool_use", "tool_call", "tool_dispatch"}:
+            events.extend(self._flush_reasonix_thinking())
+            if et == "tool_dispatch":
+                tool = raw.get("tool") or {}
+                if not isinstance(tool, dict):
+                    tool = {}
+                if not tool.get("args") or tool.get("refreshed"):
+                    return events
+                name = tool.get("name") or tool.get("resolvedName") or "tool"
+            else:
+                name = raw.get("toolName") or raw.get("tool") or raw.get("name") or "tool"
+            self._last_tool = name
+            events.append({"type": "log", "line": f"→ {name}"})
+            return events
+
+        if et in {"tool_completed", "tool_errored", "tool_result"}:
+            tool = raw.get("tool") or {}
+            if not isinstance(tool, dict):
+                tool = {}
+            out = (raw.get("result") or raw.get("output") or raw.get("content")
+                   or tool.get("output") or tool.get("result") or tool.get("content")
+                   or "")
+            if not isinstance(out, str):
+                try:
+                    out = json.dumps(out, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    out = str(out)
+            if out.strip():
+                events.append({"type": "log",
+                               "line": out.strip()[:self.EVENT_TOOL_OUTPUT_CAP]})
+            return events
+
+        return events
+
+    def _parse_pi_line(self, line: str) -> list[dict]:
+        """Map one Pi Harness NDJSON / RPC stream line to UI agent_event dicts."""
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            text = line.strip()
+            if not text:
+                return []
+            trimmed = len(text) > self.EVENT_TEXT_CAP
+            return [{"type": "text", "part": {
+                "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                "trimmed": trimmed,
+            }}]
+        if not isinstance(raw, dict):
+            return []
+        et = raw.get("type") or raw.get("event") or raw.get("method")
+        if not et:
+            return []
+
+        # Top-level error events
+        if et in {"error", "session_error"}:
+            err_data = raw.get("error") or raw.get("message") or {}
+            err_msg = err_data.get("message") if isinstance(err_data, dict) else str(err_data)
+            self._last_agent_error = f"Pi error: {err_msg}"
+            return [{"type": "text", "part": {
+                "text": f"Error: {err_msg}", "trimmed": False}}]
+
+        # Check for message error payloads inside message_start / message_end / turn_end
+        msg = raw.get("message")
+        if isinstance(msg, dict):
+            if msg.get("stopReason") == "error" or msg.get("errorMessage"):
+                err_msg = str(msg.get("errorMessage") or "API error")
+                self._last_agent_error = f"Pi error: {err_msg}"
+                return [{"type": "text", "part": {
+                    "text": f"Error: {err_msg}", "trimmed": False}}]
+
+        events: list[dict] = []
+
+        if et in {"turn_start", "step_start", "session_start"}:
+            return [{"type": "step_start", "part": {
+                "turn": raw.get("turn") or 1}}]
+
+        # Handle message content blocks (reasoning, text, tool_use) on message_end
+        if isinstance(msg, dict) and et == "message_end":
+            content_blocks = msg.get("content")
+            if isinstance(content_blocks, list):
+                for block in content_blocks:
+                    if not isinstance(block, dict):
+                        continue
+                    bt = block.get("type")
+                    if bt in {"thinking", "reasoning"}:
+                        t = block.get("thinking") or block.get("text") or ""
+                        if isinstance(t, str) and t.strip():
+                            trimmed = len(t) > self.EVENT_TEXT_CAP
+                            events.append({"type": "reasoning", "part": {
+                                "text": t[:self.EVENT_TEXT_CAP] if trimmed else t,
+                                "trimmed": trimmed,
+                            }})
+                    elif bt in {"text", "message"}:
+                        t = block.get("text") or block.get("content") or ""
+                        if isinstance(t, str) and t.strip():
+                            trimmed = len(t) > self.EVENT_TEXT_CAP
+                            events.append({"type": "text", "part": {
+                                "text": t[:self.EVENT_TEXT_CAP] if trimmed else t,
+                                "trimmed": trimmed,
+                            }})
+                    elif bt in {"tool_use", "tool_call"}:
+                        call_id = str(block.get("id") or block.get("call_id") or "")
+                        tool_name = block.get("name") or block.get("tool") or "tool"
+                        rec = {
+                            "tool": tool_name,
+                            "title": block.get("title") or tool_name,
+                            "input": block.get("input") or block.get("args"),
+                        }
+                        if call_id:
+                            self._pi_tools[call_id] = rec
+                        part = {
+                            "tool": rec["tool"],
+                            "title": rec["title"],
+                            "callID": call_id,
+                            "state": {"status": "running"},
+                        }
+                        if rec["input"] is not None:
+                            part["state"]["input"] = rec["input"]
+                        events.append({"type": "tool_use", "part": part})
+
+        if et in {"reasoning", "thinking"}:
+            text = raw.get("text") or raw.get("thinking") or ""
+            if isinstance(text, str) and text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                events.append({"type": "reasoning", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }})
+
+        if et in {"delta"}:
+            text = raw.get("text") or raw.get("content") or raw.get("delta") or ""
+            if isinstance(text, dict):
+                text = text.get("text") or ""
+            if isinstance(text, str) and text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                events.append({"type": "text", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }})
+
+        if et in {"tool_use", "tool_call", "tool_running"}:
+            call_id = str(raw.get("call_id") or raw.get("id") or raw.get("toolCallId") or "")
+            tool_name = raw.get("tool") or raw.get("name") or raw.get("toolName") or "tool"
+            rec = {
+                "tool": tool_name,
+                "title": raw.get("title") or tool_name,
+                "input": raw.get("input") or raw.get("args"),
+            }
+            if call_id:
+                self._pi_tools[call_id] = rec
+            part = {
+                "tool": rec["tool"],
+                "title": rec["title"],
+                "callID": call_id,
+                "state": {"status": "running"},
+            }
+            if rec["input"] is not None:
+                part["state"]["input"] = rec["input"]
+            events.append({"type": "tool_use", "part": part})
+
+        if et in {"tool_result", "tool_completed", "tool_errored"}:
+            call_id = str(raw.get("call_id") or raw.get("id") or raw.get("toolCallId") or "")
+            rec = self._pi_tools.get(call_id) or {
+                "tool": raw.get("tool") or raw.get("name") or "tool",
+                "title": raw.get("title") or "",
+            }
+            out = raw.get("output") or raw.get("result") or raw.get("content") or ""
+            if not isinstance(out, str):
+                try:
+                    out = json.dumps(out, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    out = str(out)
+            trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+            status = "completed" if et != "tool_errored" else "error"
+            part = {
+                "tool": rec.get("tool") or "tool",
+                "title": rec.get("title") or "",
+                "callID": call_id,
+                "state": {
+                    "status": status,
+                    "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                },
+            }
+            if trimmed:
+                part["state"]["output_trimmed"] = True
+            if rec.get("input") is not None:
+                part["state"]["input"] = rec["input"]
+            events.append({"type": "tool_use", "part": part})
+
+        # Process toolResults inside turn_end
+        tool_results = raw.get("toolResults")
+        if isinstance(tool_results, list):
+            for tr in tool_results:
+                if not isinstance(tr, dict):
+                    continue
+                call_id = str(tr.get("toolCallId") or tr.get("id") or "")
+                rec = self._pi_tools.get(call_id) or {
+                    "tool": tr.get("toolName") or tr.get("tool") or "tool",
+                    "title": tr.get("title") or "",
+                }
+                out = tr.get("result") or tr.get("output") or tr.get("content") or ""
+                if not isinstance(out, str):
+                    try:
+                        out = json.dumps(out, ensure_ascii=False)
+                    except (TypeError, ValueError):
+                        out = str(out)
+                trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+                is_err = bool(tr.get("isError") or tr.get("is_error"))
+                part = {
+                    "tool": rec.get("tool") or "tool",
+                    "title": rec.get("title") or "",
+                    "callID": call_id,
+                    "state": {
+                        "status": "error" if is_err else "completed",
+                        "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                    },
+                }
+                if trimmed:
+                    part["state"]["output_trimmed"] = True
+                events.append({"type": "tool_use", "part": part})
+
+        if et in {"turn_end", "step_finish", "session_end"}:
+            usage = raw.get("usage") or (msg.get("usage") if isinstance(msg, dict) else None) or raw.get("tokens") or {}
+            stop_reason = raw.get("stopReason") or (msg.get("stopReason") if isinstance(msg, dict) else None) or raw.get("reason") or "stop"
+            if usage:
+                cost = self._usage_cost(usage) or self._usage_cost(msg) or self._usage_cost(raw)
+                events.append({"type": "step_finish", "part": {
+                    "reason": stop_reason,
+                    "tokens": self._usage_tokens(usage),
+                    "cost": cost,
+                }})
+
+        return events
+
     def _accumulate_stats(self, phase: str, event: dict):
-        if event.get("type") != "step_finish":
-            return
         part = event.get("part") or {}
         toks = part.get("tokens") or {}
+        if not toks:
+            return
         cost = float(part.get("cost") or 0)
         self.stats["cost"] += cost
         for k in ("input", "output", "reasoning"):

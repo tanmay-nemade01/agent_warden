@@ -1553,6 +1553,8 @@
           <option value="commandcode">Command Code</option>
           <option value="claude">Claude Code</option>
           <option value="codex">OpenAI Codex</option>
+          <option value="reasonix">Reasonix</option>
+          <option value="pi">Pi Harness</option>
         </select>
       </div>
       <div class="field-block">
@@ -1854,8 +1856,14 @@ function setPhaseDot(rid, phase, cls) {
 
 function smartScroll(el) {
   if (!el || state.replaying) return;
-  const nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 80;
-  if (nearBottom) el.scrollTop = el.scrollHeight;
+  if (el._scrollPending) return;
+  el._scrollPending = true;
+  requestAnimationFrame(() => {
+    el._scrollPending = false;
+    if (!el.isConnected) return;
+    const nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 120;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  });
 }
 
 function appendLog(rid, phase, line) {
@@ -1883,6 +1891,7 @@ function fmtJson(v) {
 function renderTool(rid, phase, ev) {
   const card = state.runs[rid];
   if (!card) return;
+  if (state.tools[rid] && state.tools[rid][phase]) state.tools[rid][phase]._activeThinking = null;
   const part = ev.part || {};
   const st = part.state || {};
   const key = part.callID || part.id || ((part.tool || "tool") + ":" + (part.title || ""));
@@ -1936,7 +1945,17 @@ function renderThinking(rid, phase, ev) {
   const card = state.runs[rid];
   if (!card) return;
   const text = (ev.part || {}).text || "";
+  if (!text.trim()) return;
   const host = transcriptEl(card, phase);
+  if (!state.tools[rid]) state.tools[rid] = {};
+  if (!state.tools[rid][phase]) state.tools[rid][phase] = {};
+  const active = state.tools[rid][phase]._activeThinking;
+  if (active && active.det && active.det.isConnected) {
+    active.sum.textContent = "thinking" + (text.length > 300 ? ` · ${(text.length/1000).toFixed(1)}k chars` : "") + " (click to expand)";
+    active.pre.textContent = text + ((ev.part || {}).trimmed ? "\n… [truncated]" : "");
+    smartScroll(host);
+    return;
+  }
   const det = document.createElement("details");
   det.className = "thinking";
   const sum = document.createElement("summary");
@@ -1945,12 +1964,14 @@ function renderThinking(rid, phase, ev) {
   pre.textContent = text + ((ev.part || {}).trimmed ? "\n… [truncated]" : "");
   det.append(sum, pre);
   host.appendChild(det);
+  state.tools[rid][phase]._activeThinking = { det, sum, pre };
   smartScroll(host);
 }
 
 function renderStepMeta(rid, phase, ev) {
   const card = state.runs[rid];
   if (!card) return;
+  if (state.tools[rid] && state.tools[rid][phase]) state.tools[rid][phase]._activeThinking = null;
   const part = ev.part || {};
   const host = transcriptEl(card, phase);
   const div = document.createElement("div");
@@ -1964,13 +1985,14 @@ function renderStepMeta(rid, phase, ev) {
     if (!state.replaying) liveHistoryFromCard(rid);
   }
   host.appendChild(div);
-  host.scrollTop = host.scrollHeight;
+  smartScroll(host);
 }
 
 function renderAgentEvent(rid, phase, ev) {
   if (ev.type === "tool_use") return renderTool(rid, phase, ev);
   if (ev.type === "reasoning") return renderThinking(rid, phase, ev);
   if (ev.type === "text") {
+    if (state.tools[rid] && state.tools[rid][phase]) state.tools[rid][phase]._activeThinking = null;
     const card = state.runs[rid];
     if (!card) return;
     const host = transcriptEl(card, phase);
@@ -1978,7 +2000,7 @@ function renderAgentEvent(rid, phase, ev) {
     div.className = "tmsg";
     div.textContent = (ev.part || {}).text || "";
     host.appendChild(div);
-    host.scrollTop = host.scrollHeight;
+    smartScroll(host);
     return;
   }
   if (ev.type === "step_start" || ev.type === "step_finish") {
@@ -3118,6 +3140,9 @@ function formatProviderGroupLabel(key) {
     "xiaomi-token-plan-sgp": "Xiaomi (Token Plan SGP)",
     "opencode-go": "OpenCode Go",
     "opencode": "OpenCode Free",
+    "openrouter": "OpenRouter",
+    "reasonix": "Reasonix",
+    "pi": "Pi Harness",
     "openai": "OpenAI",
     "anthropic": "Anthropic",
     "google": "Google",
@@ -3226,6 +3251,10 @@ $("backend").addEventListener("change", async () => {
   const hint = $("models-hint");
   if (backend === "commandcode") {
     hint.textContent = "Command Code default: deepseek/deepseek-v4-flash. Refresh models is slow.";
+  } else if (backend === "reasonix") {
+    hint.textContent = "Reasonix default: deepseek/deepseek-v4-flash (prefix-cache optimized).";
+  } else if (backend === "pi") {
+    hint.textContent = "Pi Harness default: claude-3-7-sonnet.";
   }
   await refreshConfig({ refreshModels: false });
 });

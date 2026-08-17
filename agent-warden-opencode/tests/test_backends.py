@@ -62,12 +62,17 @@ def test_normalize_backend():
     assert config.normalize_backend("codex") == config.BACKEND_CODEX
     assert config.normalize_backend("openaicodex") == config.BACKEND_CODEX
     assert config.normalize_backend("openai") == config.BACKEND_CODEX
+    assert config.normalize_backend("reasonix") == config.BACKEND_REASONIX
+    assert config.normalize_backend("rx") == config.BACKEND_REASONIX
+    assert config.normalize_backend("pi") == config.BACKEND_PI
+    assert config.normalize_backend("piharness") == config.BACKEND_PI
     assert config.normalize_backend("unknown_xyz") == config.DEFAULT_BACKEND
 
 
 def test_backend_meta():
     for bid in (config.BACKEND_OPENCODE, config.BACKEND_COMMANDCODE,
-                config.BACKEND_CLAUDE, config.BACKEND_CODEX):
+                config.BACKEND_CLAUDE, config.BACKEND_CODEX,
+                config.BACKEND_REASONIX, config.BACKEND_PI):
         meta = config.backend_meta(bid)
         assert meta["id"] == bid
         assert "label" in meta
@@ -77,7 +82,8 @@ def test_backend_meta():
 
 def test_fallback_models_all_backends():
     for bid in (config.BACKEND_OPENCODE, config.BACKEND_COMMANDCODE,
-                config.BACKEND_CLAUDE, config.BACKEND_CODEX):
+                config.BACKEND_CLAUDE, config.BACKEND_CODEX,
+                config.BACKEND_REASONIX, config.BACKEND_PI):
         catalog = config.list_models(backend=bid)
         assert catalog["ok"] is True
         assert catalog["backend"] == bid
@@ -425,5 +431,351 @@ def test_parse_agent_event_error_capture(tmp_path):
     assert "Invalid API Key" in ev["part"]["text"]
     assert pipeline._last_agent_error == "OpenCode error: Invalid API Key"
 
+
+def test_parse_models_verbose_openrouter():
+    sample_stdout = """openrouter/~anthropic/claude-fable-latest
+{
+  "id": "~anthropic/claude-fable-latest",
+  "providerID": "openrouter",
+  "name": "Claude Fable Latest",
+  "family": "claude-fable",
+  "status": "active",
+  "capabilities": {
+    "reasoning": true
+  },
+  "variants": {
+    "low": {},
+    "high": {}
+  }
+}
+openrouter/meta-llama/llama-3.3-70b-instruct
+{
+  "id": "meta-llama/llama-3.3-70b-instruct",
+  "providerID": "openrouter",
+  "name": "Llama 3.3 70B",
+  "family": "llama",
+  "status": "active",
+  "capabilities": {
+    "reasoning": false
+  }
+}
+openrouter/nvidia/nemotron-3-super-120b-a12b:free
+{
+  "id": "nvidia/nemotron-3-super-120b-a12b:free",
+  "providerID": "openrouter",
+  "name": "Nemotron 3 Super Free",
+  "family": "nemotron",
+  "status": "active",
+  "capabilities": {
+    "reasoning": false
+  }
+}
+"""
+    models = config._parse_models_verbose(sample_stdout)
+    assert len(models) == 3
+    ids = [m["id"] for m in models]
+    assert "openrouter/~anthropic/claude-fable-latest" in ids
+    assert "openrouter/meta-llama/llama-3.3-70b-instruct" in ids
+    assert "openrouter/nvidia/nemotron-3-super-120b-a12b:free" in ids
+    assert all(m["provider"] == "openrouter" for m in models)
+
+
+def test_parse_reasonix_line():
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline._reasonix_thinking = ""
+    pipeline.EVENT_TEXT_CAP = 4000
+    pipeline.EVENT_TOOL_OUTPUT_CAP = 4000
+
+    # Control packets return []
+    assert pipeline._parse_reasonix_line(json.dumps({"kind": "turn_phase", "phase": "working"})) == []
+    assert pipeline._parse_reasonix_line(json.dumps({"kind": "stream_attempt", "streamAttempt": {"action": "begin"}})) == []
+
+    # Thinking / reasoning deltas accumulate; nothing emitted until flushed
+    assert pipeline._parse_reasonix_line(json.dumps({
+        "kind": "reasoning",
+        "text": "Analyzing prefix cache...",
+    })) == []
+    assert pipeline._parse_reasonix_line(json.dumps({
+        "kind": "reasoning",
+        "text": " found 3 tokens.",
+    })) == []
+
+    # Text deltas are ignored in favor of complete message
+    assert pipeline._parse_reasonix_line(json.dumps({"kind": "text", "text": "Extracted"})) == []
+
+    # Message flushes accumulated reasoning, then emits the text as plain log lines
+    evs = pipeline._parse_reasonix_line(json.dumps({
+        "kind": "message",
+        "text": "Extracted section notes",
+    }))
+    assert len(evs) == 2
+    assert evs[0] == {"type": "log", "line": "Analyzing prefix cache... found 3 tokens."}
+    assert evs[1] == {"type": "log", "line": "Extracted section notes"}
+
+    # Tool frames become plain log lines (no structured tool blocks)
+    evs = pipeline._parse_reasonix_line(json.dumps({
+        "kind": "tool_running",
+        "toolCallId": "call_123",
+        "toolName": "read_file",
+        "input": {"path": "dense.md"},
+    }))
+    assert len(evs) == 1
+    assert evs[0] == {"type": "log", "line": "→ read_file"}
+
+    evs = pipeline._parse_reasonix_line(json.dumps({
+        "kind": "tool_completed",
+        "toolCallId": "call_123",
+        "result": "File contents here",
+    }))
+    assert len(evs) == 1
+    assert evs[0] == {"type": "log", "line": "File contents here"}
+
+    # tool_result carries its output nested under tool.output
+    evs = pipeline._parse_reasonix_line(json.dumps({
+        "kind": "tool_result",
+        "tool": {"id": "call_123", "name": "bash", "output": "the answer is 496"},
+    }))
+    assert len(evs) == 1
+    assert evs[0] == {"type": "log", "line": "the answer is 496"}
+
+    # tool_result with no output emits nothing
+    assert pipeline._parse_reasonix_line(json.dumps({
+        "kind": "tool_result",
+        "tool": {"id": "call_123", "name": "bash"},
+    })) == []
+
+    # tool_dispatch only logs once a tool call carries args; tool_progress is dropped
+    assert pipeline._parse_reasonix_line(json.dumps({
+        "kind": "tool_dispatch", "tool": {"name": "bash", "partial": True},
+    })) == []
+    evs = pipeline._parse_reasonix_line(json.dumps({
+        "kind": "tool_dispatch", "tool": {"name": "bash", "args": "{\"command\": \"ls\"}"},
+    }))
+    assert len(evs) == 1
+    assert evs[0] == {"type": "log", "line": "→ bash"}
+    assert pipeline._parse_reasonix_line(json.dumps({
+        "kind": "tool_progress", "tool": {"id": "x", "output": "..."},
+    })) == []
+
+    # Step finish with cache read tokens
+    evs = pipeline._parse_reasonix_line(json.dumps({
+        "kind": "usage",
+        "usage": {
+            "promptTokens": 1000,
+            "completionTokens": 200,
+            "cacheHitTokens": 850,
+        },
+        "cost": 0.0012,
+    }))
+    assert len(evs) == 1
+    assert evs[0]["type"] == "log"
+    assert "step done" in evs[0]["line"]
+    assert evs[0]["part"]["tokens"]["input"] == 1000
+    assert evs[0]["part"]["tokens"]["output"] == 200
+    assert evs[0]["part"]["tokens"]["reasoning"] == 850
+
+    # Top-level result
+    evs = pipeline._parse_reasonix_line(json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "usage": {
+            "input_tokens": 1000,
+            "output_tokens": 200,
+            "cache_read_input_tokens": 850,
+        }
+    }))
+    assert len(evs) == 1
+    assert evs[0]["type"] == "log"
+    assert "done · success" in evs[0]["line"]
+    assert evs[0]["part"]["tokens"]["input"] == 1000
+    assert evs[0]["part"]["tokens"]["output"] == 200
+    assert evs[0]["part"]["tokens"]["reasoning"] == 850
+
+
+def test_format_pi_model_name():
+    family, name = config._format_pi_model_name("~deepseek/deepseek-v4-flash-latest")
+    assert family == "deepseek"
+    assert name == "DeepSeek V4 Flash Latest"
+
+    family, name = config._format_pi_model_name("deepseek/deepseek-v4-flash")
+    assert family == "deepseek"
+    assert name == "DeepSeek V4 Flash"
+
+    family, name = config._format_pi_model_name("deepseek/deepseek-v4-flash-0731")
+    assert family == "deepseek"
+    assert name == "DeepSeek V4 Flash (0731 Snapshot)"
+
+    family, name = config._format_pi_model_name("deepseek/deepseek-v4-pro-0813")
+    assert family == "deepseek"
+    assert name == "DeepSeek V4 Pro (0813 Snapshot)"
+
+    family, name = config._format_pi_model_name("~anthropic/claude-sonnet-latest")
+    assert family == "anthropic"
+    assert name == "Claude Sonnet Latest"
+
+    family, name = config._format_pi_model_name("google/gemini-3.7-flash")
+    assert family == "google"
+    assert name == "Gemini 3.7 Flash"
+
+
+def test_parse_human_tokens():
+    assert config._parse_human_tokens("1.0M") == 1_000_000
+    assert config._parse_human_tokens("1M") == 1_000_000
+    assert config._parse_human_tokens("384K") == 384_000
+    assert config._parse_human_tokens("393.2K") == 393_200
+    assert config._parse_human_tokens("128000") == 128_000
+    assert config._parse_human_tokens("") == 0
+
+
+def test_parse_pi_models():
+    sample_stdout = """provider    model                               context  max-out  thinking  images
+openrouter  ~deepseek/deepseek-v4-flash-latest  1.0M     384K     yes       no    
+openrouter  deepseek/deepseek-v4-flash          1.0M     384K     yes       no    
+openrouter  deepseek/deepseek-v4-flash-0731     1.0M     393.2K   yes       no    
+openrouter  deepseek/deepseek-v4-pro            1.0M     384K     yes       no    
+openrouter  deepseek/deepseek-chat              128K     16K      no        no    
+openrouter  anthropic/claude-3-7-sonnet         1M       128K     yes       yes   
+openrouter  google/gemini-2.5-flash             1.0M     65.5K    yes       yes   
+"""
+    variants = ["low", "medium", "high", "max"]
+    models = config._parse_pi_models(sample_stdout, variants)
+    assert len(models) == 7
+
+    # 1. Latest alias
+    latest = next(m for m in models if m["id"] == "~deepseek/deepseek-v4-flash-latest")
+    assert latest["name"] == "DeepSeek V4 Flash Latest"
+    assert latest["family"] == "deepseek"
+    assert latest["reasoning"] is True
+    assert latest["variants"] == variants
+    assert latest["limit"]["context"] == 1_000_000
+    assert latest["limit"]["output"] == 384_000
+
+    # 2. Standard alias
+    std = next(m for m in models if m["id"] == "deepseek/deepseek-v4-flash")
+    assert std["name"] == "DeepSeek V4 Flash"
+    assert std["family"] == "deepseek"
+    assert std["reasoning"] is True
+    assert std["variants"] == variants
+
+    # 3. Snapshot
+    snap = next(m for m in models if m["id"] == "deepseek/deepseek-v4-flash-0731")
+    assert snap["name"] == "DeepSeek V4 Flash (0731 Snapshot)"
+    assert snap["family"] == "deepseek"
+    assert snap["limit"]["output"] == 393_200
+
+    # 4. Non-reasoning model
+    chat = next(m for m in models if m["id"] == "deepseek/deepseek-chat")
+    assert chat["name"] == "DeepSeek Chat"
+    assert chat["reasoning"] is False
+    assert chat["variants"] == []
+
+
+def test_parse_pi_line():
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline._pi_tools = {}
+    pipeline.EVENT_TEXT_CAP = 4000
+    pipeline.EVENT_TOOL_OUTPUT_CAP = 4000
+
+    # Turn start
+    evs = pipeline._parse_pi_line(json.dumps({
+        "type": "turn_start",
+        "turn": 1,
+    }))
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_start"
+
+    # Delta text
+    evs = pipeline._parse_pi_line(json.dumps({
+        "type": "delta",
+        "delta": "Hello from Pi Harness",
+    }))
+    assert len(evs) == 1
+    assert evs[0]["type"] == "text"
+    assert "Pi Harness" in evs[0]["part"]["text"]
+
+    # Step finish with usage & nested dict cost
+    evs = pipeline._parse_pi_line(json.dumps({
+        "type": "turn_end",
+        "message": {
+            "role": "assistant",
+            "usage": {
+                "input": 500,
+                "output": 80,
+                "cacheRead": 120,
+                "cost": {"total": 0.0005},
+            },
+            "stopReason": "stop",
+        },
+    }))
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_finish"
+    assert evs[0]["part"]["tokens"]["input"] == 500
+    assert evs[0]["part"]["tokens"]["output"] == 80
+    assert evs[0]["part"]["tokens"]["reasoning"] == 120
+    assert evs[0]["part"]["cost"] == 0.0005
+
+    # Error payload inside message
+    error_line = json.dumps({
+        "type": "message_end",
+        "message": {
+            "role": "assistant",
+            "stopReason": "error",
+            "errorMessage": "404: No endpoints available matching your guardrail restrictions",
+        },
+    })
+    evs = pipeline._parse_pi_line(error_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "text"
+    assert "No endpoints available" in evs[0]["part"]["text"]
+    assert "Pi error: 404: No endpoints" in pipeline._last_agent_error
+
+    # Message content blocks (reasoning + tool_use) on message_end
+    msg_end = json.dumps({
+        "type": "message_end",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "Planning extraction strategy..."},
+                {"type": "tool_use", "id": "call_99", "name": "read_file", "input": {"path": "transcript.txt"}},
+            ],
+        },
+    })
+    evs = pipeline._parse_pi_line(msg_end)
+    assert len(evs) == 2
+    assert evs[0]["type"] == "reasoning"
+    assert "Planning extraction" in evs[0]["part"]["text"]
+    assert evs[1]["type"] == "tool_use"
+    assert evs[1]["part"]["callID"] == "call_99"
+    assert evs[1]["part"]["state"]["status"] == "running"
+
+    # Tool results and usage on turn_end
+    turn_end = json.dumps({
+        "type": "turn_end",
+        "message": {
+            "role": "assistant",
+            "usage": {"input": 200, "output": 50},
+            "stopReason": "tool_use",
+        },
+        "toolResults": [
+            {"toolCallId": "call_99", "toolName": "read_file", "result": "Lecture 1 text", "isError": False},
+        ],
+    })
+    evs = pipeline._parse_pi_line(turn_end)
+    assert len(evs) == 2
+    assert evs[0]["type"] == "tool_use"
+    assert evs[0]["part"]["callID"] == "call_99"
+    assert evs[0]["part"]["state"]["status"] == "completed"
+    assert evs[0]["part"]["state"]["output"] == "Lecture 1 text"
+    assert evs[1]["type"] == "step_finish"
+
+
+def test_pi_sandbox_args():
+    args = permissions.pi_sandbox_args()
+    assert "--print" in args
+    assert "--mode" in args
+    assert "json" in args
+    assert "--no-session" in args
+    assert "--approve" in args
 
 
