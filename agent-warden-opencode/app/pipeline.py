@@ -516,10 +516,11 @@ class Pipeline:
         cmd = argv + [
             "-p",
             "--output-format", "stream-json",
+            "--verbose",
             "--model", self.model,
             "--dangerously-skip-permissions",
             "--max-turns", str(config.CLAUDE_MAX_TURNS),
-            "--allowedTools", allowed_tools,
+            "--tools", allowed_tools,
         ]
         env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
         if extra_env:
@@ -673,6 +674,7 @@ class Pipeline:
             "output": g("output", "outputTokens", "output_tokens",
                         "completionTokens", "completion_tokens"),
             "reasoning": g("reasoning", "reasoningTokens", "reasoning_tokens",
+                           "reasoning_output_tokens",
                            "cacheRead", "cacheReadTokens", "cache_read_input_tokens",
                            "cacheHitTokens", "cache_hit_tokens",
                            "prompt_cache_hit_tokens"),
@@ -860,6 +862,98 @@ class Pipeline:
         et = raw.get("type")
         if not et:
             return []
+        out: list[dict] = []
+        if et == "system":
+            model = raw.get("model")
+            return [{"type": "step_start", "part": {"model": model}}]
+        if et == "assistant":
+            msg = raw.get("message") or {}
+            usage = msg.get("usage") or {}
+            if usage and (usage.get("input_tokens") or usage.get("output_tokens")):
+                out.append({"type": "step_start", "part": {
+                    "model": msg.get("model"),
+                    "tokens": self._usage_tokens(usage),
+                }})
+            content = msg.get("content") or []
+            if isinstance(content, str) and content.strip():
+                trimmed = len(content) > self.EVENT_TEXT_CAP
+                out.append({"type": "text", "part": {
+                    "text": content[:self.EVENT_TEXT_CAP] if trimmed else content,
+                    "trimmed": trimmed,
+                }})
+            elif isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    bt = block.get("type")
+                    if bt in {"thinking", "reasoning"}:
+                        text = block.get("thinking") or block.get("text") or ""
+                        if text:
+                            trimmed = len(text) > self.EVENT_TEXT_CAP
+                            out.append({"type": "reasoning", "part": {
+                                "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                                "trimmed": trimmed,
+                            }})
+                    elif bt == "text":
+                        text = block.get("text") or ""
+                        if text.strip():
+                            trimmed = len(text) > self.EVENT_TEXT_CAP
+                            out.append({"type": "text", "part": {
+                                "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                                "trimmed": trimmed,
+                            }})
+                    elif bt == "tool_use":
+                        call_id = str(block.get("id") or "")
+                        rec = {
+                            "tool": block.get("name") or "tool",
+                            "title": block.get("name") or "",
+                            "input": block.get("input"),
+                        }
+                        if call_id:
+                            self._claude_tools[call_id] = rec
+                        part = {
+                            "tool": rec["tool"],
+                            "title": rec["title"],
+                            "callID": call_id,
+                            "state": {"status": "running"},
+                        }
+                        if rec["input"] is not None:
+                            part["state"]["input"] = rec["input"]
+                        out.append({"type": "tool_use", "part": part})
+            return out
+        if et == "user":
+            msg = raw.get("message") or {}
+            content = msg.get("content") or []
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_result":
+                        call_id = str(block.get("tool_use_id") or "")
+                        rec = self._claude_tools.get(call_id) or {
+                            "tool": "tool",
+                            "title": "",
+                        }
+                        res_out = block.get("content") or ""
+                        if not isinstance(res_out, str):
+                            try:
+                                res_out = json.dumps(res_out, ensure_ascii=False)
+                            except (TypeError, ValueError):
+                                res_out = str(res_out)
+                        trimmed = len(res_out) > self.EVENT_TOOL_OUTPUT_CAP
+                        part = {
+                            "tool": rec.get("tool") or "tool",
+                            "title": rec.get("title") or "",
+                            "callID": call_id,
+                            "state": {
+                                "status": "completed" if not block.get("is_error") else "error",
+                                "output": res_out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else res_out,
+                            },
+                        }
+                        if trimmed:
+                            part["state"]["output_trimmed"] = True
+                        out.append({"type": "tool_use", "part": part})
+            return out
         if et == "message_start":
             msg = raw.get("message") or {}
             usage = msg.get("usage") or {}
@@ -878,11 +972,15 @@ class Pipeline:
         if et in {"result", "cost"}:
             usage = raw.get("usage") or {}
             cost = float(raw.get("total_cost_usd") or raw.get("cost") or 0.0)
-            return [{"type": "step_finish", "part": {
-                "reason": "result",
+            res_text = raw.get("result") or ""
+            if isinstance(res_text, str) and res_text.strip() and raw.get("is_error"):
+                out.append({"type": "text", "part": {"text": res_text[:self.EVENT_TEXT_CAP]}})
+            out.append({"type": "step_finish", "part": {
+                "reason": raw.get("stop_reason") or "result",
                 "tokens": self._usage_tokens(usage),
                 "cost": cost,
-            }}]
+            }})
+            return out
         if et == "content_block_start":
             cb = raw.get("content_block") or {}
             cbt = cb.get("type")
@@ -953,20 +1051,20 @@ class Pipeline:
             return [{"type": "tool_use", "part": part}]
         if et in {"tool_result", "tool_completed", "tool_errored"}:
             call_id = str(raw.get("tool_use_id") or raw.get("id") or "")
-            out = raw.get("content") or raw.get("output") or raw.get("result") or ""
-            if not isinstance(out, str):
+            out_str = raw.get("content") or raw.get("output") or raw.get("result") or ""
+            if not isinstance(out_str, str):
                 try:
-                    out = json.dumps(out, ensure_ascii=False)
+                    out_str = json.dumps(out_str, ensure_ascii=False)
                 except (TypeError, ValueError):
-                    out = str(out)
-            trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+                    out_str = str(out_str)
+            trimmed = len(out_str) > self.EVENT_TOOL_OUTPUT_CAP
             part = {
                 "tool": raw.get("tool") or raw.get("name") or "tool",
                 "title": raw.get("name") or raw.get("title") or "",
                 "callID": call_id,
                 "state": {
                     "status": "completed" if et != "tool_errored" else "error",
-                    "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                    "output": out_str[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out_str,
                 },
             }
             if trimmed:
@@ -993,10 +1091,12 @@ class Pipeline:
         et = raw.get("type")
         if not et:
             return []
-        if et in {"step_start", "turn_start"}:
+        if et == "thread.started":
+            return [{"type": "step_start", "part": {"thread": raw.get("thread_id")}}]
+        if et in {"turn.started", "turn_start", "step_start"}:
             turn = raw.get("turn") or (raw.get("part") or {}).get("turn")
             return [{"type": "step_start", "part": {"turn": turn}}]
-        if et in {"step_finish", "turn_end"}:
+        if et in {"turn.completed", "step_finish", "turn_end"}:
             usage = raw.get("usage") or (raw.get("part") or {}).get("tokens") or {}
             reason = (raw.get("stop_reason") or raw.get("reason")
                       or (raw.get("part") or {}).get("reason") or "stop")
@@ -1005,6 +1105,96 @@ class Pipeline:
                 "tokens": self._usage_tokens(usage),
                 "cost": self._usage_cost(raw),
             }}]
+        if et in {"item.started", "item.completed"}:
+            item = raw.get("item") or {}
+            itype = item.get("type")
+            item_id = str(item.get("id") or "")
+            if itype == "agent_message":
+                text = item.get("text") or ""
+                if text.strip():
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "text", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+            elif itype in {"reasoning", "thinking"}:
+                text = item.get("text") or item.get("thinking") or ""
+                if text.strip():
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "reasoning", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+            elif itype == "command_execution":
+                cmd = item.get("command") or ""
+                status = item.get("status")
+                out_str = item.get("aggregated_output") or item.get("output") or ""
+                if not isinstance(out_str, str):
+                    try:
+                        out_str = json.dumps(out_str, ensure_ascii=False)
+                    except (TypeError, ValueError):
+                        out_str = str(out_str)
+                rec = {"tool": "exec", "title": "exec", "input": {"command": cmd}}
+                if item_id:
+                    self._codex_tools[item_id] = rec
+                if status in {"completed", "failed"} or et == "item.completed":
+                    trimmed = len(out_str) > self.EVENT_TOOL_OUTPUT_CAP
+                    is_err = status == "failed" or (item.get("exit_code") is not None and item.get("exit_code") != 0)
+                    part = {
+                        "tool": "exec",
+                        "title": "exec",
+                        "callID": item_id,
+                        "state": {
+                            "status": "error" if is_err else "completed",
+                            "output": out_str[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out_str,
+                        },
+                    }
+                    if cmd:
+                        part["state"]["input"] = {"command": cmd}
+                    if trimmed:
+                        part["state"]["output_trimmed"] = True
+                    return [{"type": "tool_use", "part": part}]
+                else:
+                    part = {
+                        "tool": "exec",
+                        "title": "exec",
+                        "callID": item_id,
+                        "state": {"status": "running"},
+                    }
+                    if cmd:
+                        part["state"]["input"] = {"command": cmd}
+                    return [{"type": "tool_use", "part": part}]
+            elif itype in {"file_change", "file_edit", "patch_apply", "file_write"}:
+                path = item.get("path") or item.get("filename") or ""
+                rec = {"tool": itype, "title": itype, "input": {"path": path}}
+                if item_id:
+                    self._codex_tools[item_id] = rec
+                status = "completed" if et == "item.completed" else "running"
+                part = {
+                    "tool": itype,
+                    "title": itype,
+                    "callID": item_id,
+                    "state": {"status": status, "input": {"path": path}},
+                }
+                return [{"type": "tool_use", "part": part}]
+            elif itype == "error":
+                msg = item.get("message") or str(item)
+                return [{"type": "text", "part": {"text": f"[Error] {msg}"}}]
+            return []
+        if et == "item.delta":
+            delta = raw.get("delta") or {}
+            text = delta.get("text") or ""
+            if text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                return [{"type": "text", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }}]
+        if et in {"error", "turn.failed"}:
+            err = raw.get("error") or raw.get("message") or ""
+            if isinstance(err, dict):
+                err = err.get("message") or str(err)
+            return [{"type": "text", "part": {"text": f"[Error] {err}"}}]
         if et in {"tool_use", "tool_call"}:
             call_id = str(raw.get("call_id") or raw.get("id") or "")
             rec = {
@@ -1029,20 +1219,20 @@ class Pipeline:
                 "tool": raw.get("tool") or "tool",
                 "title": raw.get("title") or "",
             }
-            out = raw.get("output") or raw.get("result") or raw.get("error") or ""
-            if not isinstance(out, str):
+            out_str = raw.get("output") or raw.get("result") or raw.get("error") or ""
+            if not isinstance(out_str, str):
                 try:
-                    out = json.dumps(out, ensure_ascii=False)
+                    out_str = json.dumps(out_str, ensure_ascii=False)
                 except (TypeError, ValueError):
-                    out = str(out)
-            trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+                    out_str = str(out_str)
+            trimmed = len(out_str) > self.EVENT_TOOL_OUTPUT_CAP
             part = {
                 "tool": rec.get("tool") or "tool",
                 "title": rec.get("title") or "",
                 "callID": call_id,
                 "state": {
                     "status": "completed" if et != "tool_error" else "error",
-                    "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                    "output": out_str[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out_str,
                 },
             }
             if trimmed:

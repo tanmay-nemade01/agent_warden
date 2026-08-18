@@ -231,6 +231,168 @@ def test_parse_codex_events():
     assert events[0]["part"]["tokens"]["output"] == 100
 
 
+def test_parse_claude_cli_stream_events():
+    """Test native Claude Code 2.x CLI stream-json envelopes."""
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.stats = {"cost": 0.0, "tokens": {"input": 0, "output": 0, "reasoning": 0}}
+    pipeline._claude_tools = {}
+    pipeline.EVENT_TEXT_CAP = 4000
+    pipeline.EVENT_TOOL_OUTPUT_CAP = 4000
+
+    # system / init envelope
+    sys_line = json.dumps({
+        "type": "system",
+        "subtype": "init",
+        "model": "claude-opus-5",
+        "session_id": "test-session-123",
+    })
+    events = pipeline._parse_claude_line(sys_line)
+    assert len(events) == 1
+    assert events[0]["type"] == "step_start"
+    assert events[0]["part"]["model"] == "claude-opus-5"
+
+    # assistant envelope with thinking, text, and tool_use
+    asst_line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "id": "msg_001",
+            "role": "assistant",
+            "model": "claude-3-7-sonnet",
+            "usage": {"input_tokens": 120, "output_tokens": 45},
+            "content": [
+                {"type": "thinking", "thinking": "Analyzing requirements..."},
+                {"type": "text", "text": "I will read the file."},
+                {"type": "tool_use", "id": "call_1", "name": "Read", "input": {"path": "main.py"}},
+            ],
+        },
+    })
+    events = pipeline._parse_claude_line(asst_line)
+    assert len(events) == 4
+    assert events[0]["type"] == "step_start"
+    assert events[0]["part"]["tokens"]["input"] == 120
+    assert events[1]["type"] == "reasoning"
+    assert "Analyzing" in events[1]["part"]["text"]
+    assert events[2]["type"] == "text"
+    assert events[2]["part"]["text"] == "I will read the file."
+    assert events[3]["type"] == "tool_use"
+    assert events[3]["part"]["tool"] == "Read"
+    assert events[3]["part"]["callID"] == "call_1"
+    assert events[3]["part"]["state"]["status"] == "running"
+
+    # user envelope with tool_result
+    user_line = json.dumps({
+        "type": "user",
+        "message": {
+            "content": [
+                {"type": "tool_result", "tool_use_id": "call_1", "content": "print('hello')", "is_error": False}
+            ]
+        }
+    })
+    events = pipeline._parse_claude_line(user_line)
+    assert len(events) == 1
+    assert events[0]["type"] == "tool_use"
+    assert events[0]["part"]["tool"] == "Read"
+    assert events[0]["part"]["callID"] == "call_1"
+    assert events[0]["part"]["state"]["status"] == "completed"
+    assert events[0]["part"]["state"]["output"] == "print('hello')"
+
+    # result envelope
+    res_line = json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "result": "Task completed successfully",
+        "total_cost_usd": 0.0035,
+        "usage": {"input_tokens": 200, "output_tokens": 80},
+    })
+    events = pipeline._parse_claude_line(res_line)
+    assert len(events) == 1
+    assert events[0]["type"] == "step_finish"
+    assert events[0]["part"]["tokens"]["input"] == 200
+    assert events[0]["part"]["tokens"]["output"] == 80
+    assert events[0]["part"]["cost"] == 0.0035
+
+
+def test_parse_codex_cli_stream_events():
+    """Test native OpenAI Codex CLI JSONL stream events."""
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.stats = {"cost": 0.0, "tokens": {"input": 0, "output": 0, "reasoning": 0}}
+    pipeline._codex_tools = {}
+    pipeline.EVENT_TEXT_CAP = 4000
+    pipeline.EVENT_TOOL_OUTPUT_CAP = 4000
+
+    # thread.started
+    t_start = json.dumps({"type": "thread.started", "thread_id": "01a01429-e43d-7a52"})
+    events = pipeline._parse_codex_line(t_start)
+    assert len(events) == 1
+    assert events[0]["type"] == "step_start"
+    assert events[0]["part"]["thread"] == "01a01429-e43d-7a52"
+
+    # turn.started
+    turn_start = json.dumps({"type": "turn.started"})
+    events = pipeline._parse_codex_line(turn_start)
+    assert len(events) == 1
+    assert events[0]["type"] == "step_start"
+
+    # item.completed (agent_message)
+    msg_item = json.dumps({
+        "type": "item.completed",
+        "item": {"id": "item_0", "type": "agent_message", "text": "Running tests now."},
+    })
+    events = pipeline._parse_codex_line(msg_item)
+    assert len(events) == 1
+    assert events[0]["type"] == "text"
+    assert events[0]["part"]["text"] == "Running tests now."
+
+    # item.started (command_execution)
+    cmd_start = json.dumps({
+        "type": "item.started",
+        "item": {"id": "item_1", "type": "command_execution", "command": "python -m pytest", "status": "in_progress"},
+    })
+    events = pipeline._parse_codex_line(cmd_start)
+    assert len(events) == 1
+    assert events[0]["type"] == "tool_use"
+    assert events[0]["part"]["tool"] == "exec"
+    assert events[0]["part"]["callID"] == "item_1"
+    assert events[0]["part"]["state"]["status"] == "running"
+    assert events[0]["part"]["state"]["input"]["command"] == "python -m pytest"
+
+    # item.completed (command_execution)
+    cmd_done = json.dumps({
+        "type": "item.completed",
+        "item": {
+            "id": "item_1",
+            "type": "command_execution",
+            "command": "python -m pytest",
+            "aggregated_output": "59 passed in 10s",
+            "exit_code": 0,
+            "status": "completed",
+        },
+    })
+    events = pipeline._parse_codex_line(cmd_done)
+    assert len(events) == 1
+    assert events[0]["type"] == "tool_use"
+    assert events[0]["part"]["callID"] == "item_1"
+    assert events[0]["part"]["state"]["status"] == "completed"
+    assert events[0]["part"]["state"]["output"] == "59 passed in 10s"
+
+    # turn.completed
+    turn_done = json.dumps({
+        "type": "turn.completed",
+        "usage": {
+            "input_tokens": 15000,
+            "cached_input_tokens": 10000,
+            "output_tokens": 120,
+            "reasoning_output_tokens": 25,
+        },
+    })
+    events = pipeline._parse_codex_line(turn_done)
+    assert len(events) == 1
+    assert events[0]["type"] == "step_finish"
+    assert events[0]["part"]["tokens"]["input"] == 15000
+    assert events[0]["part"]["tokens"]["output"] == 120
+    assert events[0]["part"]["tokens"]["reasoning"] == 25
+
+
 def test_format_commandcode_model_name():
     assert config._format_commandcode_model_name("deepseek/deepseek-v4-flash") == "DeepSeek V4 Flash"
     assert config._format_commandcode_model_name("moonshotai/kimi-k3") == "Kimi K3"

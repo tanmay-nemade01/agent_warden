@@ -61,7 +61,7 @@ BACKENDS = {
     BACKEND_CODEX: {
         "id": BACKEND_CODEX,
         "label": "OpenAI Codex",
-        "model": "gpt-5.4",
+        "model": "gpt-5.4-mini",
         "variant": "",
         "provider": "openai",
         "effort_variants": [],
@@ -586,16 +586,6 @@ def _fallback_models(backend: str) -> list[dict]:
     if backend_id == BACKEND_CODEX:
         return [
             {
-                "id": "gpt-5.4",
-                "name": "GPT-5.4",
-                "family": "gpt-5",
-                "status": "active",
-                "reasoning": True,
-                "variants": [],
-                "cost": {},
-                "limit": {},
-            },
-            {
                 "id": "gpt-5.4-mini",
                 "name": "GPT-5.4 Mini",
                 "family": "gpt-5",
@@ -606,11 +596,41 @@ def _fallback_models(backend: str) -> list[dict]:
                 "limit": {},
             },
             {
-                "id": "gpt-4o",
-                "name": "GPT-4o",
-                "family": "gpt-4o",
+                "id": "gpt-5.6-terra",
+                "name": "GPT-5.6 Terra",
+                "family": "gpt-5",
                 "status": "active",
-                "reasoning": False,
+                "reasoning": True,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "gpt-5.6-luna",
+                "name": "GPT-5.6 Luna",
+                "family": "gpt-5",
+                "status": "active",
+                "reasoning": True,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "gpt-5.5",
+                "name": "GPT-5.5",
+                "family": "gpt-5",
+                "status": "active",
+                "reasoning": True,
+                "variants": [],
+                "cost": {},
+                "limit": {},
+            },
+            {
+                "id": "gpt-5.4",
+                "name": "GPT-5.4",
+                "family": "gpt-5",
+                "status": "active",
+                "reasoning": True,
                 "variants": [],
                 "cost": {},
                 "limit": {},
@@ -1112,11 +1132,46 @@ def _list_claude_models(refresh: bool, timeout: float) -> dict:
     }
 
 
+def _load_codex_cached_models() -> list[dict]:
+    cache_path = Path.home() / ".codex" / "models_cache.json"
+    if not cache_path.is_file():
+        return []
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8", errors="replace"))
+        raw_models = data.get("models") or []
+        models = []
+        for rm in raw_models:
+            slug = rm.get("slug")
+            if not slug or slug == "codex-auto-review":
+                continue
+            name = rm.get("display_name") or slug
+            desc = rm.get("description") or ""
+            reasoning = bool(rm.get("default_reasoning_summary") or "reasoning" in desc.lower())
+            models.append({
+                "id": slug,
+                "name": name,
+                "family": "openai",
+                "description": desc,
+                "status": "active",
+                "reasoning": reasoning,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": rm.get("context_window", 0)},
+            })
+        return models
+    except Exception:
+        return []
+
+
 def _list_codex_models(refresh: bool, timeout: float) -> dict:
     meta = backend_meta(BACKEND_CODEX)
-    models = _fallback_models(BACKEND_CODEX)
+    cached = _load_codex_cached_models()
+    models = cached if cached else _fallback_models(BACKEND_CODEX)
     argv = find_codex_argv()
     default_model = meta["model"]
+    ids = {m["id"] for m in models}
+    if default_model not in ids and models:
+        default_model = models[0]["id"]
     variants = next((m["variants"] for m in models if m["id"] == default_model),
                     list(meta["effort_variants"]))
     return {
