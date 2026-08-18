@@ -31,6 +31,7 @@ BACKEND_CLAUDE = "claude"
 BACKEND_CODEX = "codex"
 BACKEND_REASONIX = "reasonix"
 BACKEND_PI = "pi"
+BACKEND_ANTIGRAVITY = "antigravity"
 DEFAULT_BACKEND = BACKEND_OPENCODE
 
 BACKENDS = {
@@ -82,6 +83,14 @@ BACKENDS = {
         "provider": "openrouter",
         "effort_variants": ["low", "medium", "high", "max"],
     },
+    BACKEND_ANTIGRAVITY: {
+        "id": BACKEND_ANTIGRAVITY,
+        "label": "Antigravity",
+        "model": "gemini-3.7-flash",
+        "variant": "high",
+        "provider": "google",
+        "effort_variants": ["low", "medium", "high", "max"],
+    },
 }
 
 # OpenCode defaults (kept as top-level names for existing callers).
@@ -103,6 +112,7 @@ CLAUDE_MAX_TURNS = 250
 CODEX_MAX_TURNS = 250
 REASONIX_MAX_TURNS = 250
 PI_MAX_TURNS = 250
+ANTIGRAVITY_MAX_TURNS = 250
 # OpenCode sends min(model.limit.output, this env). Default 32k is far
 # too small for max-effort thinking (finish reason length/unknown, 0
 # output tokens). DeepSeek V4 catalog output is 384k; 128k still truncated
@@ -127,6 +137,8 @@ def normalize_backend(backend: str | None) -> str:
         return BACKEND_REASONIX
     if raw in {"pi", "piharness", "picodingagent"}:
         return BACKEND_PI
+    if raw in {"antigravity", "agy", "googleantigravity", "gemini"}:
+        return BACKEND_ANTIGRAVITY
     if raw in {"opencode", "oc"}:
         return BACKEND_OPENCODE
     return DEFAULT_BACKEND
@@ -212,6 +224,7 @@ _CLAUDE_ARGV: list[str] | None = None
 _CODEX_ARGV: list[str] | None = None
 _REASONIX_ARGV: list[str] | None = None
 _PI_ARGV: list[str] | None = None
+_ANTIGRAVITY_ARGV: list[str] | None = None
 _MODELS_CACHE: dict[str, dict] = {}
 _MODELS_CACHE_AT: dict[str, float] = {}
 _MODELS_CACHE_TTL = 300.0  # seconds (OpenCode)
@@ -446,6 +459,45 @@ def find_pi_argv() -> list[str]:
 
 def find_pi() -> str:
     return find_pi_argv()[0]
+
+
+def find_antigravity_argv() -> list[str]:
+    """Argv prefix for Antigravity CLI (agy), skipping PowerShell shims."""
+    global _ANTIGRAVITY_ARGV
+    if _ANTIGRAVITY_ARGV:
+        return _ANTIGRAVITY_ARGV
+    for name in ("agy.exe", "agy.cmd", "agy", "antigravity.exe", "antigravity.cmd", "antigravity"):
+        found = shutil.which(name)
+        if found:
+            path = Path(found)
+            if path.suffix.lower() == ".ps1":
+                cmd = path.with_suffix(".cmd")
+                if cmd.is_file():
+                    path = cmd
+            _ANTIGRAVITY_ARGV = [str(path)]
+            return _ANTIGRAVITY_ARGV
+    pkg_roots = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Antigravity",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages",
+        Path(os.environ.get("APPDATA", "")) / "npm",
+        Path.home() / ".gemini" / "antigravity-cli",
+    ]
+    for root in pkg_roots:
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            for f in ("agy.exe", "agy.cmd", "antigravity.exe", "antigravity.cmd"):
+                if f in filenames:
+                    p = Path(dirpath) / f
+                    _ANTIGRAVITY_ARGV = [str(p)]
+                    return _ANTIGRAVITY_ARGV
+            dirnames[:] = [d for d in dirnames if d not in {"__pycache__", ".git"}]
+    _ANTIGRAVITY_ARGV = ["agy"]
+    return _ANTIGRAVITY_ARGV
+
+
+def find_antigravity() -> str:
+    return find_antigravity_argv()[0]
 
 
 def _parse_models_verbose(stdout: str) -> list[dict]:
@@ -780,6 +832,59 @@ def _fallback_models(backend: str) -> list[dict]:
                 "variants": [],
                 "cost": {},
                 "limit": {},
+            },
+        ]
+    if backend_id == BACKEND_ANTIGRAVITY:
+        return [
+            {
+                "id": "gemini-3.7-flash",
+                "name": "Gemini 3.7 Flash",
+                "family": "gemini",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 65536},
+            },
+            {
+                "id": "gemini-3.7-pro",
+                "name": "Gemini 3.7 Pro",
+                "family": "gemini",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 2000000, "output": 65536},
+            },
+            {
+                "id": "gemini-3.1-pro-preview",
+                "name": "Gemini 3.1 Pro Preview",
+                "family": "gemini",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 2000000, "output": 65536},
+            },
+            {
+                "id": "gemini-2.5-flash",
+                "name": "Gemini 2.5 Flash",
+                "family": "gemini",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 65536},
+            },
+            {
+                "id": "gemini-2.5-pro",
+                "name": "Gemini 2.5 Pro",
+                "family": "gemini",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 2000000, "output": 65536},
             },
         ]
     return [{
@@ -1428,6 +1533,24 @@ def _list_pi_models(refresh: bool, timeout: float) -> dict:
     }
 
 
+def _list_antigravity_models(refresh: bool, timeout: float) -> dict:
+    meta = backend_meta(BACKEND_ANTIGRAVITY)
+    fallback = _fallback_models(BACKEND_ANTIGRAVITY)
+    argv = find_antigravity_argv()
+    default_model = meta["model"]
+    variants = next((m["variants"] for m in fallback if m["id"] == default_model),
+                    list(meta["effort_variants"]))
+    return {
+        "ok": True,
+        "backend": BACKEND_ANTIGRAVITY,
+        "provider": meta["provider"],
+        "models": fallback,
+        "default_model": default_model,
+        "default_variant": preferred_variant(variants, meta["variant"]),
+        "error": None,
+    }
+
+
 def list_models(provider: str | None = None, refresh: bool = False,
                 timeout: float | None = None, backend: str | None = None) -> dict:
     """Discover models for a backend.
@@ -1461,6 +1584,9 @@ def list_models(provider: str | None = None, refresh: bool = False,
             refresh=refresh, timeout=timeout if timeout is not None else 30.0)
     elif backend == BACKEND_PI:
         result = _list_pi_models(
+            refresh=refresh, timeout=timeout if timeout is not None else 30.0)
+    elif backend == BACKEND_ANTIGRAVITY:
+        result = _list_antigravity_models(
             refresh=refresh, timeout=timeout if timeout is not None else 30.0)
     else:
         result = _list_opencode_models(

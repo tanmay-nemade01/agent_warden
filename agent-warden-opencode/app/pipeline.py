@@ -174,6 +174,7 @@ class Pipeline:
         self._cc_tools: dict[str, dict] = {}
         self._claude_tools: dict[str, dict] = {}
         self._codex_tools: dict[str, dict] = {}
+        self._antigravity_tools: dict[str, dict] = {}
         self._timed_out = False
         self._stalled = False
         self._last_activity = 0.0
@@ -328,6 +329,8 @@ class Pipeline:
             return self._run_reasonix(agent, message, title, extra_env)
         if self.backend == config.BACKEND_PI:
             return self._run_pi(agent, message, title, extra_env)
+        if self.backend == config.BACKEND_ANTIGRAVITY:
+            return self._run_antigravity(agent, message, title, extra_env)
         self._oc_session_id = None
         resume = self._resume_session
         self._resume_session = None
@@ -600,6 +603,28 @@ class Pipeline:
         self._popen(cmd, stdin_data=message, extra_env=env,
                     cwd=str(config.WORKSPACE))
         return self._stream_process(agent, self._parse_pi_line)
+
+    def _run_antigravity(self, agent: int, message: str, title: str,
+                         extra_env: dict | None = None) -> tuple[int, list[str]]:
+        """Headless Antigravity CLI: `agy` with stream-json events."""
+        job = self._ensure_job_files()
+        job["prompt"].write_text(message, encoding="utf-8")
+        argv = config.find_antigravity_argv()
+        cmd = argv + [
+            "--model", self.model,
+            "--file", str(job["prompt"]),
+        ] + permissions.antigravity_args()
+        if self.variant:
+            cmd.extend(["--variant", self.variant])
+        env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
+        if extra_env:
+            env.update(extra_env)
+        self._antigravity_tools = {}
+        self._log({"type": "phase_cmd", "phase": AGENTS[agent],
+                   "cmd": " ".join(cmd[:10]) + " ..."})
+        self._popen(cmd, stdin_data=message, extra_env=env,
+                    cwd=str(config.WORKSPACE))
+        return self._stream_process(agent, self._parse_antigravity_line)
 
     def _parse_agent_event(self, line: str) -> dict | None:
         """Parse one `opencode run --format json` line into a UI-safe event.
@@ -1580,6 +1605,109 @@ class Pipeline:
                     "tokens": self._usage_tokens(usage),
                     "cost": cost,
                 }})
+
+        return events
+
+    def _parse_antigravity_line(self, line: str) -> list[dict]:
+        """Map one Antigravity (AGY) JSONL stream line to UI agent_event dicts."""
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            text = line.strip()
+            if not text:
+                return []
+            trimmed = len(text) > self.EVENT_TEXT_CAP
+            return [{"type": "text", "part": {
+                "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                "trimmed": trimmed,
+            }}]
+        if not isinstance(raw, dict):
+            return []
+        et = raw.get("type") or raw.get("event") or raw.get("kind")
+        if not et:
+            return []
+
+        if et in {"error", "session_error"}:
+            err_data = raw.get("error") or raw.get("message") or {}
+            err_msg = err_data.get("message") if isinstance(err_data, dict) else str(err_data)
+            self._last_agent_error = f"Antigravity error: {err_msg}"
+            return [{"type": "text", "part": {
+                "text": f"Error: {err_msg}", "trimmed": False}}]
+
+        events: list[dict] = []
+        if et in {"turn_start", "step_start", "session_start"}:
+            turn = raw.get("turn") or (raw.get("part") or {}).get("turn") or 1
+            model = raw.get("model") or (raw.get("part") or {}).get("model")
+            part = {"turn": turn}
+            if model:
+                part["model"] = model
+            return [{"type": "step_start", "part": part}]
+
+        if et in {"reasoning", "thinking"}:
+            text = raw.get("text") or raw.get("thinking") or (raw.get("part") or {}).get("text") or ""
+            if isinstance(text, str) and text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                events.append({"type": "reasoning", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }})
+
+        if et in {"text", "message"}:
+            text = raw.get("text") or raw.get("content") or (raw.get("part") or {}).get("text") or ""
+            if isinstance(text, str) and text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                events.append({"type": "text", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }})
+
+        if et in {"tool_use", "tool_call", "tool_running"}:
+            call_id = str(raw.get("call_id") or raw.get("id") or raw.get("toolCallId") or (raw.get("part") or {}).get("callID") or "")
+            tool_name = raw.get("tool") or raw.get("name") or (raw.get("part") or {}).get("tool") or "tool"
+            inp = raw.get("input") or raw.get("args") or (raw.get("part") or {}).get("state", {}).get("input")
+            part = {
+                "tool": tool_name,
+                "title": raw.get("title") or tool_name,
+                "callID": call_id,
+                "state": {"status": "running"},
+            }
+            if inp is not None:
+                part["state"]["input"] = inp
+            events.append({"type": "tool_use", "part": part})
+
+        if et in {"tool_result", "tool_completed", "tool_errored"}:
+            call_id = str(raw.get("call_id") or raw.get("id") or raw.get("toolCallId") or (raw.get("part") or {}).get("callID") or "")
+            tool_name = raw.get("tool") or raw.get("name") or (raw.get("part") or {}).get("tool") or "tool"
+            out = raw.get("output") or raw.get("result") or raw.get("content") or (raw.get("part") or {}).get("state", {}).get("output") or ""
+            if not isinstance(out, str):
+                try:
+                    out = json.dumps(out, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    out = str(out)
+            trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+            status = "completed" if et != "tool_errored" else "error"
+            part = {
+                "tool": tool_name,
+                "title": raw.get("title") or tool_name,
+                "callID": call_id,
+                "state": {
+                    "status": status,
+                    "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                },
+            }
+            if trimmed:
+                part["state"]["output_trimmed"] = True
+            events.append({"type": "tool_use", "part": part})
+
+        if et in {"turn_end", "step_finish", "session_end"}:
+            usage = raw.get("usage") or raw.get("tokens") or (raw.get("part") or {}).get("tokens") or {}
+            stop_reason = raw.get("stopReason") or raw.get("reason") or (raw.get("part") or {}).get("reason") or "stop"
+            cost = self._usage_cost(usage) or self._usage_cost(raw) or float((raw.get("part") or {}).get("cost") or 0.0)
+            events.append({"type": "step_finish", "part": {
+                "reason": stop_reason,
+                "tokens": self._usage_tokens(usage),
+                "cost": cost,
+            }})
 
         return events
 

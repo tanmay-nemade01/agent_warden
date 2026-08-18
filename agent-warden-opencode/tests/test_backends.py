@@ -66,13 +66,18 @@ def test_normalize_backend():
     assert config.normalize_backend("rx") == config.BACKEND_REASONIX
     assert config.normalize_backend("pi") == config.BACKEND_PI
     assert config.normalize_backend("piharness") == config.BACKEND_PI
+    assert config.normalize_backend("antigravity") == config.BACKEND_ANTIGRAVITY
+    assert config.normalize_backend("agy") == config.BACKEND_ANTIGRAVITY
+    assert config.normalize_backend("googleantigravity") == config.BACKEND_ANTIGRAVITY
+    assert config.normalize_backend("gemini") == config.BACKEND_ANTIGRAVITY
     assert config.normalize_backend("unknown_xyz") == config.DEFAULT_BACKEND
 
 
 def test_backend_meta():
     for bid in (config.BACKEND_OPENCODE, config.BACKEND_COMMANDCODE,
                 config.BACKEND_CLAUDE, config.BACKEND_CODEX,
-                config.BACKEND_REASONIX, config.BACKEND_PI):
+                config.BACKEND_REASONIX, config.BACKEND_PI,
+                config.BACKEND_ANTIGRAVITY):
         meta = config.backend_meta(bid)
         assert meta["id"] == bid
         assert "label" in meta
@@ -83,7 +88,8 @@ def test_backend_meta():
 def test_fallback_models_all_backends():
     for bid in (config.BACKEND_OPENCODE, config.BACKEND_COMMANDCODE,
                 config.BACKEND_CLAUDE, config.BACKEND_CODEX,
-                config.BACKEND_REASONIX, config.BACKEND_PI):
+                config.BACKEND_REASONIX, config.BACKEND_PI,
+                config.BACKEND_ANTIGRAVITY):
         catalog = config.list_models(backend=bid)
         assert catalog["ok"] is True
         assert catalog["backend"] == bid
@@ -99,6 +105,11 @@ def test_permissions_helpers():
 
     sandbox_mode = permissions.codex_sandbox_mode()
     assert "workspace-write" in sandbox_mode
+
+    agy_args = permissions.antigravity_args()
+    assert "--mode" in agy_args
+    assert "json" in agy_args
+    assert "--auto" in agy_args
 
 
 def test_parse_claude_events():
@@ -939,5 +950,98 @@ def test_pi_sandbox_args():
     assert "json" in args
     assert "--no-session" in args
     assert "--approve" in args
+
+
+def test_parse_antigravity_events():
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.stats = {"cost": 0.0, "tokens": {"input": 0, "output": 0, "reasoning": 0}}
+    pipeline._antigravity_tools = {}
+    pipeline.EVENT_TEXT_CAP = 4000
+    pipeline.EVENT_TOOL_OUTPUT_CAP = 4000
+
+    # Step start
+    start_line = json.dumps({
+        "type": "step_start",
+        "turn": 1,
+        "model": "gemini-3.7-flash",
+    })
+    evs = pipeline._parse_antigravity_line(start_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_start"
+    assert evs[0]["part"]["turn"] == 1
+    assert evs[0]["part"]["model"] == "gemini-3.7-flash"
+
+    # Reasoning / thinking
+    think_line = json.dumps({
+        "type": "reasoning",
+        "text": "Analyzing lecture transcript structure...",
+    })
+    evs = pipeline._parse_antigravity_line(think_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "reasoning"
+    assert "Analyzing lecture" in evs[0]["part"]["text"]
+
+    # Tool use
+    tool_line = json.dumps({
+        "type": "tool_use",
+        "id": "call_agy_1",
+        "name": "view_file",
+        "input": {"AbsolutePath": "transcript.txt"},
+    })
+    evs = pipeline._parse_antigravity_line(tool_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "tool_use"
+    assert evs[0]["part"]["tool"] == "view_file"
+    assert evs[0]["part"]["callID"] == "call_agy_1"
+    assert evs[0]["part"]["state"]["status"] == "running"
+
+    # Tool result
+    result_line = json.dumps({
+        "type": "tool_result",
+        "id": "call_agy_1",
+        "name": "view_file",
+        "output": "Transcript sample lines",
+    })
+    evs = pipeline._parse_antigravity_line(result_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "tool_use"
+    assert evs[0]["part"]["callID"] == "call_agy_1"
+    assert evs[0]["part"]["state"]["status"] == "completed"
+    assert evs[0]["part"]["state"]["output"] == "Transcript sample lines"
+
+    # Text
+    text_line = json.dumps({
+        "type": "text",
+        "text": "Completed extraction phase.",
+    })
+    evs = pipeline._parse_antigravity_line(text_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "text"
+    assert "Completed extraction" in evs[0]["part"]["text"]
+
+    # Step finish
+    finish_line = json.dumps({
+        "type": "step_finish",
+        "reason": "stop",
+        "usage": {"input": 1500, "output": 400, "reasoning": 120},
+        "cost": 0.0005,
+    })
+    evs = pipeline._parse_antigravity_line(finish_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_finish"
+    assert evs[0]["part"]["tokens"]["input"] == 1500
+    assert evs[0]["part"]["tokens"]["output"] == 400
+    assert evs[0]["part"]["tokens"]["reasoning"] == 120
+
+    # Error line
+    error_line = json.dumps({
+        "type": "error",
+        "error": {"message": "Resource quota exceeded"},
+    })
+    evs = pipeline._parse_antigravity_line(error_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "text"
+    assert "Resource quota exceeded" in evs[0]["part"]["text"]
+    assert pipeline._last_agent_error == "Antigravity error: Resource quota exceeded"
 
 

@@ -1555,6 +1555,7 @@
           <option value="codex">OpenAI Codex</option>
           <option value="reasonix">Reasonix</option>
           <option value="pi">Pi Harness</option>
+          <option value="antigravity">Antigravity</option>
         </select>
       </div>
       <div class="field-block">
@@ -3146,6 +3147,7 @@ function formatProviderGroupLabel(key) {
     "openai": "OpenAI",
     "anthropic": "Anthropic",
     "google": "Google",
+    "antigravity": "Antigravity",
     "moonshotai": "Moonshot AI",
     "minimax": "MiniMax",
     "zai": "ZAI",
@@ -3255,6 +3257,8 @@ $("backend").addEventListener("change", async () => {
     hint.textContent = "Reasonix default: deepseek/deepseek-v4-flash (prefix-cache optimized).";
   } else if (backend === "pi") {
     hint.textContent = "Pi Harness default: claude-3-7-sonnet.";
+  } else if (backend === "antigravity") {
+    hint.textContent = "Antigravity default: gemini-3.7-flash (Gemini 3.7 series).";
   }
   await refreshConfig({ refreshModels: false });
 });

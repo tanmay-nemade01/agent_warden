@@ -7,6 +7,7 @@ Command Code: deny/allow lists that still apply under ``--yolo``.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 TOOLKIT_REL = "make-transcript-notes-kit-3agent"
@@ -41,11 +42,29 @@ def opencode_permission_block() -> dict:
     }
 
 
+def _base_opencode_config() -> dict:
+    """Read user's global opencode config if present, preserving custom providers."""
+    for cand in [Path.home() / ".config" / "opencode" / "opencode.jsonc",
+                 Path.home() / ".config" / "opencode" / "opencode.json"]:
+        if cand.is_file():
+            try:
+                lines = [l for l in cand.read_text(encoding="utf-8").splitlines()
+                         if not l.strip().startswith("//")]
+                txt = "\n".join(lines)
+                txt = re.sub(r",(\s*[}\]])", r"\1", txt)
+                data = json.loads(txt)
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                pass
+    return {}
+
+
 def opencode_config() -> dict:
-    return {
-        "$schema": "https://opencode.ai/config.json",
-        "permission": opencode_permission_block(),
-    }
+    cfg = _base_opencode_config().copy()
+    cfg["$schema"] = "https://opencode.ai/config.json"
+    cfg["permission"] = opencode_permission_block()
+    return cfg
 
 
 def commandcode_permissions() -> dict:
@@ -94,6 +113,11 @@ def reasonix_auto_flag() -> str:
 def pi_sandbox_args() -> list[str]:
     """Non-interactive JSON mode arguments for Pi Harness."""
     return ["--print", "--mode", "json", "--no-session", "--approve"]
+
+
+def antigravity_args() -> list[str]:
+    """Non-interactive streaming JSON flags for Antigravity (AGY)."""
+    return ["--mode", "json", "--auto", "--approve", "--no-interactive"]
 
 
 def write_job_configs(out_dir: Path) -> dict[str, Path]:
