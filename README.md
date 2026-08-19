@@ -23,7 +23,15 @@ Agent 4 (interactive enhancer) is optional and skipped by Notes Studio.
 ## What you need
 
 - **Python 3.10+**
-- **[opencode CLI](https://opencode.ai)** and/or **[Command Code](https://commandcode.ai/docs/reference/cli)** (`cmdc` on Windows) on PATH, signed in
+- One or more supported agent CLIs on PATH, signed in:
+  - **[OpenCode CLI](https://opencode.ai)** (`opencode`)
+  - **[Command Code](https://commandcode.ai/docs/reference/cli)** (`cmdc` on Windows)
+  - **[Claude Code CLI](https://code.claude.com)** (`claude`)
+  - **[OpenAI Codex CLI](https://platform.openai.com)** (`codex`)
+  - **[Reasonix CLI](https://github.com/esengine/reasonix)** (`reasonix`)
+  - **[Pi Harness](https://github.com/earendil-works/pi-coding-agent)** (`pi`)
+  - **[Antigravity CLI](https://github.com/google/antigravity)** (`agy`)
+  - **[Cursor Agent CLI](https://cursor.com)** (`cursor-agent` / `cursor`, authenticated via `CURSOR_API_KEY`)
 - Toolkit Python deps (PyYAML):
 
 ```bash

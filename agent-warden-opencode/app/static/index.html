@@ -1428,9 +1428,35 @@
   .menu-pop button { width: 100%; text-align: left; }
   .menu-pop .menu-note { font-size: 11px; color: var(--ink-soft); padding: 4px 6px; }
   .alive-line { font-family: var(--mono); font-size: 11px; color: var(--amber); }
+  .modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(2px);
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal-card {
+    background: var(--surface); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink);
+    padding: 20px 24px; max-width: 520px; width: 90%; max-height: 90vh; overflow-y: auto;
+  }
+  .modal-card h3 { margin: 0 0 6px 0; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+  .key-row { margin-bottom: 12px; }
+  .key-row label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+  .key-pill { font-size: 10px; font-family: var(--mono); padding: 1px 6px; border-radius: 3px; }
+  .key-pill.set { background: rgba(46, 204, 113, 0.2); color: #2ecc71; border: 1px solid #2ecc71; }
+  .key-pill.unset { background: rgba(231, 76, 60, 0.2); color: #e74c3c; border: 1px solid #e74c3c; }
+  .key-input-row { display: flex; gap: 6px; }
+  .key-input-row input { flex: 1; font-family: var(--mono); font-size: 12px; padding: 6px 8px; }
+  #keys-toggle {
+    position: fixed; top: 12px; right: 54px; z-index: 50;
+    height: 36px; padding: 0 12px; font-size: 13px; font-weight: 600;
+    background: var(--surface); border: 2px solid var(--ink);
+    box-shadow: 2px 2px 0 var(--ink); cursor: pointer; color: var(--ink);
+    display: flex; align-items: center; gap: 6px;
+  }
+  #keys-toggle:hover { background: var(--paper-2); }
 </style>
 </head>
 <body>
+<button id="keys-toggle" type="button" title="Configure API Keys">🔑 API Keys</button>
 <button id="theme-toggle" aria-label="Switch to light theme" title="Toggle dark / light theme" aria-pressed="true">
   <svg id="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
   <svg id="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79zM4 10.5H1v2h3zm9-9.95h-2V3.5h2zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79zM20 10.5v2h3v-2zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41z"/></svg>
@@ -1472,6 +1498,64 @@
       loading…
     </div>
   </header>
+
+  <div id="keys-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <h3>🔑 API Keys Configuration</h3>
+      <p class="muted" style="font-size:12px;margin-bottom:16px;">
+        Keys are saved to <code>.env</code> in your workspace root and applied live without restarting the server.
+      </p>
+      <div id="keys-fields">
+        <div class="key-row">
+          <label><span>Cursor Agent (<code>CURSOR_API_KEY</code>)</span> <span id="pill-CURSOR_API_KEY" class="key-pill unset">NOT SET</span></label>
+          <div class="key-input-row">
+            <input type="password" id="input-CURSOR_API_KEY" placeholder="crsr_..." autocomplete="off">
+            <button class="btn small ghost toggle-peek" type="button" data-for="input-CURSOR_API_KEY">👁</button>
+          </div>
+        </div>
+        <div class="key-row">
+          <label><span>Anthropic Claude (<code>ANTHROPIC_API_KEY</code>)</span> <span id="pill-ANTHROPIC_API_KEY" class="key-pill unset">NOT SET</span></label>
+          <div class="key-input-row">
+            <input type="password" id="input-ANTHROPIC_API_KEY" placeholder="sk-ant-..." autocomplete="off">
+            <button class="btn small ghost toggle-peek" type="button" data-for="input-ANTHROPIC_API_KEY">👁</button>
+          </div>
+        </div>
+        <div class="key-row">
+          <label><span>OpenAI (<code>OPENAI_API_KEY</code>)</span> <span id="pill-OPENAI_API_KEY" class="key-pill unset">NOT SET</span></label>
+          <div class="key-input-row">
+            <input type="password" id="input-OPENAI_API_KEY" placeholder="sk-..." autocomplete="off">
+            <button class="btn small ghost toggle-peek" type="button" data-for="input-OPENAI_API_KEY">👁</button>
+          </div>
+        </div>
+        <div class="key-row">
+          <label><span>Google Gemini (<code>GEMINI_API_KEY</code>)</span> <span id="pill-GEMINI_API_KEY" class="key-pill unset">NOT SET</span></label>
+          <div class="key-input-row">
+            <input type="password" id="input-GEMINI_API_KEY" placeholder="AIza..." autocomplete="off">
+            <button class="btn small ghost toggle-peek" type="button" data-for="input-GEMINI_API_KEY">👁</button>
+          </div>
+        </div>
+        <div class="key-row">
+          <label><span>DeepSeek (<code>DEEPSEEK_API_KEY</code>)</span> <span id="pill-DEEPSEEK_API_KEY" class="key-pill unset">NOT SET</span></label>
+          <div class="key-input-row">
+            <input type="password" id="input-DEEPSEEK_API_KEY" placeholder="sk-..." autocomplete="off">
+            <button class="btn small ghost toggle-peek" type="button" data-for="input-DEEPSEEK_API_KEY">👁</button>
+          </div>
+        </div>
+        <div class="key-row">
+          <label><span>xAI Grok (<code>XAI_API_KEY</code>)</span> <span id="pill-XAI_API_KEY" class="key-pill unset">NOT SET</span></label>
+          <div class="key-input-row">
+            <input type="password" id="input-XAI_API_KEY" placeholder="xai-..." autocomplete="off">
+            <button class="btn small ghost toggle-peek" type="button" data-for="input-XAI_API_KEY">👁</button>
+          </div>
+        </div>
+      </div>
+      <div id="keys-status" style="font-size:12px;margin:8px 0;display:none;"></div>
+      <div class="btnrow" style="margin-top:16px;justify-content:flex-end;">
+        <button class="btn" id="keys-close" type="button">Close</button>
+        <button class="btn primary" id="keys-save" type="button">Save Keys</button>
+      </div>
+    </div>
+  </div>
 
   <div class="workbench">
     <section class="board" aria-labelledby="board-title">
@@ -1556,6 +1640,7 @@
           <option value="reasonix">Reasonix</option>
           <option value="pi">Pi Harness</option>
           <option value="antigravity">Antigravity</option>
+          <option value="cursor">Cursor Agent</option>
         </select>
       </div>
       <div class="field-block">
@@ -3148,9 +3233,16 @@ function formatProviderGroupLabel(key) {
     "anthropic": "Anthropic",
     "google": "Google",
     "antigravity": "Antigravity",
+    "cursor": "Cursor",
     "moonshotai": "Moonshot AI",
     "minimax": "MiniMax",
     "zai": "ZAI",
+    "reasonix": "Reasonix",
+    "anthropic": "Anthropic",
+    "openai": "OpenAI",
+    "gemini": "Google Gemini",
+    "xai": "xAI (Grok)",
+    "cursor": "Cursor",
     "open source": "Open Source",
   };
   const lower = key.toLowerCase();
@@ -3259,6 +3351,8 @@ $("backend").addEventListener("change", async () => {
     hint.textContent = "Pi Harness default: claude-3-7-sonnet.";
   } else if (backend === "antigravity") {
     hint.textContent = "Antigravity default: gemini-3.7-flash (Gemini 3.7 series).";
+  } else if (backend === "cursor") {
+    hint.textContent = "Cursor default: composer-2.5 (or claude-3.7-sonnet via Cursor API key).";
   }
   await refreshConfig({ refreshModels: false });
 });
@@ -3739,9 +3833,92 @@ if (ticket) {
   syncChip();
 }
 
+// API Keys modal logic
+const keysToggle = $("keys-toggle");
+const keysModal = $("keys-modal");
+const keysClose = $("keys-close");
+const keysSave = $("keys-save");
+const keysStatus = $("keys-status");
+
+async function loadKeys() {
+  const res = await api("/api/keys");
+  if (res && res.keys) {
+    for (const [k, meta] of Object.entries(res.keys)) {
+      const pill = $(`pill-${k}`);
+      const inp = $(`input-${k}`);
+      if (pill) {
+        if (meta.set) {
+          pill.className = "key-pill set";
+          pill.textContent = `CONFIGURED (${meta.masked})`;
+        } else {
+          pill.className = "key-pill unset";
+          pill.textContent = "NOT SET";
+        }
+      }
+      if (inp && !inp.value && meta.set) {
+        inp.placeholder = `Current: ${meta.masked}`;
+      }
+    }
+  }
+}
+
+if (keysToggle && keysModal) {
+  keysToggle.addEventListener("click", () => {
+    keysModal.classList.add("open");
+    loadKeys();
+  });
+  keysClose.addEventListener("click", () => keysModal.classList.remove("open"));
+  keysModal.addEventListener("click", (e) => {
+    if (e.target === keysModal) keysModal.classList.remove("open");
+  });
+  document.querySelectorAll(".toggle-peek").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = $(btn.dataset.for);
+      if (target) {
+        target.type = target.type === "password" ? "text" : "password";
+      }
+    });
+  });
+  keysSave.addEventListener("click", async () => {
+    keysSave.disabled = true;
+    keysSave.textContent = "Saving…";
+    const payload = {};
+    const keyNames = ["CURSOR_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY"];
+    for (const kn of keyNames) {
+      const inp = $(`input-${kn}`);
+      if (inp && inp.value.trim()) {
+        payload[kn] = inp.value.trim();
+      }
+    }
+    const res = await api("/api/keys", { method: "POST", body: payload });
+    keysSave.disabled = false;
+    keysSave.textContent = "Save Keys";
+    if (res && res.ok) {
+      if (keysStatus) {
+        keysStatus.style.display = "block";
+        keysStatus.style.color = "#2ecc71";
+        keysStatus.textContent = "✓ Keys saved to .env and active live!";
+        setTimeout(() => { if (keysStatus) keysStatus.style.display = "none"; }, 3500);
+      }
+      for (const kn of keyNames) {
+        const inp = $(`input-${kn}`);
+        if (inp) inp.value = "";
+      }
+      loadKeys();
+      await refreshConfig({ refreshModels: true });
+    } else {
+      if (keysStatus) {
+        keysStatus.style.display = "block";
+        keysStatus.style.color = "var(--crimson)";
+        keysStatus.textContent = "Failed to save keys: " + (res.error || "Unknown error");
+      }
+    }
+  });
+}
+
 (function initBackend() {
   const saved = localStorage.getItem("agent_warden_backend");
-  if (saved === "commandcode" || saved === "opencode") {
+  if (saved) {
     $("backend").value = saved;
     state.backend = saved;
   }

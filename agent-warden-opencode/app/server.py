@@ -413,12 +413,12 @@ class Handler(BaseHTTPRequestHandler):
                 and not self._api_authed()):
             return self._json({"error": "unauthorized"}, 401)
         if path == "/api/config":
-            refresh = (query.get("refresh_models") or ["0"])[0] in (
+            refresh = (query.get("refresh_models") or query.get("refresh") or ["0"])[0] in (
                 "1", "true", "yes")
             backend = (query.get("backend") or [None])[0]
             return self._json(self._config(refresh_models=refresh, backend=backend))
         if path == "/api/models":
-            refresh = (query.get("refresh") or ["0"])[0] in (
+            refresh = (query.get("refresh") or query.get("refresh_models") or ["0"])[0] in (
                 "1", "true", "yes")
             backend = (query.get("backend") or [None])[0]
             provider = (query.get("provider") or [None])[0]
@@ -478,6 +478,8 @@ class Handler(BaseHTTPRequestHandler):
             if confine(config.OUTPUTS_DIR, subject, prefix) is None:
                 return self._json({"error": "invalid subject or prefix"}, 400)
             return self._json({"files": config.list_outputs(subject, prefix)})
+        if path == "/api/keys":
+            return self._get_keys()
         if path.startswith("/outputs/"):
             return self._serve_output(path)
         return self._text("not found", 404)
@@ -496,6 +498,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._add_subject()
         if path == "/api/parallel":
             return self._set_parallel()
+        if path == "/api/keys":
+            return self._set_keys()
         if path == "/api/history/delete":
             return self._delete_history()
         return self._text("not found", 404)
@@ -608,6 +612,49 @@ class Handler(BaseHTTPRequestHandler):
         set_max_parallel(n)
         self._json({"ok": True, "max_parallel": get_max_parallel(),
                     "in_flight": self._inflight_runs()})
+
+    def _get_keys(self):
+        keys = ["CURSOR_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY"]
+        result = {}
+        for k in keys:
+            val = os.environ.get(k, "")
+            if val:
+                masked = (val[:6] + "..." + val[-4:]) if len(val) > 12 else ("***" if val else "")
+                result[k] = {"set": True, "masked": masked, "length": len(val)}
+            else:
+                result[k] = {"set": False, "masked": "", "length": 0}
+        self._json({"ok": True, "keys": result})
+
+    def _set_keys(self):
+        body = self._body()
+        if body is None:
+            return
+        env_file = config.WORKSPACE / ".env"
+        existing: dict[str, str] = {}
+        if env_file.is_file():
+            try:
+                for line in env_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        existing[k.strip()] = v.strip().strip("'\"")
+            except Exception:
+                pass
+        allowed_keys = {"CURSOR_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY"}
+        for k, v in body.items():
+            if k in allowed_keys and isinstance(v, str):
+                v_clean = v.strip()
+                if v_clean:
+                    existing[k] = v_clean
+                    os.environ[k] = v_clean
+                elif v_clean == "" and k in existing:
+                    # Clear if blank
+                    del existing[k]
+                    os.environ.pop(k, None)
+        lines = [f"{k}={v}" for k, v in sorted(existing.items())]
+        env_file.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        config.clear_models_cache()
+        self._get_keys()
 
     def _preview_run(self):
         body = self._body()

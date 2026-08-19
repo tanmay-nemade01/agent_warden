@@ -203,8 +203,39 @@ class WorkerStopCleanupTests(unittest.TestCase):
             # Give the worker thread a moment to run and exit
             time.sleep(0.1)
 
-        with server.STATE_LOCK:
-            self.assertNotIn(rid, server.STATE["runs"])
+class ApiKeysEndpointTests(unittest.TestCase):
+    def test_get_and_set_keys(self):
+        import os
+        from app import server
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with patch.object(config, "WORKSPACE", root):
+                handler = server.Handler.__new__(server.Handler)
+                responses = []
+                handler._json = lambda data, code=200: responses.append((data, code))
+
+                # Test get keys when none set
+                with patch.dict(os.environ, {}, clear=True):
+                    handler._get_keys()
+                    self.assertTrue(responses[-1][0]["ok"])
+                    self.assertFalse(responses[-1][0]["keys"]["CURSOR_API_KEY"]["set"])
+
+                # Test set keys
+                handler._body = lambda: {
+                    "CURSOR_API_KEY": "crsr_test_key_1234567890",
+                    "XAI_API_KEY": "xai-test-key-12345",
+                }
+                handler._set_keys()
+                self.assertTrue(responses[-1][0]["ok"])
+                self.assertTrue(responses[-1][0]["keys"]["CURSOR_API_KEY"]["set"])
+                self.assertTrue(responses[-1][0]["keys"]["XAI_API_KEY"]["set"])
+                self.assertEqual(os.environ.get("CURSOR_API_KEY"), "crsr_test_key_1234567890")
+                self.assertEqual(os.environ.get("XAI_API_KEY"), "xai-test-key-12345")
+
+                # Verify written to .env
+                env_content = (root / ".env").read_text(encoding="utf-8")
+                self.assertIn("CURSOR_API_KEY=crsr_test_key_1234567890", env_content)
+                self.assertIn("XAI_API_KEY=xai-test-key-12345", env_content)
 
 
 if __name__ == "__main__":

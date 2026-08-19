@@ -120,6 +120,11 @@ def antigravity_args() -> list[str]:
     return ["--mode", "json", "--auto", "--approve", "--no-interactive"]
 
 
+def cursor_sandbox_args() -> list[str]:
+    """Non-interactive streaming JSON and auto-force arguments for Cursor Agent."""
+    return ["-p", "--output-format", "stream-json", "--force"]
+
+
 def write_job_configs(out_dir: Path) -> dict[str, Path]:
     """Write per-run config files under the lecture output tree (writable)."""
     job = Path(out_dir) / "_job"

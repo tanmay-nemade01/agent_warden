@@ -70,6 +70,10 @@ def test_normalize_backend():
     assert config.normalize_backend("agy") == config.BACKEND_ANTIGRAVITY
     assert config.normalize_backend("googleantigravity") == config.BACKEND_ANTIGRAVITY
     assert config.normalize_backend("gemini") == config.BACKEND_ANTIGRAVITY
+    assert config.normalize_backend("cursor") == config.BACKEND_CURSOR
+    assert config.normalize_backend("cursoragent") == config.BACKEND_CURSOR
+    assert config.normalize_backend("cursorcli") == config.BACKEND_CURSOR
+    assert config.normalize_backend("anysphere") == config.BACKEND_CURSOR
     assert config.normalize_backend("unknown_xyz") == config.DEFAULT_BACKEND
 
 
@@ -77,7 +81,7 @@ def test_backend_meta():
     for bid in (config.BACKEND_OPENCODE, config.BACKEND_COMMANDCODE,
                 config.BACKEND_CLAUDE, config.BACKEND_CODEX,
                 config.BACKEND_REASONIX, config.BACKEND_PI,
-                config.BACKEND_ANTIGRAVITY):
+                config.BACKEND_ANTIGRAVITY, config.BACKEND_CURSOR):
         meta = config.backend_meta(bid)
         assert meta["id"] == bid
         assert "label" in meta
@@ -89,7 +93,7 @@ def test_fallback_models_all_backends():
     for bid in (config.BACKEND_OPENCODE, config.BACKEND_COMMANDCODE,
                 config.BACKEND_CLAUDE, config.BACKEND_CODEX,
                 config.BACKEND_REASONIX, config.BACKEND_PI,
-                config.BACKEND_ANTIGRAVITY):
+                config.BACKEND_ANTIGRAVITY, config.BACKEND_CURSOR):
         catalog = config.list_models(backend=bid)
         assert catalog["ok"] is True
         assert catalog["backend"] == bid
@@ -110,6 +114,12 @@ def test_permissions_helpers():
     assert "--mode" in agy_args
     assert "json" in agy_args
     assert "--auto" in agy_args
+
+    cursor_args = permissions.cursor_sandbox_args()
+    assert "-p" in cursor_args
+    assert "--output-format" in cursor_args
+    assert "stream-json" in cursor_args
+    assert "--force" in cursor_args
 
 
 def test_parse_claude_events():
@@ -1043,5 +1053,218 @@ def test_parse_antigravity_events():
     assert evs[0]["type"] == "text"
     assert "Resource quota exceeded" in evs[0]["part"]["text"]
     assert pipeline._last_agent_error == "Antigravity error: Resource quota exceeded"
+
+
+def test_parse_cursor_events():
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.stats = {"cost": 0.0, "tokens": {"input": 0, "output": 0, "reasoning": 0}}
+    pipeline._cursor_tools = {}
+    pipeline.EVENT_TEXT_CAP = 4000
+    pipeline.EVENT_TOOL_OUTPUT_CAP = 4000
+
+    # Step start
+    start_line = json.dumps({
+        "type": "step_start",
+        "turn": 1,
+        "model": "composer-2.5",
+        "usage": {"input": 300, "output": 50},
+    })
+    evs = pipeline._parse_cursor_line(start_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_start"
+    assert evs[0]["part"]["turn"] == 1
+    assert evs[0]["part"]["model"] == "composer-2.5"
+
+    # Reasoning / thinking
+    think_line = json.dumps({
+        "type": "reasoning",
+        "text": "Planning note generation and extraction steps...",
+    })
+    evs = pipeline._parse_cursor_line(think_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "reasoning"
+    assert "Planning note generation" in evs[0]["part"]["text"]
+
+    # Tool use
+    tool_line = json.dumps({
+        "type": "tool_use",
+        "id": "call_cursor_1",
+        "name": "edit_file",
+        "input": {"path": "dense.md", "content": "# Lecture Notes"},
+    })
+    evs = pipeline._parse_cursor_line(tool_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "tool_use"
+    assert evs[0]["part"]["tool"] == "edit_file"
+    assert evs[0]["part"]["callID"] == "call_cursor_1"
+    assert evs[0]["part"]["state"]["status"] == "running"
+
+    # Tool result
+    result_line = json.dumps({
+        "type": "tool_result",
+        "id": "call_cursor_1",
+        "name": "edit_file",
+        "output": "File updated successfully",
+    })
+    evs = pipeline._parse_cursor_line(result_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "tool_use"
+    assert evs[0]["part"]["callID"] == "call_cursor_1"
+    assert evs[0]["part"]["state"]["status"] == "completed"
+    assert evs[0]["part"]["state"]["output"] == "File updated successfully"
+
+    # Text
+    text_line = json.dumps({
+        "type": "text",
+        "text": "Completed extraction for lecture transcript.",
+    })
+    evs = pipeline._parse_cursor_line(text_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "text"
+    assert "Completed extraction" in evs[0]["part"]["text"]
+
+    # Step finish
+    finish_line = json.dumps({
+        "type": "step_finish",
+        "stopReason": "end_turn",
+        "usage": {"input": 2000, "output": 600, "reasoning": 150},
+        "cost": 0.0012,
+    })
+    evs = pipeline._parse_cursor_line(finish_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_finish"
+    assert evs[0]["part"]["tokens"]["input"] == 2000
+    assert evs[0]["part"]["tokens"]["output"] == 600
+    assert evs[0]["part"]["tokens"]["reasoning"] == 150
+    assert evs[0]["part"]["cost"] == 0.0012
+
+    # Error event
+    error_line = json.dumps({
+        "type": "error",
+        "error": {"message": "Invalid Cursor API key provided"},
+    })
+    evs = pipeline._parse_cursor_line(error_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "text"
+    assert "Invalid Cursor API key" in evs[0]["part"]["text"]
+    assert pipeline._last_agent_error == "Cursor error: Invalid Cursor API key provided"
+
+
+def test_find_cursor_argv(monkeypatch):
+    monkeypatch.setattr(config, "_CURSOR_ARGV", None)
+    monkeypatch.setenv("CURSOR_AGENT_PATH", "C:\\fake\\cursor-agent.exe")
+    with patch("pathlib.Path.exists", return_value=True):
+        argv = config.find_cursor_argv()
+        assert argv == ["C:\\fake\\cursor-agent.exe"]
+
+
+def test_parse_cursor_cli_native_stream_events():
+    """Test native Cursor Agent CLI stream-json events."""
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.stats = {"cost": 0.0, "tokens": {"input": 0, "output": 0, "reasoning": 0}}
+    pipeline._cursor_tools = {}
+    pipeline.EVENT_TEXT_CAP = 4000
+    pipeline.EVENT_TOOL_OUTPUT_CAP = 4000
+
+    # 1. System / init event
+    init_line = json.dumps({
+        "type": "system",
+        "subtype": "init",
+        "model": "Cursor Grok 4.6",
+        "session_id": "sess-123",
+    })
+    evs = pipeline._parse_cursor_line(init_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_start"
+    assert evs[0]["part"]["model"] == "Cursor Grok 4.6"
+
+    # 2. Thinking delta
+    think_line = json.dumps({
+        "type": "thinking",
+        "subtype": "delta",
+        "text": "Reading lecture outline...",
+    })
+    evs = pipeline._parse_cursor_line(think_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "reasoning"
+    assert "Reading lecture" in evs[0]["part"]["text"]
+
+    # 3. Tool call started (shellToolCall)
+    shell_start = json.dumps({
+        "type": "tool_call",
+        "subtype": "started",
+        "call_id": "call-shell-1",
+        "tool_call": {
+            "shellToolCall": {
+                "args": {"command": "python make-transcript-notes-kit-3agent/scripts/lint_dense.py test.md"},
+                "description": "Run lint gate",
+            }
+        }
+    })
+    evs = pipeline._parse_cursor_line(shell_start)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "tool_use"
+    assert evs[0]["part"]["tool"] == "bash"
+    assert evs[0]["part"]["callID"] == "call-shell-1"
+    assert evs[0]["part"]["state"]["status"] == "running"
+
+    # 4. Tool call completed (shellToolCall with stdout)
+    shell_done = json.dumps({
+        "type": "tool_call",
+        "subtype": "completed",
+        "call_id": "call-shell-1",
+        "tool_call": {
+            "shellToolCall": {
+                "result": {
+                    "success": {
+                        "command": "python make-transcript-notes-kit-3agent/scripts/lint_dense.py test.md",
+                        "exitCode": 0,
+                        "stdout": "PASS: numbering\nResult: PASS",
+                    }
+                }
+            }
+        }
+    })
+    evs = pipeline._parse_cursor_line(shell_done)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "tool_use"
+    assert evs[0]["part"]["tool"] == "bash"
+    assert evs[0]["part"]["callID"] == "call-shell-1"
+    assert evs[0]["part"]["state"]["status"] == "completed"
+    assert "PASS: numbering" in evs[0]["part"]["state"]["output"]
+
+    # 5. Assistant response
+    asst_line = json.dumps({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "PHASE_COMPLETE"}]
+        }
+    })
+    evs = pipeline._parse_cursor_line(asst_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "text"
+    assert evs[0]["part"]["text"] == "PHASE_COMPLETE"
+
+    # 6. Result envelope with token usage
+    res_line = json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "result": "PHASE_COMPLETE",
+        "usage": {
+            "inputTokens": 15000,
+            "outputTokens": 800,
+            "cacheReadTokens": 2500,
+        }
+    })
+    evs = pipeline._parse_cursor_line(res_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_finish"
+    assert evs[0]["part"]["tokens"]["input"] == 15000
+    assert evs[0]["part"]["tokens"]["output"] == 800
+    assert evs[0]["part"]["tokens"]["reasoning"] == 2500
+
+
 
 

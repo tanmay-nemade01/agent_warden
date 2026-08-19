@@ -25,6 +25,24 @@ DOCS_DIR = (WORKSPACE / "companion_docs"
             if (WORKSPACE / "companion_docs").is_dir()
             else WORKSPACE / "extracted_pdfs")
 
+def _load_env_file():
+    for cand in [WORKSPACE / ".env", _DEFAULT_WORKSPACE / ".env", Path.cwd() / ".env"]:
+        if cand.is_file():
+            try:
+                for line in cand.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+            except Exception:
+                pass
+
+_load_env_file()
+
 BACKEND_OPENCODE = "opencode"
 BACKEND_COMMANDCODE = "commandcode"
 BACKEND_CLAUDE = "claude"
@@ -32,6 +50,7 @@ BACKEND_CODEX = "codex"
 BACKEND_REASONIX = "reasonix"
 BACKEND_PI = "pi"
 BACKEND_ANTIGRAVITY = "antigravity"
+BACKEND_CURSOR = "cursor"
 DEFAULT_BACKEND = BACKEND_OPENCODE
 
 BACKENDS = {
@@ -91,6 +110,14 @@ BACKENDS = {
         "provider": "google",
         "effort_variants": ["low", "medium", "high", "max"],
     },
+    BACKEND_CURSOR: {
+        "id": BACKEND_CURSOR,
+        "label": "Cursor Agent",
+        "model": "composer-2.5",
+        "variant": "high",
+        "provider": "cursor",
+        "effort_variants": ["low", "medium", "high", "max"],
+    },
 }
 
 # OpenCode defaults (kept as top-level names for existing callers).
@@ -113,6 +140,7 @@ CODEX_MAX_TURNS = 250
 REASONIX_MAX_TURNS = 250
 PI_MAX_TURNS = 250
 ANTIGRAVITY_MAX_TURNS = 250
+CURSOR_MAX_TURNS = 250
 # OpenCode sends min(model.limit.output, this env). Default 32k is far
 # too small for max-effort thinking (finish reason length/unknown, 0
 # output tokens). DeepSeek V4 catalog output is 384k; 128k still truncated
@@ -139,6 +167,8 @@ def normalize_backend(backend: str | None) -> str:
         return BACKEND_PI
     if raw in {"antigravity", "agy", "googleantigravity", "gemini"}:
         return BACKEND_ANTIGRAVITY
+    if raw in {"cursor", "cursoragent", "cursorcli", "anysphere"}:
+        return BACKEND_CURSOR
     if raw in {"opencode", "oc"}:
         return BACKEND_OPENCODE
     return DEFAULT_BACKEND
@@ -225,6 +255,7 @@ _CODEX_ARGV: list[str] | None = None
 _REASONIX_ARGV: list[str] | None = None
 _PI_ARGV: list[str] | None = None
 _ANTIGRAVITY_ARGV: list[str] | None = None
+_CURSOR_ARGV: list[str] | None = None
 _MODELS_CACHE: dict[str, dict] = {}
 _MODELS_CACHE_AT: dict[str, float] = {}
 _MODELS_CACHE_TTL = 300.0  # seconds (OpenCode)
@@ -498,6 +529,54 @@ def find_antigravity_argv() -> list[str]:
 
 def find_antigravity() -> str:
     return find_antigravity_argv()[0]
+
+
+def find_cursor_argv() -> list[str]:
+    """Argv prefix for Cursor Agent CLI (cursor-agent / agent), skipping PowerShell shims."""
+    global _CURSOR_ARGV
+    if _CURSOR_ARGV:
+        return _CURSOR_ARGV
+    for env_k in ("CURSOR_AGENT_PATH", "CURSOR_CLI", "CURSOR_PATH"):
+        custom = os.environ.get(env_k)
+        if custom and Path(custom).exists():
+            p = Path(custom)
+            _CURSOR_ARGV = [str(p)]
+            return _CURSOR_ARGV
+    for name in ("cursor-agent.cmd", "cursor-agent.exe", "cursor-agent",
+                 "agent.cmd", "agent.exe", "agent"):
+        found = shutil.which(name)
+        if found:
+            path = Path(found)
+            if path.suffix.lower() == ".ps1":
+                cmd = path.with_suffix(".cmd")
+                if cmd.is_file():
+                    path = cmd
+            _CURSOR_ARGV = [str(path)]
+            return _CURSOR_ARGV
+    pkg_roots = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "cursor-agent",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "cursor-agent",
+        Path.home() / ".cursor" / "bin",
+        Path.home() / ".local" / "bin",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages",
+        Path(os.environ.get("APPDATA", "")) / "npm",
+    ]
+    for root in pkg_roots:
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            for f in ("cursor-agent.cmd", "cursor-agent.exe", "agent.cmd", "agent.exe"):
+                if f in filenames:
+                    p = Path(dirpath) / f
+                    _CURSOR_ARGV = [str(p)]
+                    return _CURSOR_ARGV
+            dirnames[:] = [d for d in dirnames if d not in {"__pycache__", ".git"}]
+    _CURSOR_ARGV = ["cursor-agent"]
+    return _CURSOR_ARGV
+
+
+def find_cursor() -> str:
+    return find_cursor_argv()[0]
 
 
 def _parse_models_verbose(stdout: str) -> list[dict]:
@@ -887,6 +966,159 @@ def _fallback_models(backend: str) -> list[dict]:
                 "limit": {"context": 2000000, "output": 65536},
             },
         ]
+    if backend_id == BACKEND_CURSOR:
+        return [
+            {
+                "id": "composer-2.5",
+                "name": "Cursor Composer 2.5",
+                "family": "cursor",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 200000, "output": 64000},
+            },
+            {
+                "id": "sonic",
+                "name": "Cursor Sonic",
+                "family": "cursor",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": 200000, "output": 64000},
+            },
+            {
+                "id": "claude-3.7-sonnet",
+                "name": "Claude 3.7 Sonnet",
+                "family": "anthropic",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 200000, "output": 64000},
+            },
+            {
+                "id": "claude-3.5-sonnet",
+                "name": "Claude 3.5 Sonnet",
+                "family": "anthropic",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": 200000, "output": 8192},
+            },
+            {
+                "id": "claude-3.5-haiku",
+                "name": "Claude 3.5 Haiku",
+                "family": "anthropic",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": 200000, "output": 8192},
+            },
+            {
+                "id": "gpt-5.4",
+                "name": "GPT-5.4",
+                "family": "openai",
+                "status": "active",
+                "reasoning": True,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": 200000, "output": 64000},
+            },
+            {
+                "id": "gpt-4o",
+                "name": "GPT-4o",
+                "family": "openai",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": 128000, "output": 16384},
+            },
+            {
+                "id": "o3-mini",
+                "name": "o3-mini",
+                "family": "openai",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high"],
+                "cost": {},
+                "limit": {"context": 200000, "output": 64000},
+            },
+            {
+                "id": "deepseek-r1",
+                "name": "DeepSeek R1",
+                "family": "deepseek",
+                "status": "active",
+                "reasoning": True,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": 128000, "output": 64000},
+            },
+            {
+                "id": "deepseek-v3",
+                "name": "DeepSeek V3",
+                "family": "deepseek",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": 128000, "output": 8192},
+            },
+            {
+                "id": "gemini-2.5-pro",
+                "name": "Gemini 2.5 Pro",
+                "family": "gemini",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 65536},
+            },
+            {
+                "id": "grok-3",
+                "name": "Grok 3",
+                "family": "xai",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 65536},
+            },
+            {
+                "id": "grok-3-mini",
+                "name": "Grok 3 Mini",
+                "family": "xai",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 65536},
+            },
+            {
+                "id": "grok-2",
+                "name": "Grok 2",
+                "family": "xai",
+                "status": "active",
+                "reasoning": False,
+                "variants": [],
+                "cost": {},
+                "limit": {"context": 128000, "output": 16384},
+            },
+            {
+                "id": "grok-code",
+                "name": "Grok Code",
+                "family": "xai",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high"],
+                "cost": {},
+                "limit": {"context": 256000, "output": 32768},
+            },
+        ]
     return [{
         "id": meta["model"],
         "name": "DeepSeek V4 Flash",
@@ -941,6 +1173,7 @@ _SPECIAL_MODEL_WORDS = {
     "meta": "Meta",
     "google": "Google",
     "sakana": "Sakana",
+    "cursor": "Cursor",
     "moonshotai": "Moonshot",
     "xiaomi": "Xiaomi",
     "tencent": "Tencent",
@@ -1551,6 +1784,101 @@ def _list_antigravity_models(refresh: bool, timeout: float) -> dict:
     }
 
 
+def _list_cursor_models(refresh: bool, timeout: float) -> dict:
+    meta = backend_meta(BACKEND_CURSOR)
+    fallback = _fallback_models(BACKEND_CURSOR)
+    api_key = os.environ.get("CURSOR_API_KEY") or os.environ.get("CURSOR_KEY") or os.environ.get("CURSOR_TOKEN") or ""
+
+    if api_key:
+        try:
+            import urllib.request
+            headers = {
+                "Authorization": f"Bearer {api_key.strip()}",
+                "User-Agent": "Cursor/1.0",
+                "x-cursor-client-version": "0.45.0",
+            }
+            req = urllib.request.Request("https://api.cursor.com/v1/models", headers=headers)
+            with urllib.request.urlopen(req, timeout=min(timeout, 8.0)) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            items = data.get("items") or data.get("models") or data.get("data") or []
+            if items:
+                dynamic_models = []
+                seen_ids = set()
+                for item in items:
+                    m_id = item.get("id")
+                    if not m_id or m_id in seen_ids:
+                        continue
+                    seen_ids.add(m_id)
+                    name = item.get("displayName") or item.get("name") or m_id
+                    params = {p.get("id"): p for p in item.get("parameters", [])} if isinstance(item.get("parameters"), list) else {}
+                    has_effort = "effort" in params
+                    raw_variants = [v.get("value") for v in params.get("effort", {}).get("values", [])] if has_effort else []
+                    effort_vars = [v for v in raw_variants if v]
+
+                    lower_id = m_id.lower()
+                    if "grok" in lower_id:
+                        family = "xai"
+                    elif "claude" in lower_id or "anthropic" in lower_id:
+                        family = "anthropic"
+                    elif any(k in lower_id for k in ("gpt", "o1", "o3", "openai")):
+                        family = "openai"
+                    elif "deepseek" in lower_id:
+                        family = "deepseek"
+                    elif "gemini" in lower_id:
+                        family = "gemini"
+                    else:
+                        family = "cursor"
+
+                    dynamic_models.append({
+                        "id": m_id,
+                        "name": name,
+                        "family": family,
+                        "status": "active",
+                        "reasoning": bool(effort_vars),
+                        "variants": effort_vars,
+                        "cost": {},
+                        "limit": {"context": 200000, "output": 64000},
+                        "aliases": item.get("aliases", []),
+                    })
+
+                if dynamic_models:
+                    default_model = meta["model"]
+                    if not any(m["id"] == default_model for m in dynamic_models):
+                        default_model = dynamic_models[0]["id"]
+                    variants = next((m["variants"] for m in dynamic_models if m["id"] == default_model),
+                                    list(meta["effort_variants"]))
+                    return {
+                        "ok": True,
+                        "backend": BACKEND_CURSOR,
+                        "provider": meta["provider"],
+                        "models": dynamic_models,
+                        "default_model": default_model,
+                        "default_variant": preferred_variant(variants, meta["variant"]),
+                        "error": None,
+                    }
+        except Exception:
+            pass
+
+    default_model = meta["model"]
+    variants = next((m["variants"] for m in fallback if m["id"] == default_model),
+                    list(meta["effort_variants"]))
+    return {
+        "ok": True,
+        "backend": BACKEND_CURSOR,
+        "provider": meta["provider"],
+        "models": fallback,
+        "default_model": default_model,
+        "default_variant": preferred_variant(variants, meta["variant"]),
+        "error": None,
+    }
+
+
+def clear_models_cache():
+    """Clear cached model responses across backends."""
+    _MODELS_CACHE.clear()
+    _MODELS_CACHE_AT.clear()
+
+
 def list_models(provider: str | None = None, refresh: bool = False,
                 timeout: float | None = None, backend: str | None = None) -> dict:
     """Discover models for a backend.
@@ -1587,6 +1915,9 @@ def list_models(provider: str | None = None, refresh: bool = False,
             refresh=refresh, timeout=timeout if timeout is not None else 30.0)
     elif backend == BACKEND_ANTIGRAVITY:
         result = _list_antigravity_models(
+            refresh=refresh, timeout=timeout if timeout is not None else 30.0)
+    elif backend == BACKEND_CURSOR:
+        result = _list_cursor_models(
             refresh=refresh, timeout=timeout if timeout is not None else 30.0)
     else:
         result = _list_opencode_models(

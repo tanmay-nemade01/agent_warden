@@ -37,7 +37,9 @@ Agent 4 (enhancer) is intentionally skipped, per the toolkit's own guidance.
   - [OpenAI Codex CLI](https://platform.openai.com) (`codex`)
   - [Reasonix CLI](https://github.com/esengine/reasonix) (`reasonix`)
   - [Pi Harness](https://github.com/earendil-works/pi-coding-agent) (`pi`)
-- An authenticated provider or API key for the backend you pick in the UI
+  - [Antigravity CLI](https://github.com/google/antigravity) (`agy`)
+  - [Cursor Agent CLI](https://cursor.com) (`cursor-agent` / `cursor`)
+- An authenticated provider or API key for the backend you pick in the UI (e.g. `CURSOR_API_KEY` in environment or `.env`)
 
 ## Run
 
@@ -65,6 +67,8 @@ Open http://127.0.0.1:8787
    - **OpenAI Codex** uses `codex exec --json --dangerously-bypass-approvals-and-sandbox`.
    - **Reasonix** uses `reasonix run -y --json -m <model>`.
    - **Pi Harness** uses `pi --print --mode json -m <model> --no-session`.
+   - **Antigravity** uses `agy --model <model> --mode json --auto`.
+   - **Cursor Agent** uses `cursor-agent -p --output-format stream-json --force --model <model>` (authenticated via `CURSOR_API_KEY`).
    Gates show PASS/FAIL under each phase; failing gates trigger fix sessions (max 2) before the phase reports.
    If a stage still fails, that stage is retried automatically up to 3 times
    (each transcript file has its own budget). **Failed runs** sit at the top
@@ -77,18 +81,20 @@ Open http://127.0.0.1:8787
 
 ## Model & Backends
 
-The job ticket has an **Agent backend** dropdown supporting 6 backends:
+The job ticket has an **Agent backend** dropdown supporting 8 backends:
 - **OpenCode** — Default: `opencode-go/deepseek-v4-flash` (effort: `max`)
 - **Command Code** — Default: `deepseek/deepseek-v4-flash` (effort: `high`)
 - **Claude Code** — Default: `claude-3-7-sonnet` (effort: `high`)
 - **OpenAI Codex** — Default: `gpt-5.4` (standard model selection)
 - **Reasonix** — Default: `deepseek/deepseek-v4-flash` (prefix-cache optimized, effort: `high`)
 - **Pi Harness** — Default: `claude-3-7-sonnet` (minimalist modular harness, effort: `high`)
+- **Antigravity** — Default: `gemini-3.7-flash` (effort: `high`)
+- **Cursor Agent** — Default: `composer-2.5` (effort: `high`, authenticated via `CURSOR_API_KEY`)
 
 On each UI load the server discovers OpenCode models via
 `opencode models opencode-go --verbose`. Command Code's `--list-models` is slow,
 so the UI starts from the DeepSeek V4 Flash default until you click
-**refresh models**. Claude Code, OpenAI Codex, Reasonix, and Pi Harness provide catalog fallback presets
+**refresh models**. Claude Code, OpenAI Codex, Reasonix, Pi Harness, Antigravity, and Cursor Agent provide catalog fallback presets
 covering their flagship and lightweight models.
 
 ## Layout

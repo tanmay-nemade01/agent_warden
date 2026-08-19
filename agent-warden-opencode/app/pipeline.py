@@ -175,6 +175,7 @@ class Pipeline:
         self._claude_tools: dict[str, dict] = {}
         self._codex_tools: dict[str, dict] = {}
         self._antigravity_tools: dict[str, dict] = {}
+        self._cursor_tools: dict[str, dict] = {}
         self._timed_out = False
         self._stalled = False
         self._last_activity = 0.0
@@ -331,6 +332,8 @@ class Pipeline:
             return self._run_pi(agent, message, title, extra_env)
         if self.backend == config.BACKEND_ANTIGRAVITY:
             return self._run_antigravity(agent, message, title, extra_env)
+        if self.backend == config.BACKEND_CURSOR:
+            return self._run_cursor(agent, message, title, extra_env)
         self._oc_session_id = None
         resume = self._resume_session
         self._resume_session = None
@@ -625,6 +628,30 @@ class Pipeline:
         self._popen(cmd, stdin_data=message, extra_env=env,
                     cwd=str(config.WORKSPACE))
         return self._stream_process(agent, self._parse_antigravity_line)
+
+    def _run_cursor(self, agent: int, message: str, title: str,
+                    extra_env: dict | None = None) -> tuple[int, list[str]]:
+        """Headless Cursor Agent: `cursor-agent -p` with stream-json events."""
+        job = self._ensure_job_files()
+        job["prompt"].write_text(message, encoding="utf-8")
+        argv = config.find_cursor_argv()
+        cmd = argv + permissions.cursor_sandbox_args()
+        if self.model:
+            cmd.extend(["--model", self.model])
+        cursor_key = (extra_env or {}).get("CURSOR_API_KEY") or os.environ.get("CURSOR_API_KEY")
+        if cursor_key:
+            cmd.extend(["--api-key", cursor_key])
+        env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
+        if cursor_key:
+            env["CURSOR_API_KEY"] = cursor_key
+        if extra_env:
+            env.update(extra_env)
+        self._cursor_tools = {}
+        self._log({"type": "phase_cmd", "phase": AGENTS[agent],
+                   "cmd": " ".join(cmd[:10]) + " ..."})
+        self._popen(cmd, stdin_data=message, extra_env=env,
+                    cwd=str(config.WORKSPACE))
+        return self._stream_process(agent, self._parse_cursor_line)
 
     def _parse_agent_event(self, line: str) -> dict | None:
         """Parse one `opencode run --format json` line into a UI-safe event.
@@ -1703,6 +1730,367 @@ class Pipeline:
             usage = raw.get("usage") or raw.get("tokens") or (raw.get("part") or {}).get("tokens") or {}
             stop_reason = raw.get("stopReason") or raw.get("reason") or (raw.get("part") or {}).get("reason") or "stop"
             cost = self._usage_cost(usage) or self._usage_cost(raw) or float((raw.get("part") or {}).get("cost") or 0.0)
+            events.append({"type": "step_finish", "part": {
+                "reason": stop_reason,
+                "tokens": self._usage_tokens(usage),
+                "cost": cost,
+            }})
+
+        return events
+
+    def _parse_cursor_line(self, line: str) -> list[dict]:
+        """Map one Cursor Agent NDJSON stream line to UI agent_event dicts."""
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            text = line.strip()
+            if not text:
+                return []
+            trimmed = len(text) > self.EVENT_TEXT_CAP
+            return [{"type": "text", "part": {
+                "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                "trimmed": trimmed,
+            }}]
+        if not isinstance(raw, dict):
+            return []
+        et = raw.get("type") or raw.get("event") or raw.get("kind")
+        if not et:
+            return []
+
+        if et in {"error", "session_error", "run_error"}:
+            err_data = raw.get("error") or raw.get("message") or raw.get("result") or {}
+            err_msg = err_data.get("message") if isinstance(err_data, dict) else str(err_data)
+            self._last_agent_error = f"Cursor error: {err_msg}"
+            return [{"type": "text", "part": {
+                "text": f"Error: {err_msg}", "trimmed": False}}]
+
+        msg = raw.get("message")
+        if isinstance(msg, dict):
+            if msg.get("stopReason") == "error" or msg.get("errorMessage"):
+                err_msg = str(msg.get("errorMessage") or "API error")
+                self._last_agent_error = f"Cursor error: {err_msg}"
+                return [{"type": "text", "part": {
+                    "text": f"Error: {err_msg}", "trimmed": False}}]
+
+        events: list[dict] = []
+        if et in {"turn_start", "step_start", "session_start", "message_start", "system", "init"} or raw.get("subtype") == "init":
+            turn = raw.get("turn") or (raw.get("part") or {}).get("turn") or 1
+            model = raw.get("model") or (raw.get("part") or {}).get("model") or (msg.get("model") if isinstance(msg, dict) else None)
+            usage = raw.get("usage") or (msg.get("usage") if isinstance(msg, dict) else None) or {}
+            part = {"turn": turn}
+            if model:
+                part["model"] = model
+            if usage:
+                part["tokens"] = self._usage_tokens(usage)
+            return [{"type": "step_start", "part": part}]
+
+        # Content blocks in message_start / message_end / message
+        if isinstance(msg, dict) and et in {"message_end", "message"}:
+            content_blocks = msg.get("content")
+            if isinstance(content_blocks, list):
+                for block in content_blocks:
+                    if not isinstance(block, dict):
+                        continue
+                    bt = block.get("type")
+                    if bt in {"thinking", "reasoning"}:
+                        t = block.get("thinking") or block.get("text") or ""
+                        if isinstance(t, str) and t.strip():
+                            trimmed = len(t) > self.EVENT_TEXT_CAP
+                            events.append({"type": "reasoning", "part": {
+                                "text": t[:self.EVENT_TEXT_CAP] if trimmed else t,
+                                "trimmed": trimmed,
+                            }})
+                    elif bt in {"text", "message"}:
+                        t = block.get("text") or block.get("content") or ""
+                        if isinstance(t, str) and t.strip():
+                            trimmed = len(t) > self.EVENT_TEXT_CAP
+                            events.append({"type": "text", "part": {
+                                "text": t[:self.EVENT_TEXT_CAP] if trimmed else t,
+                                "trimmed": trimmed,
+                            }})
+                    elif bt in {"tool_use", "tool_call"}:
+                        call_id = str(block.get("id") or block.get("call_id") or "")
+                        tool_name = block.get("name") or block.get("tool") or "tool"
+                        rec = {
+                            "tool": tool_name,
+                            "title": block.get("title") or tool_name,
+                            "input": block.get("input") or block.get("args"),
+                        }
+                        if call_id:
+                            self._cursor_tools[call_id] = rec
+                        part = {
+                            "tool": rec["tool"],
+                            "title": rec["title"],
+                            "callID": call_id,
+                            "state": {"status": "running"},
+                        }
+                        if rec["input"] is not None:
+                            part["state"]["input"] = rec["input"]
+                        events.append({"type": "tool_use", "part": part})
+
+        if et in {"content_block_start"}:
+            cb = raw.get("content_block") or {}
+            cbt = cb.get("type")
+            if cbt in {"thinking", "reasoning"}:
+                text = cb.get("thinking") or cb.get("text") or ""
+                if text:
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "reasoning", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+            elif cbt in {"tool_use", "tool_call"}:
+                call_id = str(cb.get("id") or "")
+                rec = {
+                    "tool": cb.get("name") or "tool",
+                    "title": cb.get("name") or "",
+                    "input": cb.get("input"),
+                }
+                if call_id:
+                    self._cursor_tools[call_id] = rec
+                part = {
+                    "tool": rec["tool"],
+                    "title": rec["title"],
+                    "callID": call_id,
+                    "state": {"status": "running"},
+                }
+                if rec["input"] is not None:
+                    part["state"]["input"] = rec["input"]
+                return [{"type": "tool_use", "part": part}]
+            elif cbt == "text":
+                text = cb.get("text") or ""
+                if text.strip():
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "text", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+
+        if et in {"content_block_delta"}:
+            delta = raw.get("delta") or {}
+            dt = delta.get("type")
+            if dt in {"thinking_delta"}:
+                text = delta.get("thinking") or ""
+                if text:
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "reasoning", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+            elif dt in {"text_delta"}:
+                text = delta.get("text") or ""
+                if text.strip():
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    return [{"type": "text", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }}]
+
+        if et in {"reasoning", "thinking"}:
+            text = raw.get("text") or raw.get("thinking") or (raw.get("part") or {}).get("text") or ""
+            if isinstance(text, str) and text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                events.append({"type": "reasoning", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }})
+
+        if et in {"delta"}:
+            text = raw.get("text") or raw.get("content") or raw.get("delta") or ""
+            if isinstance(text, dict):
+                text = text.get("text") or ""
+            if isinstance(text, str) and text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                events.append({"type": "text", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }})
+
+        if et in {"text", "message", "assistant"}:
+            text = ""
+            if isinstance(msg, dict):
+                content = msg.get("content")
+                if isinstance(content, list):
+                    text = "".join(
+                        (c.get("text") or "") if isinstance(c, dict) else str(c)
+                        for c in content)
+                elif isinstance(content, str):
+                    text = content
+                text = text or msg.get("text") or ""
+            else:
+                text = raw.get("text") or raw.get("content") or ""
+                if isinstance(text, list):
+                    text = "".join(
+                        (c.get("text") or "") if isinstance(c, dict) else str(c)
+                        for c in text)
+            if isinstance(text, str) and text.strip():
+                trimmed = len(text) > self.EVENT_TEXT_CAP
+                events.append({"type": "text", "part": {
+                    "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                    "trimmed": trimmed,
+                }})
+
+        # Handle tool calls (both native cursor agent CLI format and standard envelopes)
+        if et in {"tool_use", "tool_call", "tool_running"}:
+            subtype = raw.get("subtype") or "started"
+            call_id = str(raw.get("call_id") or raw.get("id") or raw.get("toolCallId") or (raw.get("part") or {}).get("callID") or "")
+            tool_call = raw.get("tool_call") or {}
+            inner_tool = None
+            inner_key = ""
+            if isinstance(tool_call, dict):
+                for k, v in tool_call.items():
+                    if isinstance(v, dict) and k.endswith("ToolCall"):
+                        inner_tool = v
+                        inner_key = k
+                        break
+                if inner_tool is None:
+                    for k, v in tool_call.items():
+                        if isinstance(v, dict) and ("args" in v or "result" in v):
+                            inner_tool = v
+                            inner_key = k
+                            break
+
+            if subtype in {"completed", "error"}:
+                rec = self._cursor_tools.get(call_id) or {
+                    "tool": raw.get("tool") or raw.get("name") or "tool",
+                    "title": raw.get("title") or "",
+                }
+                result_obj = (inner_tool.get("result") if inner_tool else None) or raw.get("result") or raw.get("output") or ""
+                is_err = subtype == "error"
+                out_text = ""
+                if isinstance(result_obj, dict):
+                    if "error" in result_obj and result_obj["error"]:
+                        is_err = True
+                        out_text = result_obj["error"] if isinstance(result_obj["error"], str) else json.dumps(result_obj["error"])
+                    elif "success" in result_obj:
+                        succ = result_obj["success"]
+                        if isinstance(succ, dict):
+                            out_text = succ.get("stdout") or succ.get("content") or succ.get("output") or json.dumps(succ)
+                            if succ.get("exitCode") not in (None, 0):
+                                is_err = True
+                                if succ.get("stderr"):
+                                    out_text = f"{out_text}\n{succ['stderr']}".strip()
+                        else:
+                            out_text = str(succ)
+                    else:
+                        out_text = json.dumps(result_obj)
+                else:
+                    out_text = str(result_obj)
+
+                trimmed = len(out_text) > self.EVENT_TOOL_OUTPUT_CAP
+                part = {
+                    "tool": rec.get("tool") or "tool",
+                    "title": rec.get("title") or "",
+                    "callID": call_id,
+                    "state": {
+                        "status": "error" if is_err else "completed",
+                        "output": out_text[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out_text,
+                    },
+                }
+                if trimmed:
+                    part["state"]["output_trimmed"] = True
+                if rec.get("input") is not None:
+                    part["state"]["input"] = rec["input"]
+                events.append({"type": "tool_use", "part": part})
+            else:
+                if inner_key == "shellToolCall":
+                    tool_name = "bash"
+                elif inner_key == "readToolCall":
+                    tool_name = "read"
+                elif inner_key == "editToolCall":
+                    tool_name = "edit"
+                elif inner_key in ("writeToolCall", "writeFileToolCall"):
+                    tool_name = "write"
+                else:
+                    tool_name = raw.get("tool") or raw.get("name") or raw.get("toolName") or (raw.get("part") or {}).get("tool") or inner_key.replace("ToolCall", "").lower() or "tool"
+
+                inp = (inner_tool.get("args") if inner_tool else None) or raw.get("input") or raw.get("args") or (raw.get("part") or {}).get("state", {}).get("input")
+                title = (inner_tool.get("description") if inner_tool else None) or (inp.get("command") if isinstance(inp, dict) else None) or (inp.get("path") if isinstance(inp, dict) else None) or raw.get("title") or tool_name
+                rec = {
+                    "tool": tool_name,
+                    "title": title,
+                    "input": inp,
+                }
+                if call_id:
+                    self._cursor_tools[call_id] = rec
+                part = {
+                    "tool": rec["tool"],
+                    "title": rec["title"],
+                    "callID": call_id,
+                    "state": {"status": "running"},
+                }
+                if inp is not None:
+                    part["state"]["input"] = inp
+                events.append({"type": "tool_use", "part": part})
+
+        if et in {"tool_result", "tool_completed", "tool_errored"}:
+            call_id = str(raw.get("call_id") or raw.get("id") or raw.get("toolCallId") or raw.get("tool_use_id") or (raw.get("part") or {}).get("callID") or "")
+            rec = self._cursor_tools.get(call_id) or {
+                "tool": raw.get("tool") or raw.get("name") or "tool",
+                "title": raw.get("title") or "",
+            }
+            out = raw.get("output") or raw.get("result") or raw.get("content") or (raw.get("part") or {}).get("state", {}).get("output") or ""
+            if not isinstance(out, str):
+                try:
+                    out = json.dumps(out, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    out = str(out)
+            trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+            status = "completed" if et != "tool_errored" else "error"
+            part = {
+                "tool": rec.get("tool") or "tool",
+                "title": rec.get("title") or "",
+                "callID": call_id,
+                "state": {
+                    "status": status,
+                    "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                },
+            }
+            if trimmed:
+                part["state"]["output_trimmed"] = True
+            if rec.get("input") is not None:
+                part["state"]["input"] = rec["input"]
+            events.append({"type": "tool_use", "part": part})
+
+        tool_results = raw.get("toolResults")
+        if isinstance(tool_results, list):
+            for tr in tool_results:
+                if not isinstance(tr, dict):
+                    continue
+                call_id = str(tr.get("toolCallId") or tr.get("id") or "")
+                rec = self._cursor_tools.get(call_id) or {
+                    "tool": tr.get("toolName") or tr.get("tool") or "tool",
+                    "title": tr.get("title") or "",
+                }
+                out = tr.get("result") or tr.get("output") or tr.get("content") or ""
+                if not isinstance(out, str):
+                    try:
+                        out = json.dumps(out, ensure_ascii=False)
+                    except (TypeError, ValueError):
+                        out = str(out)
+                trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+                is_err = bool(tr.get("isError") or tr.get("is_error"))
+                part = {
+                    "tool": rec.get("tool") or "tool",
+                    "title": rec.get("title") or "",
+                    "callID": call_id,
+                    "state": {
+                        "status": "error" if is_err else "completed",
+                        "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                    },
+                }
+                if trimmed:
+                    part["state"]["output_trimmed"] = True
+                events.append({"type": "tool_use", "part": part})
+
+        if et in {"turn_end", "step_finish", "session_end", "result"}:
+            usage = raw.get("usage") or (msg.get("usage") if isinstance(msg, dict) else None) or raw.get("tokens") or (raw.get("part") or {}).get("tokens") or {}
+            is_err = bool(raw.get("is_error"))
+            stop_reason = "error" if is_err else (raw.get("stopReason") or (msg.get("stopReason") if isinstance(msg, dict) else None) or raw.get("reason") or (raw.get("part") or {}).get("reason") or "stop")
+            if is_err:
+                err_msg = str(raw.get("result") or "Cursor execution error")
+                self._last_agent_error = f"Cursor error: {err_msg}"
+            cost = float(raw.get("total_cost_usd") or raw.get("cost") or (raw.get("part") or {}).get("cost") or 0.0) or self._usage_cost(usage) or self._usage_cost(msg) or self._usage_cost(raw)
             events.append({"type": "step_finish", "part": {
                 "reason": stop_reason,
                 "tokens": self._usage_tokens(usage),
