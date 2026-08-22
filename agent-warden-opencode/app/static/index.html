@@ -3,7 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161B22">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F8FAFC">
 <title>Notes Studio — Transcript Notes Pipeline</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232DD4BF'/%3E%3Ctext x='16' y='24' font-family='Arial,sans-serif' font-size='21' font-weight='900' text-anchor='middle' fill='%2306201D'%3EN%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
@@ -42,6 +46,7 @@
     --font: "Public Sans", "Segoe UI", sans-serif;
     --display: "Bricolage Grotesque", "Public Sans", sans-serif;
     --mono: "IBM Plex Mono", Consolas, monospace;
+    color-scheme: dark;
   }
   [data-theme="light"] {
     /* —— BitsNotes Light Mode —— */
@@ -69,10 +74,53 @@
     --blue-soft: rgba(37, 99, 235, 0.10);
     --violet: #7C3AED;
     --shadow: 4px 4px 0 rgba(15, 23, 42, 0.12);
+    color-scheme: light;
   }
 
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; overflow-x: hidden; }
+
+  /* —— selection & focus —— */
+  ::selection { background: var(--teal); color: var(--signal-ink); }
+  :where(a, button, input, select, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* —— slim themed scrollbars for panes —— */
+  .log, .tlist, .history-list, .modal-card, .menu-pop,
+  .thinking pre, .tool pre, .hlogs {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  .log::-webkit-scrollbar, .tlist::-webkit-scrollbar,
+  .history-list::-webkit-scrollbar, .modal-card::-webkit-scrollbar,
+  .menu-pop::-webkit-scrollbar, .thinking pre::-webkit-scrollbar,
+  .tool pre::-webkit-scrollbar, .hlogs::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .log::-webkit-scrollbar-thumb, .tlist::-webkit-scrollbar-thumb,
+  .history-list::-webkit-scrollbar-thumb, .modal-card::-webkit-scrollbar-thumb,
+  .menu-pop::-webkit-scrollbar-thumb, .thinking pre::-webkit-scrollbar-thumb,
+  .tool pre::-webkit-scrollbar-thumb, .hlogs::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .log::-webkit-scrollbar-thumb:hover, .tlist::-webkit-scrollbar-thumb:hover,
+  .history-list::-webkit-scrollbar-thumb:hover,
+  .modal-card::-webkit-scrollbar-thumb:hover,
+  .thinking pre::-webkit-scrollbar-thumb:hover,
+  .tool pre::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  .log::-webkit-scrollbar-track, .tlist::-webkit-scrollbar-track,
+  .history-list::-webkit-scrollbar-track, .modal-card::-webkit-scrollbar-track {
+    background: transparent;
+  }
   body {
     margin: 0;
     min-height: 100vh;
@@ -122,8 +170,8 @@
   .masthead {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
+    justify-content: flex-start;
+    gap: 18px;
     margin-bottom: 18px;
     padding-bottom: 14px;
     border-bottom: 2px solid var(--ink);
@@ -131,28 +179,31 @@
   }
   .brand {
     display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .brand-mark {
-    display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 14px;
+    min-width: 0;
+  }
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
   }
   .stamp {
-    width: 36px;
-    height: 36px;
+    width: 46px;
+    height: 46px;
     background: var(--ink);
     color: var(--paper);
     display: grid;
     place-items: center;
     font-family: var(--display);
     font-weight: 800;
-    font-size: 15px;
+    font-size: 18px;
     letter-spacing: -0.04em;
     border: 2px solid var(--ink);
     box-shadow: 3px 3px 0 var(--accent);
     transform: rotate(-4deg);
+    flex-shrink: 0;
   }
   .brand h1 {
     margin: 0;
@@ -173,6 +224,45 @@
     font-size: 13px;
     line-height: 1.35;
   }
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    animation: rise 0.55s ease-out 0.08s both;
+  }
+  #theme-toggle,
+  #keys-toggle {
+    height: 36px;
+    padding: 0 11px;
+    border: 2px solid var(--ink);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font: 600 12px/1 var(--font);
+    box-shadow: 2px 2px 0 color-mix(in srgb, var(--ink) 35%, transparent);
+    transition: transform 0.12s, box-shadow 0.12s, background 0.15s;
+  }
+  #theme-toggle:hover,
+  #keys-toggle:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 3px 3px 0 var(--ink);
+  }
+  #theme-toggle:active,
+  #keys-toggle:active {
+    transform: translate(1px, 1px);
+    box-shadow: none;
+  }
+  #theme-toggle svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
   .meta-panel {
     text-align: left;
     font-family: var(--mono);
@@ -187,7 +277,8 @@
     min-width: 180px;
     overflow: hidden;
     animation: rise 0.55s ease-out 0.08s both;
-    flex-shrink: 0;
+    flex-shrink: 1;
+    margin-left: auto;
   }
   .meta-panel strong {
     display: block;
@@ -311,22 +402,24 @@
     padding: 3px 8px;
     border: 1.5px solid var(--line);
     color: var(--ink-soft);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
-  .board-stats .stat-pill.fail {
-    border-color: var(--red);
-    color: var(--red);
-    background: var(--red-soft);
+  .board-stats .stat-pill::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--line-strong);
+    flex-shrink: 0;
   }
-  .board-stats .stat-pill.live {
-    border-color: var(--amber);
-    color: var(--amber);
-    background: var(--amber-soft);
-  }
-  .board-stats .stat-pill.queued {
-    border-color: var(--blue);
-    color: var(--blue);
-    background: var(--blue-soft);
-  }
+  .board-stats .stat-pill.fail { border-color: var(--red); color: var(--red); background: var(--red-soft); }
+  .board-stats .stat-pill.fail::before { background: var(--red); }
+  .board-stats .stat-pill.live { border-color: var(--amber); color: var(--amber); background: var(--amber-soft); }
+  .board-stats .stat-pill.live::before { background: var(--amber); animation: blink 1s steps(2, end) infinite; }
+  .board-stats .stat-pill.queued { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); }
+  .board-stats .stat-pill.queued::before { background: var(--blue); }
   .board-filters {
     display: flex;
     gap: 6px;
@@ -342,11 +435,14 @@
     background: var(--surface);
     color: var(--ink-soft);
     cursor: pointer;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
   }
+  .board-filters button:hover { border-color: var(--line-strong); color: var(--ink); }
   .board-filters button.active {
     border-color: var(--ink);
     color: var(--ink);
     background: var(--paper);
+    box-shadow: 2px 2px 0 color-mix(in srgb, var(--ink) 30%, transparent);
   }
   .phase-nav {
     display: flex;
@@ -368,7 +464,9 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
   }
+  .phase-nav button:hover { border-color: var(--line-strong); color: var(--ink); }
   .phase-nav button.active {
     border-color: var(--ink);
     color: var(--ink);
@@ -605,6 +703,10 @@
     border-radius: var(--radius);
   }
   .tlist label:hover { background: var(--paper); }
+  .tlist label:has(input:checked) {
+    background: var(--teal-soft);
+    box-shadow: inset 3px 0 0 var(--teal);
+  }
   .tlist input { width: auto; accent-color: var(--teal); }
   .tlist .tsize {
     color: var(--muted);
@@ -642,7 +744,80 @@
   }
   .chips input { accent-color: var(--ink); }
 
+  /* —— ticket sections —— */
+  .fsection { margin-top: 18px; }
+  .fsection:first-child { margin-top: 0; }
+  .flabel {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .flabel::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+  .kbd-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .kbd-hint kbd {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 2px 6px;
+    border: 1.5px solid var(--line-strong);
+    border-bottom-width: 3px;
+    background: var(--paper);
+    color: var(--ink-soft);
+  }
+  @media (max-width: 480px) { .kbd-hint { display: none; } }
+
+  /* —— phase chips: numbered agent badges —— */
+  #phase-chips label .pnum {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    display: inline-grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    background: var(--paper);
+    border: 1.5px solid var(--line);
+  }
+  #phase-chips label:nth-child(1) { --ph-c: var(--blue); --ph-soft: var(--blue-soft); }
+  #phase-chips label:nth-child(2) { --ph-c: var(--teal); --ph-soft: var(--teal-soft); }
+  #phase-chips label:nth-child(3) { --ph-c: var(--violet); --ph-soft: rgba(167, 139, 250, 0.12); }
+  [data-theme="light"] #phase-chips label:nth-child(3) { --ph-soft: rgba(124, 58, 237, 0.10); }
+  #phase-chips label:has(input:checked) {
+    border-color: var(--ph-c);
+    background: color-mix(in srgb, var(--ph-c) 8%, var(--surface));
+    box-shadow: inset 0 -3px 0 var(--ph-c);
+  }
+  #phase-chips label:has(input:checked) .pnum {
+    color: var(--signal-ink);
+    background: var(--ph-c);
+    border-color: var(--ph-c);
+  }
+
   .status-line { margin-top: 14px; font-size: 13.5px; min-height: 1.2em; }
+  .status-line .error::before { content: "✕  "; font-weight: 700; }
+  .status-line .ok::before { content: "✓  "; font-weight: 700; }
+  .status-line .warn::before { content: "▲  "; font-weight: 700; }
   .error { color: var(--red); }
   .ok { color: var(--green); }
   .warn { color: var(--amber); }
@@ -672,9 +847,9 @@
   }
 
   #runs:empty::after {
-    content: "No runs yet — pick transcripts and press Run.";
+    content: "◇  No runs yet — pick transcripts on the right and press Run.";
     display: block;
-    padding: 36px 20px;
+    padding: 44px 20px;
     color: var(--muted);
     border: 2px dashed var(--line);
     background:
@@ -687,6 +862,7 @@
       );
     text-align: center;
     font-size: 14px;
+    letter-spacing: 0.01em;
   }
 
   .runcard {
@@ -724,7 +900,20 @@
     letter-spacing: 0.06em;
     padding: 3px 8px;
     border: 1px solid currentColor;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
+  .rstatus.running::before,
+  .rstatus.queued::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+  .rstatus.running::before { animation: blink 1s steps(2, end) infinite; }
   .rstatus.running { color: var(--amber); background: var(--amber-soft); }
   .rstatus.queued { color: var(--blue); background: var(--blue-soft); }
   .rstatus.done { color: var(--green); background: var(--green-soft); }
@@ -736,6 +925,35 @@
     font-size: 12px;
     font-variant-numeric: tabular-nums;
   }
+
+  /* —— run progress strip —— */
+  .runprogress {
+    height: 4px;
+    background: var(--line);
+    position: relative;
+    overflow: hidden;
+  }
+  .runprogress i {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -40%;
+    width: 38%;
+    background: var(--amber);
+    transition: left 0.15s linear;
+  }
+  @keyframes indet {
+    0% { left: -40%; }
+    100% { left: 105%; }
+  }
+  .runcard[data-runstate="running"] .runprogress i { animation: indet 1.5s ease-in-out infinite; }
+  .runcard[data-runstate="queued"] .runprogress i { background: var(--blue); animation: indet 2.4s ease-in-out infinite; }
+  .runcard[data-runstate="done"] .runprogress { background: var(--green); }
+  .runcard[data-runstate="done"] .runprogress i,
+  .runcard[data-runstate="error"] .runprogress i,
+  .runcard[data-runstate="stopped"] .runprogress i { display: none; }
+  .runcard[data-runstate="error"] .runprogress { background: var(--red); }
+  .runcard[data-runstate="stopped"] .runprogress { background: var(--muted); }
 
   .runcard .phases {
     display: grid;
@@ -750,8 +968,49 @@
     border-right: 1.5px solid var(--line);
     background: var(--surface-2);
     min-width: 0;
+    position: relative;
   }
   .phase:last-child { border-right: 0; }
+  .phase[data-state="running"] {
+    box-shadow: inset 0 3px 0 var(--amber);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--amber) 6%, var(--surface-2)), var(--surface-2) 55%);
+  }
+  .phase[data-state="passed"] { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--green) 70%, transparent); }
+  .phase[data-state="failed"] {
+    box-shadow: inset 0 3px 0 var(--red);
+    background: linear-gradient(180deg, var(--red-soft), transparent 55%);
+  }
+  .pstate {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .phase:not([data-state]) .pstate { visibility: hidden; }
+  .phase[data-state="pending"] .pstate::before { content: "queued"; }
+  .phase[data-state="running"] .pstate::before { content: "running…"; color: var(--amber); }
+  .phase[data-state="passed"] .pstate::before { content: "done"; color: var(--green); }
+  .phase[data-state="failed"] .pstate::before,
+  .phase[data-state="error"] .pstate::before { content: "failed"; color: var(--red); }
+  .phase[data-state="stopped"] .pstate::before { content: "stopped"; }
+  @media (min-width: 901px) {
+    .runcard .phases .phase + .phase::after {
+      content: "▸";
+      position: absolute;
+      left: -7px;
+      top: 12px;
+      z-index: 2;
+      color: var(--line-strong);
+      font-size: 11px;
+      line-height: 1;
+      background: var(--surface-2);
+      padding: 2px 1px;
+      pointer-events: none;
+    }
+  }
   @media (max-width: 900px) {
     .phase { border-right: 0; border-bottom: 1.5px solid var(--line); }
     .phase:last-child { border-bottom: 0; }
@@ -772,21 +1031,33 @@
   }
 
   .dot {
-    width: 9px;
-    height: 9px;
+    width: 13px;
+    height: 13px;
     border-radius: 50%;
     background: var(--line);
-    display: inline-block;
+    display: inline-grid;
+    place-items: center;
     flex-shrink: 0;
     border: 1.5px solid var(--ink);
+    font-family: var(--font);
+    font-size: 8.5px;
+    font-weight: 700;
+    line-height: 1;
+    color: transparent;
   }
   .dot.pending { background: var(--surface-2); }
   .dot.running {
     background: var(--amber);
     animation: blink 1s steps(2, end) infinite;
   }
-  .dot.passed { background: var(--green); }
-  .dot.failed { background: var(--red); }
+  .dot.passed, .dot.done {
+    background: var(--green);
+  }
+  .dot.passed::after, .dot.done::after { content: "✓"; color: #06201D; }
+  .dot.failed, .dot.error {
+    background: var(--red);
+  }
+  .dot.failed::after, .dot.error::after { content: "✕"; color: #06201D; }
   .dot.stopped { background: var(--muted); }
 
   .log {
@@ -797,10 +1068,11 @@
     padding: 9px 11px;
     max-height: 300px;
     overflow: auto;
-    font: 11px/1.45 var(--mono);
+    font: 11.5px/1.5 var(--mono);
     color: var(--ink-soft);
     white-space: pre-wrap;
     word-break: break-word;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.14);
   }
   .log .rawline { color: var(--ink-soft); white-space: pre-wrap; }
   .log .cmd { color: var(--violet); }
@@ -815,14 +1087,18 @@
   .gate:last-child { border-bottom: 0; }
   .badge {
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 10.5px;
     font-weight: 700;
     padding: 2px 7px;
     border: 1px solid currentColor;
+    letter-spacing: 0.04em;
   }
   .badge.pass { background: var(--green-soft); color: var(--green); }
+  .badge.pass::before { content: "✓ "; }
   .badge.fail { background: var(--red-soft); color: var(--red); }
+  .badge.fail::before { content: "✕ "; }
   .badge.warn { background: var(--amber-soft); color: var(--amber); }
+  .badge.warn::before { content: "! "; }
   .findings { font-size: 11px; color: var(--muted); margin-left: 4px; }
 
   .transcript { display: flex; flex-direction: column; gap: 6px; }
@@ -866,9 +1142,9 @@
   }
   .tool summary {
     cursor: pointer;
-    padding: 3px 8px;
+    padding: 4px 8px;
     color: var(--ink);
-    font-size: 11px;
+    font-size: 11.5px;
     user-select: none;
     list-style: none;
     display: flex;
@@ -876,9 +1152,10 @@
     align-items: baseline;
   }
   .tool summary::-webkit-details-marker { display: none; }
+  .tool summary:hover { background: color-mix(in srgb, var(--blue) 6%, transparent); }
   .tool summary .tname { color: var(--blue); font-weight: 600; }
   .tool summary .tstatus {
-    font-size: 9.5px;
+    font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
@@ -888,7 +1165,7 @@
   .tool .tbody { padding: 4px 8px 8px; border-top: 1px solid var(--line); }
   .tool .tlabel {
     color: var(--muted);
-    font-size: 9.5px;
+    font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 6px 0 2px;
@@ -945,15 +1222,18 @@
   .resume-banner .art.miss { color: var(--muted); }
 
   .rollup {
-    padding: 10px 16px;
+    padding: 0;
     border-top: 2px solid var(--ink);
     background: var(--surface);
     font-family: var(--mono);
     font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
     color: var(--ink-soft);
-    display: flex; flex-wrap: wrap; gap: 6px 16px;
+    display: flex; flex-wrap: wrap;
   }
-  .rollup .total { color: var(--ink); font-weight: 500; }
+  .rollup > span { padding: 8px 14px; border-right: 1.5px solid var(--line); white-space: nowrap; }
+  .rollup > span:last-child { border-right: 0; }
+  .rollup .total { color: var(--ink); font-weight: 600; letter-spacing: 0.02em; }
   .rollup .ph { color: var(--muted); }
 
   .history-list {
@@ -973,6 +1253,7 @@
   .hcard {
     background: var(--surface-2);
     border: 2px solid var(--ink);
+    border-left-width: 5px;
     box-shadow: 2px 2px 0 color-mix(in srgb, var(--ink) 55%, transparent);
     padding: 12px 14px;
     display: flex;
@@ -980,6 +1261,7 @@
     gap: 10px;
     animation: rise 0.4s ease-out both;
   }
+  .hcard:not(.is-error):not(.is-running) { border-left-color: var(--ink); }
   .hcard.is-error {
     border-color: var(--red);
     background: var(--red-soft);
@@ -1119,7 +1401,7 @@
   }
   .retry-tag {
     font-family: var(--mono);
-    font-size: 9.5px;
+    font-size: 10px;
     padding: 1px 6px;
     border: 1px solid var(--line);
     background: var(--surface-2);
@@ -1310,41 +1592,9 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231F2328' d='M6 8.5L1.5 4h9z'/%3E%3C/svg%3E");
   }
 
-  /* —— Theme toggle button —— */
-  #theme-toggle {
-    position: fixed;
-    top: 18px;
-    right: 18px;
-    z-index: 100;
-    width: 38px;
-    height: 38px;
-    border: 2px solid var(--ink);
-    border-radius: 0;
-    background: var(--surface);
-    color: var(--ink);
-    cursor: pointer;
-    display: grid;
-    place-items: center;
-    box-shadow: 2px 2px 0 var(--accent);
-    transition: transform 0.12s, box-shadow 0.12s, background 0.15s, color 0.15s;
-    padding: 0;
-  }
-  #theme-toggle:hover {
-    transform: translate(-1px, -1px);
-    box-shadow: 3px 3px 0 var(--accent);
-  }
-  #theme-toggle:active {
-    transform: translate(1px, 1px);
-    box-shadow: none;
-  }
-  #theme-toggle svg {
-    width: 18px;
-    height: 18px;
-    fill: currentColor;
-  }
-
   .btn:focus-visible,
   #theme-toggle:focus-visible,
+  #keys-toggle:focus-visible,
   .board-filters button:focus-visible,
   .reset-auto-btn:focus-visible {
     outline: 2px solid var(--accent);
@@ -1404,7 +1654,7 @@
     grid-column: 1 / -1;
     max-height: 280px;
     overflow: auto;
-    font: 11px/1.45 var(--mono);
+    font: 11.5px/1.5 var(--mono);
     color: var(--ink-soft);
     background: var(--paper-2);
     border: 1.5px solid var(--line);
@@ -1422,80 +1672,59 @@
     min-width: 140px;
     background: var(--surface);
     border: 2px solid var(--ink);
+    box-shadow: 3px 3px 0 color-mix(in srgb, var(--ink) 60%, transparent);
     padding: 4px;
+    animation: rise 0.14s ease-out both;
   }
   .menu.open .menu-pop { display: flex; flex-direction: column; gap: 2px; }
   .menu-pop button { width: 100%; text-align: left; }
   .menu-pop .menu-note { font-size: 11px; color: var(--ink-soft); padding: 4px 6px; }
   .alive-line { font-family: var(--mono); font-size: 11px; color: var(--amber); }
   .modal-backdrop {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-    z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(2px);
+    visibility: hidden; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    z-index: 1000; display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(3px); opacity: 0;
+    transition: opacity 0.16s ease, visibility 0.16s ease;
   }
-  .modal-backdrop.open { display: flex; }
+  .modal-backdrop.open { visibility: visible; opacity: 1; }
   .modal-card {
     background: var(--surface); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink);
     padding: 20px 24px; max-width: 520px; width: 90%; max-height: 90vh; overflow-y: auto;
+    transform: translateY(10px) scale(0.985);
+    transition: transform 0.16s ease;
   }
+  .modal-backdrop.open .modal-card { transform: none; }
   .modal-card h3 { margin: 0 0 6px 0; font-size: 18px; display: flex; align-items: center; gap: 8px; }
   .key-row { margin-bottom: 12px; }
-  .key-row label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
-  .key-pill { font-size: 10px; font-family: var(--mono); padding: 1px 6px; border-radius: 3px; }
-  .key-pill.set { background: rgba(46, 204, 113, 0.2); color: #2ecc71; border: 1px solid #2ecc71; }
-  .key-pill.unset { background: rgba(231, 76, 60, 0.2); color: #e74c3c; border: 1px solid #e74c3c; }
+  .key-row label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; margin-bottom: 4px; }
+  .key-pill { font-size: 10px; font-family: var(--mono); padding: 2px 7px; letter-spacing: 0.04em; }
+  .key-pill.set { background: var(--green-soft); color: var(--green); border: 1px solid var(--green); }
+  .key-pill.unset { background: var(--red-soft); color: var(--red); border: 1px solid var(--red); }
+  .key-row { margin-bottom: 12px; }
   .key-input-row { display: flex; gap: 6px; }
   .key-input-row input { flex: 1; font-family: var(--mono); font-size: 12px; padding: 6px 8px; }
-  #keys-toggle {
-    position: fixed; top: 12px; right: 54px; z-index: 50;
-    height: 36px; padding: 0 12px; font-size: 13px; font-weight: 600;
-    background: var(--surface); border: 2px solid var(--ink);
-    box-shadow: 2px 2px 0 var(--ink); cursor: pointer; color: var(--ink);
-    display: flex; align-items: center; gap: 6px;
-  }
-  #keys-toggle:hover { background: var(--paper-2); }
 </style>
 </head>
 <body>
-<button id="keys-toggle" type="button" title="Configure API Keys">🔑 API Keys</button>
-<button id="theme-toggle" aria-label="Switch to light theme" title="Toggle dark / light theme" aria-pressed="true">
-  <svg id="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
-  <svg id="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79zM4 10.5H1v2h3zm9-9.95h-2V3.5h2zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79zM20 10.5v2h3v-2zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41z"/></svg>
-</button>
-<script>
-(function() {
-  var saved = localStorage.getItem('agent_warden_theme');
-  var theme = saved || 'dark';
-  document.documentElement.setAttribute('data-theme', theme);
-  function applyIcons(t) {
-    document.getElementById('theme-icon-moon').style.display = t === 'dark' ? 'block' : 'none';
-    document.getElementById('theme-icon-sun').style.display = t === 'light' ? 'block' : 'none';
-    var btn = document.getElementById('theme-toggle');
-    btn.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false');
-    btn.setAttribute('aria-label', t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
-  }
-  // Apply icons once DOM is available (this runs inline after button)
-  applyIcons(theme);
-  document.getElementById('theme-toggle').addEventListener('click', function() {
-    var current = document.documentElement.getAttribute('data-theme') || 'dark';
-    var next = current === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('agent_warden_theme', next);
-    applyIcons(next);
-  });
-})();
-</script>
 <div class="shell">
   <header class="masthead">
     <div class="brand">
-      <div class="brand-mark">
-        <div class="stamp" aria-hidden="true">NS</div>
+      <div class="stamp" aria-hidden="true">NS</div>
+      <div class="brand-text">
+        <h1>Notes <span>Studio</span></h1>
+        <p class="tagline">Transcript → dense draft → enriched notes → final HTML. Three agents on a drafting bench — live tools, gates, and outputs.</p>
       </div>
-      <h1>Notes <span>Studio</span></h1>
-      <p class="tagline">Transcript → dense draft → enriched notes → final HTML. Three agents on a drafting bench — live tools, gates, and outputs.</p>
     </div>
     <div class="meta-panel" id="meta">
       <strong>Workspace</strong>
       loading…
+    </div>
+    <div class="head-actions">
+      <button id="keys-toggle" type="button" title="Configure API keys">🔑 API Keys</button>
+      <button id="theme-toggle" aria-label="Switch to light theme" title="Toggle dark / light theme" aria-pressed="true">
+        <svg id="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
+        <svg id="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79zM4 10.5H1v2h3zm9-9.95h-2V3.5h2zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79zM20 10.5v2h3v-2zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41z"/></svg>
+      </button>
     </div>
   </header>
 
@@ -1583,6 +1812,8 @@
         <span class="chip">collapse</span>
       </summary>
       <div class="ticket-body">
+      <div class="fsection">
+      <div class="flabel">Source</div>
       <div>
         <label for="subject">Subject</label>
         <select id="subject"></select>
@@ -1614,9 +1845,9 @@
       </div>
 
       <div class="chips" id="phase-chips">
-        <label><input type="checkbox" id="p1" checked> Agent 1 — Extractor</label>
-        <label><input type="checkbox" id="p2" checked> Agent 2 — Enricher</label>
-        <label><input type="checkbox" id="p3" checked> Agent 3 — Formatter</label>
+        <label><input type="checkbox" id="p1" checked><span class="pnum">1</span>Extractor</label>
+        <label><input type="checkbox" id="p2" checked><span class="pnum">2</span>Enricher</label>
+        <label><input type="checkbox" id="p3" checked><span class="pnum">3</span>Formatter</label>
       </div>
 
       <div class="guess-hint" id="guess-hint"></div>
@@ -1630,6 +1861,10 @@
         <button class="btn small" id="retry-btn" type="button" style="display:none;">Retry failed</button>
       </div>
 
+      </div>
+
+      <div class="fsection">
+      <div class="flabel">Agents · model · docs</div>
       <div class="field-block">
         <label for="backend">Agent backend</label>
         <select id="backend">
@@ -1662,6 +1897,10 @@
         </div>
         <select id="docs"></select>
       </div>
+      </div>
+
+      <div class="fsection">
+      <div class="flabel">Execution</div>
       <div class="field-block">
         <div class="lbl-row">
           <label for="parallel">Max parallel jobs</label>
@@ -1684,11 +1923,13 @@
           <input id="lecture" type="text" placeholder="auto-detect" spellcheck="false">
         </div>
       </details>
+      </div>
 
       <div class="ticket-cta">
         <div class="btnrow" style="margin-top:0;">
           <button class="btn primary" id="run">Run pipeline</button>
           <button class="btn danger" id="stop" disabled>Stop all</button>
+          <span class="kbd-hint" title="Keyboard shortcut"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>↵</kbd></span>
         </div>
         <div class="run-est" id="run-est"></div>
         <div class="status-line" id="status" aria-live="polite" role="status"></div>
@@ -1706,6 +1947,27 @@
 
 <script>
 const $ = id => document.getElementById(id);
+
+// —— theme toggle (lives in the masthead) ——
+(function() {
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  function applyIcons(t) {
+    document.getElementById('theme-icon-moon').style.display = t === 'dark' ? 'block' : 'none';
+    document.getElementById('theme-icon-sun').style.display = t === 'light' ? 'block' : 'none';
+    btn.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false');
+    btn.setAttribute('aria-label', t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+  }
+  applyIcons(document.documentElement.getAttribute('data-theme') || 'dark');
+  btn.addEventListener('click', function() {
+    var current = document.documentElement.getAttribute('data-theme') || 'dark';
+    var next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('agent_warden_theme', next);
+    applyIcons(next);
+  });
+})();
+
 const state = {
   abbr: "", subjectName: "",
   runs: {},
@@ -1880,7 +2142,7 @@ function ensureRunCard(ev) {
   ].filter(Boolean).join(" · ");
   el.innerHTML = `
     <div class="runhead">
-      <span class="dot"></span>
+      <span class="dot running"></span>
       <span class="rtitle">${esc(ev.subject)}</span>
       <span class="rsub">${esc(ev.prefix)}${modelBit ? " · " + modelBit : ""}</span>
       <span class="elapsed">0:00</span>
@@ -1888,19 +2150,20 @@ function ensureRunCard(ev) {
       <span class="spacer"></span>
       <button class="btn danger small runstop">Stop</button>
     </div>
+    <div class="runprogress" aria-hidden="true"><i></i></div>
     <div class="phases">
       <div class="phase" data-phase="extractor">
-        <div class="name"><span class="dot pending"></span> Agent 1 · Extractor</div>
+        <div class="name"><span class="dot pending"></span> Agent 1 · Extractor<span class="pstate"></span></div>
         <div class="desc">Transcript → dense draft + extraction manifest</div>
         <div class="log">waiting…</div>
       </div>
       <div class="phase" data-phase="enricher">
-        <div class="name"><span class="dot pending"></span> Agent 2 · Enricher</div>
+        <div class="name"><span class="dot pending"></span> Agent 2 · Enricher<span class="pstate"></span></div>
         <div class="desc">Dense draft + docs → enriched draft + topic mapping</div>
         <div class="log">waiting…</div>
       </div>
       <div class="phase" data-phase="formatter">
-        <div class="name"><span class="dot pending"></span> Agent 3 · Formatter</div>
+        <div class="name"><span class="dot pending"></span> Agent 3 · Formatter<span class="pstate"></span></div>
         <div class="desc">Enriched draft → final notes.html</div>
         <div class="log">waiting…</div>
       </div>
@@ -1938,6 +2201,7 @@ function setPhaseDot(rid, phase, cls) {
   const card = state.runs[rid];
   if (!card) return;
   card.phaseDots[phase].className = "dot " + cls;
+  if (card.phaseGates[phase]) card.phaseGates[phase].dataset.state = cls;
 }
 
 function smartScroll(el) {
@@ -2116,6 +2380,11 @@ function setRunStatus(rid, cls, text) {
   const s = card.el.querySelector(".rstatus");
   s.className = "rstatus " + cls;
   s.textContent = text;
+  card.el.dataset.runstate = cls;
+  card.el.classList.toggle("is-done", cls === "done");
+  card.el.classList.toggle("is-error", cls === "error");
+  const hd = card.el.querySelector(".runhead > .dot");
+  if (hd) hd.className = "dot " + (cls === "done" ? "done" : cls === "error" ? "error" : cls);
   card.status = (cls === "done" || cls === "error" || cls === "stopped") ? "done"
     : cls === "queued" ? "queued" : "running";
   reorderLiveRuns();
@@ -2420,6 +2689,9 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     showAddSubject(false);
+    const km = $("keys-modal");
+    if (km && km.classList.contains("open")) km.classList.remove("open");
+    document.querySelectorAll(".menu.open").forEach(m => m.classList.remove("open"));
   }
 });
 
@@ -3866,6 +4138,8 @@ if (keysToggle && keysModal) {
   keysToggle.addEventListener("click", () => {
     keysModal.classList.add("open");
     loadKeys();
+    const first = document.querySelector("#keys-modal .key-input-row input");
+    if (first) setTimeout(() => first.focus(), 60);
   });
   keysClose.addEventListener("click", () => keysModal.classList.remove("open"));
   keysModal.addEventListener("click", (e) => {

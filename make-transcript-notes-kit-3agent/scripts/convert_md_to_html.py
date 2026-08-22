@@ -53,7 +53,7 @@ def process_inline(text: str) -> str:
 
     def save_token(match):
         tok = match.group(0)
-        token_key = f"__BN_MATH_TOKEN_{uuid.uuid4().hex}__"
+        token_key = f"@@BNMATH{uuid.uuid4().hex}@@"
         token_map[token_key] = tok
         return token_key
 
