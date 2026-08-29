@@ -709,9 +709,14 @@ class Handler(BaseHTTPRequestHandler):
             return None
 
         jobs, rejected = [], []
+        idents = []
         for t in transcripts:
             prefix, lecture_num = _job_identity(
                 t, body, transcripts, subjects)
+            idents.append((t, prefix, lecture_num))
+        resolved = _resolve_batch_prefixes(
+            [(Path(t).stem, p) for t, p, _ in idents])
+        for (t, prefix, lecture_num), (_, adjusted) in zip(idents, resolved):
             if not prefix:
                 self._json({"error": "prefix required (e.g. NLP_Lecture_9)"}, 400)
                 return None
@@ -752,6 +757,7 @@ class Handler(BaseHTTPRequestHandler):
                 "prefix": prefix, "lecture_num": lecture_num,
                 "phases": job_phases, "backend": backend,
                 "model": model, "variant": variant, "docs": docs,
+                "adjusted": adjusted,
             }
             if not start:
                 jobs.append(spec)
@@ -775,7 +781,7 @@ class Handler(BaseHTTPRequestHandler):
             self._launch_job(spec, run_id, run)
             jobs.append({"run_id": run_id, **{k: spec[k] for k in
                         ("subject", "prefix", "lecture_num", "phases",
-                         "backend", "model", "variant")}})
+                         "backend", "model", "variant", "adjusted")}})
         return {"ok": bool(jobs), "jobs": jobs, "rejected": rejected,
                 "max_parallel": get_max_parallel()}
 
@@ -1003,6 +1009,53 @@ def _prefix_lecture(prefix: str) -> str:
     if parts and parts[-1].isdigit():
         return parts[-1]
     return ""
+
+
+_PREFIX_TAG_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,120}$")
+
+
+def _disambiguated_prefix(base: str, stem: str,
+                          taken_lower: set[str]) -> str:
+    """Build a unique prefix from *base* plus a filename-derived tag.
+
+    'UDL_Lecture' + 'UDL - Week 3' -> 'UDL_Lecture_Week_3'; falls back to
+    numbered suffixes ('UDL_Lecture_2', ...) when the tag adds nothing.
+    Returns '' if no acceptable candidate exists.
+    """
+    tag = re.sub(r"[^\w.\-]+", "_", stem).strip("_-. ")
+    head = re.sub(r"[^\w]+", "", base.split("_")[0]).lower()
+    bits = [b for b in tag.split("_") if b]
+    while bits and re.sub(r"[^\w]+", "", bits[0]).lower() == head:
+        bits.pop(0)
+    candidates = []
+    if bits:
+        candidates.append("_".join([base] + bits))
+    candidates += [f"{base}_{n}" for n in range(2, len(taken_lower) + 3)]
+    for cand in candidates:
+        if _PREFIX_TAG_OK.match(cand) and cand.lower() not in taken_lower:
+            return cand
+    return ""
+
+
+def _resolve_batch_prefixes(derived: list[tuple[str, str]],
+                           ) -> list[tuple[str, bool]]:
+    """Map (stem, prefix) pairs to (unique_prefix, adjusted).
+
+    Windows output folders are case-insensitive, so collisions are
+    detected case-insensitively. Later duplicates get a disambiguated
+    prefix instead of silently overwriting an earlier job's artifacts.
+    """
+    out: list[tuple[str, bool]] = []
+    taken: set[str] = set()
+    for stem, prefix in derived:
+        adjusted = False
+        if prefix.lower() in taken:
+            uniq = _disambiguated_prefix(prefix, stem, taken)
+            if uniq:
+                prefix, adjusted = uniq, True
+        taken.add(prefix.lower())
+        out.append((prefix, adjusted))
+    return out
 
 
 def _derive_prefix(stem: str) -> tuple[str, str]:

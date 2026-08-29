@@ -1632,6 +1632,22 @@
   }
   .batch-preview.show { display: block; }
   .batch-preview li { margin: 3px 0; font-family: var(--mono); font-size: 11px; }
+  .batch-preview .bp-tag {
+    font-size: 9px;
+    padding: 0 4px;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .batch-preview li.bp-rej { color: #b3261e; opacity: .85; }
+  .batch-preview .bp-note {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--ink-soft);
+    font-style: italic;
+  }
 
   .board-search {
     width: 160px;
@@ -2518,11 +2534,32 @@ function updateRunEstimate() {
   }
 }
 
+let previewSeq = 0;
+let previewTimer = null;
+
+function renderBatchPlan(el, res) {
+  const jobs = res.jobs || [];
+  const items = jobs.map(j =>
+    `<li title="${esc(j.transcript || "")}">${esc(j.prefix)}` +
+    `${j.adjusted ? ' <span class="bp-tag" title="filename did not give a unique folder — suffix added from filename">auto</span>' : ""}</li>`
+  ).join("");
+  const rej = (res.rejected || []).map(r =>
+    `<li class="bp-rej" title="${esc(r.transcript || "")}">${esc(r.prefix || "(no prefix)")} — ${esc(r.reason)}</li>`
+  ).join("");
+  const note = jobs.some(j => j.adjusted)
+    ? `<div class="bp-note">Duplicate folders were auto-suffixed from filenames — rename the files (or run them one at a time with a manual prefix) for cleaner names.</div>`
+    : "";
+  el.innerHTML =
+    `<strong>Will start ${jobs.length} job${jobs.length === 1 ? "" : "s"}</strong>` +
+    ` (max ${state.maxParallel} in parallel)<ul>${items}${rej}</ul>${note}`;
+}
+
 function refreshBatchPreview() {
   const el = $("batch-preview");
   if (!el) return;
   const boxes = checkedTranscripts();
   if (boxes.length < 2) {
+    previewSeq++;
     el.classList.remove("show");
     el.innerHTML = "";
     return;
@@ -2535,6 +2572,18 @@ function refreshBatchPreview() {
   }).join("");
   el.classList.add("show");
   el.innerHTML = `<strong>Will start ${boxes.length} jobs</strong> (max ${state.maxParallel} in parallel)<ul>${items}</ul>`;
+  clearTimeout(previewTimer);
+  const seq = ++previewSeq;
+  previewTimer = setTimeout(async () => {
+    const res = await api("/api/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ abbr: $("subject").value,
+                             transcripts: boxes.map(b => b.value) }),
+    });
+    if (seq !== previewSeq || !res || res.error) return;
+    renderBatchPlan(el, res);
+  }, 250);
 }
 
 function checkedTranscripts() {
@@ -2571,7 +2620,7 @@ function applyGuessFromSelection() {
         autoPickDocs();
         if (!$("prefix").dataset.manual) $("prefix").value = "";
         if (!$("lecture").dataset.manual) $("lecture").value = "";
-        hint.innerHTML = `Matched subject <em>${esc(abbrs[0])}</em> for ${boxes.length} files — prefix auto-derived per lecture.`;
+        hint.innerHTML = `Matched subject <em>${esc(abbrs[0])}</em> for ${boxes.length} files — prefix auto-derived per file; identical folders get a filename suffix (see preview below).`;
       } else {
         hint.textContent = `${boxes.length} files across ${abbrs.join(", ")} — set subject carefully; prefixes derive per file.`;
       }
@@ -2802,8 +2851,12 @@ async function startJobs({ resume = false, retry = false, phases = null,
     validateForm();
   }
   if (res.error) return setStatus(res.error, "error");
-  const started = (res.jobs || []).map(j => `${j.prefix} [${(j.phases||[]).join(",")}]`).join(", ");
-  setStatus(`Started ${(res.jobs||[]).length} run(s): ${started}`, "ok");
+  const adjustedN = (res.jobs || []).filter(j => j.adjusted).length;
+  const started = (res.jobs || []).map(j =>
+    `${j.prefix}${j.adjusted ? "*" : ""} [${(j.phases||[]).join(",")}]`).join(", ");
+  setStatus(`Started ${(res.jobs||[]).length} run(s): ${started}` +
+            (adjustedN ? ` (${adjustedN} duplicate folder${adjustedN === 1 ? "" : "s"} auto-suffixed*)` : ""),
+            "ok");
   if (res.rejected && res.rejected.length) {
     setStatus(`Started ${(res.jobs||[]).length} · rejected ${res.rejected.length}: ` +
               res.rejected.map(r => `${r.prefix} (${r.reason})`).join("; "), "warn");

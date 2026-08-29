@@ -2008,6 +2008,28 @@ def abbr_for_subject(subject: str) -> str:
     return ""
 
 
+def _extract_lecture(stem: str) -> str:
+    """Best-effort lecture number from a filename stem.
+
+    Tries, in order: trailing 'lecture/lec/l N', any trailing number,
+    keyword + number anywhere ('class 3', 'week04'), and finally the
+    last standalone 1-3 digit number (years like 2024 are ignored).
+    """
+    import re
+    m = re.search(r"(?:lecture|lec|l)[_\s.\-]*(\d+)\s*$", stem, re.I)
+    if not m:
+        m = re.search(r"[_\s.\-](\d+)\s*$", stem)
+    if not m:
+        m = re.search(r"(?:lecture|lec|session|sess|class|week|wk|part"
+                      r"|meeting|mtg)[_\s.\-]*(\d{1,3})\b", stem, re.I)
+    if not m:
+        nums = re.findall(r"(?<![\dA-Za-z])(\d{1,3})(?![\d])", stem)
+        if nums:
+            return str(int(nums[-1]))
+        return ""
+    return str(int(m.group(1)))
+
+
 def guess_from_filename(filename: str,
                         subjects: dict[str, str] | None = None) -> dict:
     """Infer subject abbr, lecture number, and lecture prefix from a
@@ -2017,16 +2039,12 @@ def guess_from_filename(filename: str,
       'Data_Management_for_Machine_Learning - Lecture 1.txt'
           -> DMML, lecture 1, DMML_Lecture_1
       'NLP_Lecture_9.txt' -> NLP, 9, NLP_Lecture_9
+      'UDL_class_3_transcript.txt' -> UDL, 3, UDL_Lecture_3
     """
     import re
     subjects = subjects or all_subjects()
     stem = Path(filename).stem
-    lecture = ""
-    m = re.search(r"(?:lecture|lec|l)[_\s.\-]*(\d+)\s*$", stem, re.I)
-    if not m:
-        m = re.search(r"[_\s.\-](\d+)\s*$", stem)
-    if m:
-        lecture = str(int(m.group(1)))
+    lecture = _extract_lecture(stem)
 
     abbr = ""
     score = 0

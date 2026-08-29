@@ -8,7 +8,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app import config
-from app.server import EventBus, _job_identity, inflight_summary, is_loopback_host
+from app.server import (EventBus, _job_identity, _resolve_batch_prefixes,
+                        inflight_summary, is_loopback_host)
 
 
 class LoopbackTests(unittest.TestCase):
@@ -53,6 +54,48 @@ class JobIdentityTests(unittest.TestCase):
         self.assertNotEqual(p1, p2)
         self.assertEqual(l1, "1")
         self.assertEqual(l2, "2")
+
+    def test_guess_lecture_not_at_end(self):
+        g = config.guess_from_filename(
+            "UDL_class_3_transcript.txt", {"UDL": "Universal Design for Learning"})
+        self.assertEqual(g["lecture_num"], "3")
+        self.assertEqual(g["prefix"], "UDL_Lecture_3")
+
+    def test_guess_ignores_year_numbers(self):
+        g = config.guess_from_filename(
+            "NLP_notes_2024_review.txt", {"NLP": "Natural Language Processing"})
+        self.assertEqual(g["lecture_num"], "")
+
+    def test_batch_duplicate_prefixes_disambiguated(self):
+        derived = [
+            ("session 1", "UDL_Lecture"),
+            ("week 2", "UDL_Lecture"),
+            ("talk", "UDL_Lecture"),
+        ]
+        out = _resolve_batch_prefixes(derived)
+        prefixes = [p for p, _ in out]
+        self.assertEqual(prefixes[0], "UDL_Lecture")
+        self.assertEqual(prefixes[1], "UDL_Lecture_week_2")
+        self.assertEqual(prefixes[2], "UDL_Lecture_talk")
+        self.assertEqual([a for _, a in out], [False, True, True])
+        lowered = {p.lower() for p in prefixes}
+        self.assertEqual(len(lowered), 3)
+
+    def test_batch_numbered_fallback_when_tag_useless(self):
+        derived = [
+            ("UDL", "UDL_Lecture"),
+            ("udl", "UDL_Lecture"),
+        ]
+        out = _resolve_batch_prefixes(derived)
+        prefixes = [p for p, _ in out]
+        self.assertEqual(len({p.lower() for p in prefixes}), 2)
+        self.assertEqual(out[1][1], True)
+
+    def test_batch_unique_inputs_untouched(self):
+        derived = [("l1", "UDL_Lecture_1"), ("l2", "UDL_Lecture_2")]
+        out = _resolve_batch_prefixes(derived)
+        self.assertEqual(out, [("UDL_Lecture_1", False),
+                               ("UDL_Lecture_2", False)])
 
 
 class RunEventsReadTests(unittest.TestCase):
