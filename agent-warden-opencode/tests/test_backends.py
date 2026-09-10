@@ -1266,5 +1266,88 @@ def test_parse_cursor_cli_native_stream_events():
     assert evs[0]["part"]["tokens"]["reasoning"] == 2500
 
 
+def test_antigravity_fallback_models():
+    catalog = config.list_models(backend=config.BACKEND_ANTIGRAVITY, refresh=True)
+    assert catalog["ok"] is True
+    assert catalog["backend"] == config.BACKEND_ANTIGRAVITY
+    assert catalog["default_model"] == "gemini-3.8-flash"
+    assert catalog["default_variant"] == "high"
+
+    model_ids = {m["id"] for m in catalog["models"]}
+    assert "gemini-3.8-flash" in model_ids
+    assert "gemini-3.8-pro" in model_ids
+    assert "gemini-3.7-flash" in model_ids
+    assert "gemini-3.7-pro" in model_ids
+
+    flash38 = next(m for m in catalog["models"] if m["id"] == "gemini-3.8-flash")
+    assert flash38["reasoning"] is True
+    assert "high" in flash38["variants"]
+    assert "max" in flash38["variants"]
+
+
+def test_antigravity_live_api_models(monkeypatch):
+    import io
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key-12345")
+    sample_response = {
+        "models": [
+            {
+                "name": "models/gemini-3.8-pro",
+                "displayName": "Gemini 3.8 Pro Live",
+                "description": "Live API Gemini 3.8 Pro",
+                "inputTokenLimit": 2000000,
+                "outputTokenLimit": 65536,
+                "supportedGenerationMethods": ["generateContent"],
+            },
+            {
+                "name": "models/gemini-3.8-flash",
+                "displayName": "Gemini 3.8 Flash Live",
+                "description": "Live API Gemini 3.8 Flash",
+                "inputTokenLimit": 1000000,
+                "outputTokenLimit": 65536,
+                "supportedGenerationMethods": ["generateContent"],
+            },
+            {
+                "name": "models/text-embedding-004",
+                "displayName": "Embedding Model",
+                "supportedGenerationMethods": ["embedContent"],
+            }
+        ]
+    }
+
+    class FakeHTTPResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    def fake_urlopen(req, timeout=None):
+        return FakeHTTPResponse(json.dumps(sample_response).encode("utf-8"))
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    catalog = config._list_antigravity_models(refresh=True, timeout=5.0)
+    assert catalog["ok"] is True
+    assert len(catalog["models"]) == 2
+    ids = {m["id"] for m in catalog["models"]}
+    assert "gemini-3.8-pro" in ids
+    assert "gemini-3.8-flash" in ids
+    assert "text-embedding-004" not in ids
+    assert "Gemini API" in (catalog.get("hint") or "")
+
+
+def test_antigravity_refresh_hint_on_fallback(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("ANTIGRAVITY_API_KEY", raising=False)
+    monkeypatch.delenv("ANTIGRAVITY_PATH", raising=False)
+    monkeypatch.delenv("AGY_PATH", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _: None)
+
+    catalog = config._list_antigravity_models(refresh=True, timeout=5.0)
+    assert catalog["ok"] is True
+    assert catalog["hint"] is not None
+    assert "refreshed from catalog" in catalog["hint"].lower()
+
+
+
 
 

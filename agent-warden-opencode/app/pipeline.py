@@ -620,6 +620,10 @@ class Pipeline:
         if self.variant:
             cmd.extend(["--variant", self.variant])
         env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
+        gemini_key = (extra_env or {}).get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if gemini_key:
+            env["GEMINI_API_KEY"] = gemini_key
+            env["GOOGLE_API_KEY"] = gemini_key
         if extra_env:
             env.update(extra_env)
         self._antigravity_tools = {}
@@ -2528,6 +2532,12 @@ class Pipeline:
                     return
                 err = (str(exc) if isinstance(exc, PhaseError)
                        else f"{type(exc).__name__}: {exc}")
+                if isinstance(exc, FileNotFoundError) or "cannot find the file specified" in str(exc).lower():
+                    clean_err = f"Backend executable for '{self.backend}' not found on PATH: {exc}"
+                    self._log({"type": "pipeline_end", "status": "error",
+                               "error": clean_err, "failed_phase": name,
+                               "stats": self._stats_snapshot()})
+                    return
                 self.stage_retries[num] += 1
                 if self.stage_retries[num] <= max_retries:
                     # If the phase died on a silent provider hang, keep the

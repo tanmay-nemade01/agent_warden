@@ -55,6 +55,29 @@ class JobIdentityTests(unittest.TestCase):
         self.assertEqual(l1, "1")
         self.assertEqual(l2, "2")
 
+    def test_manual_subject_single_file_different_subject_filename(self):
+        subjects = {"DA": "Data Analytics", "ML": "Machine Learning"}
+        prefix, lecture = _job_identity(
+            "ML_Lecture_5.txt",
+            {"abbr": "DA", "prefix": "", "lecture_num": ""},
+            ["ML_Lecture_5.txt"],
+            subjects,
+        )
+        self.assertEqual(prefix, "DA_Lecture_5")
+        self.assertEqual(lecture, "5")
+
+    def test_manual_subject_multi_file_different_subject_filenames(self):
+        subjects = {"DA": "Data Analytics", "ML": "Machine Learning"}
+        files = ["ML_Lecture_1.txt", "ML_Lecture_2.txt"]
+        p1, l1 = _job_identity(files[0], {"abbr": "DA", "prefix": "", "lecture_num": ""},
+                               files, subjects)
+        p2, l2 = _job_identity(files[1], {"abbr": "DA", "prefix": "", "lecture_num": ""},
+                               files, subjects)
+        self.assertEqual(p1, "DA_Lecture_1")
+        self.assertEqual(l1, "1")
+        self.assertEqual(p2, "DA_Lecture_2")
+        self.assertEqual(l2, "2")
+
     def test_guess_lecture_not_at_end(self):
         g = config.guess_from_filename(
             "UDL_class_3_transcript.txt", {"UDL": "Universal Design for Learning"})
@@ -281,6 +304,107 @@ class ApiKeysEndpointTests(unittest.TestCase):
                 self.assertIn("XAI_API_KEY=xai-test-key-12345", env_content)
 
 
+class StaticIndexHtmlTests(unittest.TestCase):
+    def test_index_html_elements_and_js_syntax(self):
+        import shutil
+        import subprocess
+        html_path = Path(__file__).resolve().parent.parent / "app" / "static" / "index.html"
+        self.assertTrue(html_path.exists())
+        content = html_path.read_text(encoding="utf-8")
+
+        # Verify essential Add Subject markup
+        self.assertIn('id="addsubj"', content)
+        self.assertIn('id="addsubj-form"', content)
+        self.assertIn('id="addsubj-save"', content)
+        self.assertIn('id="addsubj-cancel"', content)
+        self.assertIn('id="new-abbr"', content)
+        self.assertIn('id="new-name"', content)
+
+        # Verify JS syntax if node is installed
+        node_bin = shutil.which("node")
+        if node_bin:
+            marker = "theme-toggle"
+            s_start = content.find("<script>", content.find(marker))
+            s_end = content.rfind("</script>")
+            self.assertNotEqual(s_start, -1)
+            self.assertNotEqual(s_end, -1)
+            js_code = content[s_start + len("<script>"):s_end]
+            import os
+            with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as tf:
+                tf.write(js_code)
+                tpath = tf.name
+            try:
+                proc = subprocess.run(
+                    [node_bin, "--check", tpath],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                self.assertEqual(
+                    proc.returncode,
+                    0,
+                    f"JavaScript syntax error in index.html:\n{proc.stderr}",
+                )
+            finally:
+                if os.path.exists(tpath):
+                    os.remove(tpath)
+
+
+
+class BackendAvailabilityAndPreflightTests(unittest.TestCase):
+    def test_is_backend_available(self):
+        # opencode is installed on this host
+        avail, exe = config.is_backend_available("opencode")
+        self.assertTrue(avail)
+        self.assertTrue(exe)
+        # Antigravity CLI is installed on this host
+        avail, exe = config.is_backend_available("antigravity")
+        self.assertTrue(avail)
+        self.assertTrue(exe.endswith("agy.exe"))
+        # claude is not installed
+        avail, exe = config.is_backend_available("claude")
+        self.assertFalse(avail)
+        self.assertEqual(exe, "claude")
+
+    def test_config_endpoint_includes_backend_availability(self):
+        from app import server
+        handler = server.Handler.__new__(server.Handler)
+        cfg_res = handler._config()
+        self.assertIn("backends", cfg_res)
+        backends = cfg_res["backends"]
+        self.assertIsInstance(backends, list)
+        self.assertGreater(len(backends), 0)
+        for b in backends:
+            self.assertIn("available", b)
+            self.assertIn("executable", b)
+            self.assertIsInstance(b["available"], bool)
+
+    def test_plan_jobs_rejects_unavailable_backend(self):
+        from app import server
+        handler = server.Handler.__new__(server.Handler)
+        responses = []
+        handler._json = lambda data, code=200: responses.append((data, code))
+
+        first_abbr = next(iter(config.all_subjects().keys()), "DML")
+        body = {
+            "abbr": first_abbr,
+            "transcripts": ["dummy.txt"],
+            "backend": "antigravity",
+            "phases": [1, 2, 3],
+        }
+
+        # antigravity is not installed
+        with patch.object(config, "is_backend_available", return_value=(False, "agy")):
+            res = handler._plan_jobs(body, start=True)
+            self.assertIsNone(res)
+            self.assertEqual(len(responses), 1)
+            err_data, code = responses[0]
+            self.assertEqual(code, 400)
+            self.assertIn("is not available on this machine", err_data.get("error", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
 

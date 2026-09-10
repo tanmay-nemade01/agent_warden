@@ -1831,7 +1831,10 @@
       <div class="fsection">
       <div class="flabel">Source</div>
       <div>
-        <label for="subject">Subject</label>
+        <div class="lbl-row">
+          <label for="subject">Subject</label>
+          <button type="button" id="subject-reset-auto" class="reset-auto-btn" style="display:none;">Reset to auto</button>
+        </div>
         <select id="subject"></select>
         <div class="hint">
           <button class="btn small ghost" id="addsubj" type="button">+ add subject</button>
@@ -2485,6 +2488,14 @@ function validateForm() {
     return;
   }
 
+  const curBackendId = $("backend") ? $("backend").value : state.backend;
+  const curBackend = (state.backends || []).find(b => b.id === curBackendId);
+  if (curBackend && curBackend.available === false) {
+    runBtn.disabled = true;
+    stateEl.textContent = `Backend "${curBackend.label}" is not installed on PATH (${curBackend.executable || "missing"})`;
+    return;
+  }
+
   if (!files.length) {
     runBtn.disabled = true;
     stateEl.textContent = "Select at least 1 transcript file";
@@ -2554,6 +2565,20 @@ function renderBatchPlan(el, res) {
     ` (max ${state.maxParallel} in parallel)<ul>${items}${rej}</ul>${note}`;
 }
 
+function extractLectureFromMeta(meta) {
+  if (meta && meta.guess && meta.guess.lecture_num) return String(meta.guess.lecture_num);
+  const stem = (meta && meta.name ? meta.name.replace(/\.[^/.]+$/, "") : "") || "";
+  let m = stem.match(/(?:lecture|lec|l)[_\s.\-]*(\d+)\s*$/i);
+  if (m) return String(parseInt(m[1], 10));
+  m = stem.match(/(\d+)\s*$/);
+  if (m) return String(parseInt(m[1], 10));
+  m = stem.match(/(?:lecture|lec|class|session|week|w|l)[_\s.\-]*(\d+)/i);
+  if (m) return String(parseInt(m[1], 10));
+  const nums = [...stem.matchAll(/\b(\d{1,3})\b/g)];
+  if (nums.length) return String(parseInt(nums[nums.length - 1][1], 10));
+  return "";
+}
+
 function refreshBatchPreview() {
   const el = $("batch-preview");
   if (!el) return;
@@ -2564,10 +2589,18 @@ function refreshBatchPreview() {
     el.innerHTML = "";
     return;
   }
+  const isSubjectManual = !!$("subject").dataset.manual;
+  const manualAbbr = $("subject").value;
   const items = boxes.map(b => {
     const meta = state.transcripts.find(t => t.path === b.value) || {};
     const g = meta.guess || {};
-    const prefix = g.prefix || meta.name || b.value;
+    let prefix;
+    if (isSubjectManual && manualAbbr) {
+      const lec = extractLectureFromMeta(meta);
+      prefix = lec ? `${manualAbbr}_Lecture_${lec}` : `${manualAbbr}_Lecture`;
+    } else {
+      prefix = g.prefix || meta.name || b.value;
+    }
     return `<li>${esc(prefix)}</li>`;
   }).join("");
   el.classList.add("show");
@@ -2602,17 +2635,49 @@ function applyGuessFromSelection() {
   }
   const paths = boxes.map(b => b.value);
   const metas = paths.map(p => state.transcripts.find(t => t.path === p)).filter(Boolean);
-  const guesses = metas.map(t => t.guess || {}).filter(g => g.abbr);
+  const isSubjectManual = !!$("subject").dataset.manual;
 
   state.applyingGuess = true;
   try {
-    if (boxes.length === 1 && guesses[0]) {
-      const g = guesses[0];
-      if (g.abbr) $("subject").value = g.abbr;
-      if (g.prefix && !$("prefix").dataset.manual) $("prefix").value = g.prefix;
-      if (g.lecture_num && !$("lecture").dataset.manual) $("lecture").value = g.lecture_num;
-      autoPickDocs();
-      hint.innerHTML = `Matched <em>${esc(g.abbr)}</em> → ${esc(g.prefix || "(prefix?)")} · lecture ${esc(g.lecture_num || "?")}`;
+    if (isSubjectManual) {
+      const abbr = $("subject").value;
+      const subjObj = state.subjects.find(s => s.abbr === abbr) || {};
+      const subjName = subjObj.subject || abbr;
+      if (boxes.length === 1) {
+        const meta = metas[0];
+        const lec = extractLectureFromMeta(meta);
+        if (!$("lecture").dataset.manual) {
+          $("lecture").value = lec || "";
+        }
+        if (!$("prefix").dataset.manual) {
+          $("prefix").value = lec ? `${abbr}_Lecture_${lec}` : `${abbr}_Lecture`;
+        }
+        autoPickDocs();
+        hint.innerHTML = `Using subject <em>${esc(subjName)} (${esc(abbr)})</em> · prefix ${esc($("prefix").value)} · lecture ${esc(lec || "?")} (derived from filename)`;
+      } else {
+        if (!$("prefix").dataset.manual) $("prefix").value = "";
+        if (!$("lecture").dataset.manual) $("lecture").value = "";
+        autoPickDocs();
+        hint.innerHTML = `Using subject <em>${esc(subjName)} (${esc(abbr)})</em> for ${boxes.length} files — prefixes auto-derived per file (${esc(abbr)}_Lecture_...).`;
+      }
+      refreshBatchPreview();
+      return;
+    }
+
+    const guesses = metas.map(t => t.guess || {}).filter(g => g.abbr);
+    if (boxes.length === 1) {
+      const g = metas[0]?.guess || {};
+      const lec = extractLectureFromMeta(metas[0]);
+      if (g.abbr) {
+        $("subject").value = g.abbr;
+        if (g.prefix && !$("prefix").dataset.manual) $("prefix").value = g.prefix;
+        if (!$("lecture").dataset.manual) $("lecture").value = g.lecture_num || lec || "";
+        autoPickDocs();
+        hint.innerHTML = `Matched <em>${esc(g.abbr)}</em> → ${esc($("prefix").value || "(prefix?)")} · lecture ${esc($("lecture").value || "?")}`;
+      } else {
+        if (lec && !$("lecture").dataset.manual) $("lecture").value = lec;
+        hint.textContent = "No subject match from filename — pick subject and prefix manually.";
+      }
     } else if (guesses.length) {
       const abbrs = [...new Set(guesses.map(g => g.abbr))];
       if (abbrs.length === 1) {
@@ -2645,9 +2710,50 @@ $("lecture").addEventListener("input", () => {
   $("lecture").dataset.manual = "1";
 });
 $("subject").addEventListener("change", () => {
+  if (state.applyingGuess) return;
+  $("subject").dataset.manual = "1";
+  const resetBtn = $("subject-reset-auto");
+  if (resetBtn) resetBtn.style.display = "inline";
   autoPickDocs();
+  const boxes = checkedTranscripts();
+  const abbr = $("subject").value;
+  const subjObj = state.subjects.find(s => s.abbr === abbr) || {};
+  const subjName = subjObj.subject || abbr;
+  const hint = $("guess-hint");
+  if (boxes.length === 1) {
+    const meta = state.transcripts.find(t => t.path === boxes[0].value);
+    const lec = extractLectureFromMeta(meta);
+    if (!$("lecture").dataset.manual && lec) {
+      $("lecture").value = lec;
+    }
+    if (!$("prefix").dataset.manual) {
+      $("prefix").value = lec ? `${abbr}_Lecture_${lec}` : `${abbr}_Lecture`;
+    }
+    if (hint) {
+      hint.innerHTML = `Using subject <em>${esc(subjName)} (${esc(abbr)})</em> · prefix ${esc($("prefix").value)} · lecture ${esc(lec || "?")} (derived from filename)`;
+    }
+  } else if (boxes.length > 1) {
+    if (!$("prefix").dataset.manual) $("prefix").value = "";
+    if (!$("lecture").dataset.manual) $("lecture").value = "";
+    if (hint) {
+      hint.innerHTML = `Using subject <em>${esc(subjName)} (${esc(abbr)})</em> for ${boxes.length} files — prefixes auto-derived per file (${esc(abbr)}_Lecture_...).`;
+    }
+    refreshBatchPreview();
+  }
   refreshArtifacts();
+  validateForm();
 });
+
+const subjectResetBtn = $("subject-reset-auto");
+if (subjectResetBtn) {
+  subjectResetBtn.addEventListener("click", () => {
+    delete $("subject").dataset.manual;
+    subjectResetBtn.style.display = "none";
+    delete $("prefix").dataset.manual;
+    delete $("lecture").dataset.manual;
+    applyGuessFromSelection();
+  });
+}
 
 function autoPickDocs() {
   const docsSel = $("docs");
@@ -2781,6 +2887,9 @@ $("addsubj-save").addEventListener("click", async () => {
   sel.innerHTML = res.subjects.map(s =>
     `<option value="${s.abbr}">${s.abbr} — ${esc(s.subject)}</option>`).join("");
   sel.value = res.abbr;
+  sel.dataset.manual = "1";
+  const resetBtn = $("subject-reset-auto");
+  if (resetBtn) resetBtn.style.display = "inline";
   setStatus(`Subject ${res.abbr} created (companion_docs/${res.abbr} folder ready).`, "ok");
   refreshConfig();
 });
@@ -3454,7 +3563,12 @@ async function deletePastRun(run, archive) {
 }
 
 function loadIntoForm(run) {
-  if (run.abbr) $("subject").value = run.abbr;
+  if (run.abbr) {
+    $("subject").value = run.abbr;
+    $("subject").dataset.manual = "1";
+    const resetBtn = $("subject-reset-auto");
+    if (resetBtn) resetBtn.style.display = "inline";
+  }
   autoPickDocs();
   $("prefix").value = run.prefix || "";
   $("prefix").dataset.manual = "1";
@@ -3617,9 +3731,17 @@ function fillModelSelect(prefer) {
       }).join("");
     }
   }
-  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
-  else if (state.defaultModel && [...sel.options].some(o => o.value === state.defaultModel))
+  if (prev && [...sel.options].some(o => o.value === prev)) {
+    sel.value = prev;
+  } else if (prev) {
+    const opt = document.createElement("option");
+    opt.value = prev;
+    opt.textContent = `${prev} (custom)`;
+    sel.appendChild(opt);
+    sel.value = prev;
+  } else if (state.defaultModel && [...sel.options].some(o => o.value === state.defaultModel)) {
     sel.value = state.defaultModel;
+  }
   fillVariantSelect();
 }
 
@@ -3675,7 +3797,7 @@ $("backend").addEventListener("change", async () => {
   } else if (backend === "pi") {
     hint.textContent = "Pi Harness default: claude-3-7-sonnet.";
   } else if (backend === "antigravity") {
-    hint.textContent = "Antigravity default: gemini-3.7-flash (Gemini 3.7 series).";
+    hint.textContent = "Antigravity default: gemini-3.8-flash (Gemini 3.8 series).";
   } else if (backend === "cursor") {
     hint.textContent = "Cursor default: composer-2.5 (or claude-3.7-sonnet via Cursor API key).";
   }
@@ -3726,12 +3848,16 @@ async function refreshConfig({ refreshModels = false } = {}) {
     commandcode: "deepseek/deepseek-v4-flash",
     claude: "claude-3-7-sonnet",
     codex: "gpt-5.4-mini",
+    antigravity: "gemini-3.8-flash",
+    cursor: "composer-2.5",
     opencode: "opencode-go/deepseek-v4-flash",
   }[state.backend] || "opencode-go/deepseek-v4-flash";
   const defaultVariantFallback = {
     commandcode: "high",
     claude: "high",
     codex: "",
+    antigravity: "high",
+    cursor: "high",
     opencode: "max",
   }[state.backend] || "max";
   state.defaultModel = cfg.model || defaultModelFallback;
@@ -3739,8 +3865,10 @@ async function refreshConfig({ refreshModels = false } = {}) {
   const bsel = $("backend");
   if (bsel && (cfg.backends || []).length) {
     const prevB = bsel.value || backend;
-    bsel.innerHTML = (cfg.backends || []).map(b =>
-      `<option value="${esc(b.id)}">${esc(b.label)}</option>`).join("");
+    bsel.innerHTML = (cfg.backends || []).map(b => {
+      const status = (b.available === false) ? " (not installed)" : " (ready)";
+      return `<option value="${esc(b.id)}">${esc(b.label)}${status}</option>`;
+    }).join("");
     bsel.value = prevB;
   } else if (bsel) {
     bsel.value = state.backend;
@@ -3755,12 +3883,14 @@ async function refreshConfig({ refreshModels = false } = {}) {
     `model · ${esc(state.defaultModel)}<br>` +
     `effort · ${esc(state.defaultVariant)}`;
   const hint = $("models-hint");
-  if (cfg.models_ok === false && cfg.models_error) {
+  const matchedB = (cfg.backends || []).find(b => b.id === state.backend);
+  if (matchedB && matchedB.available === false) {
+    hint.textContent = `⚠️ Backend "${matchedB.label}" is not installed (${matchedB.executable || "not on PATH"}). Run is disabled.`;
+  } else if (cfg.models_ok === false && cfg.models_error) {
     hint.textContent = `fallback · ${cfg.models_error}`;
   } else if (cfg.models_hint) {
     hint.textContent = cfg.models_hint;
   } else {
-    const matchedB = (cfg.backends || []).find(b => b.id === state.backend);
     const label = matchedB ? matchedB.label : state.backend;
     hint.textContent = `${(cfg.models || []).length} ${label} models`;
   }
@@ -3772,9 +3902,15 @@ async function refreshConfig({ refreshModels = false } = {}) {
   updateRunEstimate();
   const sel = $("subject");
   const prev = sel.value;
+  const wasSubjManual = !!sel.dataset.manual;
   sel.innerHTML = cfg.subjects.map(s =>
     `<option value="${s.abbr}">${s.abbr} — ${esc(s.subject)}</option>`).join("");
   if (prev) sel.value = prev;
+  if (wasSubjManual) {
+    sel.dataset.manual = "1";
+    const resetBtn = $("subject-reset-auto");
+    if (resetBtn) resetBtn.style.display = "inline";
+  }
   const docsSel = $("docs");
   const prevDocs = docsSel.value;
   const wasManual = !!docsSel.dataset.manual;

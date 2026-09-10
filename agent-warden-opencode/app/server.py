@@ -562,7 +562,9 @@ class Handler(BaseHTTPRequestHandler):
         return {
             "workspace": str(config.WORKSPACE),
             "backend": backend,
-            "backends": [{"id": b["id"], "label": b["label"]}
+            "backends": [{"id": b["id"], "label": b["label"],
+                          "available": config.is_backend_available(b["id"])[0],
+                          "executable": config.is_backend_available(b["id"])[1]}
                          for b in config.BACKENDS.values()],
             "model": catalog.get("default_model") or bmeta["model"],
             "variant": catalog.get("default_variant") or bmeta["variant"],
@@ -688,6 +690,13 @@ class Handler(BaseHTTPRequestHandler):
         phases_in = body.get("phases")
         phases = [int(p) for p in (phases_in or [1, 2, 3])]
         backend = config.normalize_backend(body.get("backend"))
+        backend_avail, backend_exe = config.is_backend_available(backend)
+        if not backend_avail:
+            b_label = config.backend_meta(backend).get("label", backend)
+            self._json({
+                "error": f"Backend '{b_label}' is not available on this machine (executable '{backend_exe}' was not found on PATH). Please select an installed backend (such as OpenCode, Command Code, or Cursor Agent)."
+            }, 400)
+            return None
         catalog = config.list_models(backend=backend)
         model, variant = config.resolve_model_choice(
             body.get("model"), body.get("variant"), catalog, backend=backend)
@@ -984,6 +993,30 @@ def _job_identity(transcript: str, body: dict, transcripts: list[str],
     stem = Path(transcript).stem
     derived = _derive_prefix(stem)
     guess = config.guess_from_filename(name, subjects)
+    abbr = (body.get("abbr") or body.get("subject") or "").strip()
+    lec = guess.get("lecture_num") or derived[1]
+
+    if abbr:
+        # Subject was explicitly specified; do not allow a guessed prefix from
+        # an unrelated transcript filename to override the chosen subject.
+        # Only the lecture number is auto-derived from the transcript name.
+        if not lecture_num:
+            lecture_num = lec
+        if len(transcripts) > 1:
+            if not prefix:
+                prefix = f"{abbr}_Lecture_{lecture_num}" if lecture_num else f"{abbr}_Lecture"
+            else:
+                if lecture_num and not _prefix_lecture(prefix):
+                    prefix = f"{prefix}_{lecture_num}"
+                else:
+                    prefix = f"{prefix}_{derived[0]}"
+        else:
+            if not prefix:
+                prefix = f"{abbr}_Lecture_{lecture_num}" if lecture_num else f"{abbr}_Lecture"
+            elif not lecture_num:
+                lecture_num = _prefix_lecture(prefix) or lec
+        return prefix, lecture_num
+
     if len(transcripts) > 1:
         if not prefix:
             prefix = guess.get("prefix") or derived[0]
@@ -993,7 +1026,7 @@ def _job_identity(transcript: str, body: dict, transcripts: list[str],
                 prefix = (f"{prefix}_{derived[0]}" if not guess.get("prefix")
                           else guess["prefix"])
         if not lecture_num:
-            lecture_num = guess.get("lecture_num") or derived[1]
+            lecture_num = lec
     else:
         if not prefix:
             prefix = guess.get("prefix") or derived[0]

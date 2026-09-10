@@ -105,7 +105,7 @@ BACKENDS = {
     BACKEND_ANTIGRAVITY: {
         "id": BACKEND_ANTIGRAVITY,
         "label": "Antigravity",
-        "model": "gemini-3.7-flash",
+        "model": "gemini-3.8-flash",
         "variant": "high",
         "provider": "google",
         "effort_variants": ["low", "medium", "high", "max"],
@@ -497,6 +497,11 @@ def find_antigravity_argv() -> list[str]:
     global _ANTIGRAVITY_ARGV
     if _ANTIGRAVITY_ARGV:
         return _ANTIGRAVITY_ARGV
+    for env_k in ("ANTIGRAVITY_PATH", "AGY_PATH", "ANTIGRAVITY_CLI_PATH"):
+        custom = os.environ.get(env_k)
+        if custom and Path(custom).exists():
+            _ANTIGRAVITY_ARGV = [str(Path(custom))]
+            return _ANTIGRAVITY_ARGV
     for name in ("agy.exe", "agy.cmd", "agy", "antigravity.exe", "antigravity.cmd", "antigravity"):
         found = shutil.which(name)
         if found:
@@ -508,18 +513,29 @@ def find_antigravity_argv() -> list[str]:
             _ANTIGRAVITY_ARGV = [str(path)]
             return _ANTIGRAVITY_ARGV
     pkg_roots = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "agy" / "bin",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "agy",
         Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Antigravity",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "antigravity",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Antigravity IDE" / "bin",
+        Path(os.environ.get("APPDATA", "")) / "Antigravity" / "bin",
         Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages",
         Path(os.environ.get("APPDATA", "")) / "npm",
         Path.home() / ".gemini" / "antigravity-cli",
+        Path.home() / ".gemini" / "antigravity" / "bin",
+        Path.home() / ".gemini" / "antigravity-ide" / "bin",
     ]
     for root in pkg_roots:
         if not root.is_dir():
             continue
         for dirpath, dirnames, filenames in os.walk(root):
-            for f in ("agy.exe", "agy.cmd", "antigravity.exe", "antigravity.cmd"):
-                if f in filenames:
-                    p = Path(dirpath) / f
+            file_map = {f.lower(): f for f in filenames}
+            # Skip Electron GUI root directories that are not CLI binaries
+            if "resources.pak" in file_map or "chrome_100_percent.pak" in file_map:
+                continue
+            for target in ("agy.exe", "agy.cmd", "agy.bat", "agy", "antigravity-cli.exe", "antigravity-cli.cmd"):
+                if target in file_map:
+                    p = Path(dirpath) / file_map[target]
                     _ANTIGRAVITY_ARGV = [str(p)]
                     return _ANTIGRAVITY_ARGV
             dirnames[:] = [d for d in dirnames if d not in {"__pycache__", ".git"}]
@@ -577,6 +593,57 @@ def find_cursor_argv() -> list[str]:
 
 def find_cursor() -> str:
     return find_cursor_argv()[0]
+
+
+def is_backend_available(backend: str | None = None) -> tuple[bool, str]:
+    """Check if the backend executable is installed and available on PATH or disk.
+
+    Returns (is_available, executable_path_or_command_name).
+    """
+    bid = normalize_backend(backend)
+    if bid == BACKEND_OPENCODE:
+        exe = find_opencode()
+        if exe and (Path(exe).is_file() or shutil.which(exe)):
+            return True, exe
+        return False, exe or "opencode"
+    if bid == BACKEND_COMMANDCODE:
+        argv = find_commandcode_argv()
+        if argv and (Path(argv[0]).is_file() or shutil.which(argv[0])):
+            return True, argv[0]
+        return False, argv[0] if argv else "cmdc"
+    if bid == BACKEND_CURSOR:
+        argv = find_cursor_argv()
+        if argv and (Path(argv[0]).is_file() or shutil.which(argv[0])):
+            return True, argv[0]
+        return False, argv[0] if argv else "cursor-agent"
+    if bid == BACKEND_ANTIGRAVITY:
+        argv = find_antigravity_argv()
+        if argv and argv[0] != "agy" and (Path(argv[0]).is_file() or shutil.which(argv[0])):
+            return True, argv[0]
+        if argv and argv[0] == "agy" and shutil.which("agy"):
+            return True, "agy"
+        return False, argv[0] if argv else "agy"
+    if bid == BACKEND_CLAUDE:
+        argv = find_claude_argv()
+        if argv and (Path(argv[0]).is_file() or (shutil.which(argv[0]) and argv[0] != "claude") or shutil.which("claude")):
+            return True, argv[0]
+        return False, argv[0] if argv else "claude"
+    if bid == BACKEND_CODEX:
+        argv = find_codex_argv()
+        if argv and (Path(argv[0]).is_file() or (shutil.which(argv[0]) and argv[0] != "codex") or shutil.which("codex")):
+            return True, argv[0]
+        return False, argv[0] if argv else "codex"
+    if bid == BACKEND_REASONIX:
+        argv = find_reasonix_argv()
+        if argv and (Path(argv[0]).is_file() or (shutil.which(argv[0]) and argv[0] != "reasonix") or shutil.which("reasonix")):
+            return True, argv[0]
+        return False, argv[0] if argv else "reasonix"
+    if bid == BACKEND_PI:
+        argv = find_pi_argv()
+        if argv and (Path(argv[0]).is_file() or (shutil.which(argv[0]) and argv[0] != "pi") or shutil.which("pi")):
+            return True, argv[0]
+        return False, argv[0] if argv else "pi"
+    return False, "unknown"
 
 
 def _parse_models_verbose(stdout: str) -> list[dict]:
@@ -915,6 +982,26 @@ def _fallback_models(backend: str) -> list[dict]:
         ]
     if backend_id == BACKEND_ANTIGRAVITY:
         return [
+            {
+                "id": "gemini-3.8-flash",
+                "name": "Gemini 3.8 Flash",
+                "family": "gemini",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 1000000, "output": 65536},
+            },
+            {
+                "id": "gemini-3.8-pro",
+                "name": "Gemini 3.8 Pro",
+                "family": "gemini",
+                "status": "active",
+                "reasoning": True,
+                "variants": ["low", "medium", "high", "max"],
+                "cost": {},
+                "limit": {"context": 2000000, "output": 65536},
+            },
             {
                 "id": "gemini-3.7-flash",
                 "name": "Gemini 3.7 Flash",
@@ -1769,10 +1856,225 @@ def _list_pi_models(refresh: bool, timeout: float) -> dict:
 def _list_antigravity_models(refresh: bool, timeout: float) -> dict:
     meta = backend_meta(BACKEND_ANTIGRAVITY)
     fallback = _fallback_models(BACKEND_ANTIGRAVITY)
-    argv = find_antigravity_argv()
     default_model = meta["model"]
+
+    # 1. Live Google Generative Language API discovery if GEMINI_API_KEY / GOOGLE_API_KEY is available
+    api_key = (os.environ.get("GEMINI_API_KEY") or
+               os.environ.get("GOOGLE_API_KEY") or
+               os.environ.get("ANTIGRAVITY_API_KEY") or "").strip()
+    if api_key:
+        try:
+            import urllib.request
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+            req = urllib.request.Request(url, headers={"User-Agent": "AgentWarden-NotesStudio/1.0"})
+            with urllib.request.urlopen(req, timeout=min(timeout, 8.0)) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            items = data.get("models") or []
+            if items:
+                dynamic_models = []
+                seen_ids = set()
+                for item in items:
+                    raw_name = item.get("name") or ""
+                    m_id = raw_name.replace("models/", "")
+                    if not m_id or m_id in seen_ids:
+                        continue
+                    methods = item.get("supportedGenerationMethods") or []
+                    if methods and "generateContent" not in methods:
+                        continue
+                    lower_id = m_id.lower()
+                    if "gemini" not in lower_id:
+                        continue
+                    seen_ids.add(m_id)
+                    name = item.get("displayName") or m_id
+                    desc = item.get("description") or ""
+                    is_reasoning = any(k in lower_id for k in ("3.8", "3.7", "3.1", "pro", "thinking"))
+                    variants = list(meta["effort_variants"]) if is_reasoning else []
+                    dynamic_models.append({
+                        "id": m_id,
+                        "name": name,
+                        "family": "gemini",
+                        "description": desc,
+                        "status": "active",
+                        "reasoning": is_reasoning,
+                        "variants": variants,
+                        "cost": {},
+                        "limit": {
+                            "context": item.get("inputTokenLimit") or 1000000,
+                            "output": item.get("outputTokenLimit") or 65536,
+                        },
+                    })
+                if dynamic_models:
+                    def _sort_key(m):
+                        mid = m["id"].lower()
+                        if "3.8" in mid: return (0, mid)
+                        if "3.7" in mid: return (1, mid)
+                        if "3.1" in mid: return (2, mid)
+                        if "2.5" in mid: return (3, mid)
+                        return (4, mid)
+                    dynamic_models.sort(key=_sort_key)
+                    if not any(m["id"] == default_model for m in dynamic_models):
+                        default_model = dynamic_models[0]["id"]
+                    variants = next((m["variants"] for m in dynamic_models if m["id"] == default_model),
+                                    list(meta["effort_variants"]))
+                    return {
+                        "ok": True,
+                        "backend": BACKEND_ANTIGRAVITY,
+                        "provider": meta["provider"],
+                        "models": dynamic_models,
+                        "default_model": default_model,
+                        "default_variant": preferred_variant(variants, meta["variant"]),
+                        "error": None,
+                        "hint": f"{len(dynamic_models)} Antigravity models discovered live via Gemini API",
+                    }
+        except Exception:
+            pass
+
+    # 2. Antigravity CLI live discovery if executable is found and runnable
+    argv = find_antigravity_argv()
+    if argv and (shutil.which(argv[0]) or shutil.which("agy")):
+        for subcmd in [["models", "--json"], ["--list-models"], ["models"]]:
+            try:
+                import subprocess
+                proc = subprocess.run(
+                    argv + subcmd, capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=min(timeout, 8.0),
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                if proc.returncode == 0 and proc.stdout:
+                    try:
+                        data = json.loads(proc.stdout)
+                        items = data if isinstance(data, list) else data.get("models") or []
+                        if items:
+                            cli_models = []
+                            for item in items:
+                                if isinstance(item, str):
+                                    m_id = item
+                                    m_name = item
+                                elif isinstance(item, dict):
+                                    m_id = item.get("id") or item.get("name") or ""
+                                    m_name = item.get("name") or item.get("displayName") or m_id
+                                else:
+                                    continue
+                                if not m_id:
+                                    continue
+                                is_reasoning = any(k in m_id.lower() for k in ("3.8", "3.7", "3.1", "pro", "thinking"))
+                                cli_models.append({
+                                    "id": m_id,
+                                    "name": m_name,
+                                    "family": "gemini",
+                                    "status": "active",
+                                    "reasoning": is_reasoning,
+                                    "variants": list(meta["effort_variants"]) if is_reasoning else [],
+                                    "cost": {},
+                                    "limit": {"context": 1000000, "output": 65536},
+                                })
+                            if cli_models:
+                                if not any(m["id"] == default_model for m in cli_models):
+                                    default_model = cli_models[0]["id"]
+                                variants = next((m["variants"] for m in cli_models if m["id"] == default_model),
+                                                list(meta["effort_variants"]))
+                                return {
+                                    "ok": True,
+                                    "backend": BACKEND_ANTIGRAVITY,
+                                    "provider": meta["provider"],
+                                    "models": cli_models,
+                                    "default_model": default_model,
+                                    "default_variant": preferred_variant(variants, meta["variant"]),
+                                    "error": None,
+                                    "hint": f"{len(cli_models)} Antigravity models discovered via CLI",
+                                }
+                    except json.JSONDecodeError:
+                        grouped = {m["id"]: dict(m) for m in fallback}
+                        for raw_line in proc.stdout.splitlines():
+                            s_line = raw_line.strip()
+                            if not s_line or s_line.lower().startswith("fetching") or "available models" in s_line.lower():
+                                continue
+                            parts = [p.strip() for p in s_line.split("\t") if p.strip()]
+                            if not parts:
+                                parts = s_line.split(None, 1)
+                            if not parts:
+                                continue
+                            m_id = parts[0]
+                            m_name = parts[1] if len(parts) > 1 else m_id
+                            base_id = m_id
+                            variant = None
+                            for suf in ("-high", "-medium", "-low", "-max"):
+                                if m_id.endswith(suf):
+                                    base_id = m_id[:-len(suf)]
+                                    variant = suf[1:]
+                                    break
+                            if base_id not in grouped:
+                                is_reasoning = any(k in base_id.lower() for k in ("3.8", "3.7", "3.1", "pro", "thinking", "opus", "sonnet"))
+                                grouped[base_id] = {
+                                    "id": base_id,
+                                    "name": m_name.rsplit("(", 1)[0].strip() if "(" in m_name else m_name,
+                                    "family": "gemini" if "gemini" in base_id.lower() else "antigravity",
+                                    "status": "active",
+                                    "reasoning": is_reasoning,
+                                    "variants": list(meta["effort_variants"]) if is_reasoning else [],
+                                    "cost": {},
+                                    "limit": {"context": 1000000, "output": 65536},
+                                }
+                            if variant and variant not in grouped[base_id]["variants"]:
+                                grouped[base_id]["variants"].append(variant)
+                        cli_models = list(grouped.values())
+                        if cli_models:
+                            if any(m["id"] == "gemini-3.8-flash" for m in cli_models):
+                                default_model = "gemini-3.8-flash"
+                            elif not any(m["id"] == default_model for m in cli_models):
+                                default_model = cli_models[0]["id"]
+                            variants = next((m["variants"] for m in cli_models if m["id"] == default_model),
+                                            list(meta["effort_variants"]))
+                            return {
+                                "ok": True,
+                                "backend": BACKEND_ANTIGRAVITY,
+                                "provider": meta["provider"],
+                                "models": cli_models,
+                                "default_model": default_model,
+                                "default_variant": preferred_variant(variants, meta["variant"]),
+                                "error": None,
+                                "hint": f"{len(cli_models)} Antigravity models discovered live via CLI",
+                            }
+            except Exception:
+                pass
+
+    # 3. Local cache files lookup (e.g. ~/.gemini/antigravity/models_cache.json)
+    for cache_candidate in [
+        Path.home() / ".gemini" / "antigravity" / "models_cache.json",
+        Path.home() / ".gemini" / "models_cache.json",
+        WORKSPACE / ".antigravity_models_cache.json",
+    ]:
+        if cache_candidate.is_file():
+            try:
+                data = json.loads(cache_candidate.read_text(encoding="utf-8", errors="replace"))
+                items = data if isinstance(data, list) else data.get("models") or []
+                if items and isinstance(items, list):
+                    cached_models = []
+                    for it in items:
+                        if isinstance(it, dict) and it.get("id"):
+                            cached_models.append(it)
+                    if cached_models:
+                        if not any(m["id"] == default_model for m in cached_models):
+                            default_model = cached_models[0]["id"]
+                        variants = next((m["variants"] for m in cached_models if m["id"] == default_model),
+                                        list(meta["effort_variants"]))
+                        return {
+                            "ok": True,
+                            "backend": BACKEND_ANTIGRAVITY,
+                            "provider": meta["provider"],
+                            "models": cached_models,
+                            "default_model": default_model,
+                            "default_variant": preferred_variant(variants, meta["variant"]),
+                            "error": None,
+                            "hint": f"Loaded {len(cached_models)} Antigravity models from local cache",
+                        }
+            except Exception:
+                pass
+
+    # 4. Fallback catalog
     variants = next((m["variants"] for m in fallback if m["id"] == default_model),
                     list(meta["effort_variants"]))
+    hint = ("Antigravity models refreshed from catalog. Set GEMINI_API_KEY in .env or Settings for live API discovery."
+            if refresh else None)
     return {
         "ok": True,
         "backend": BACKEND_ANTIGRAVITY,
@@ -1781,6 +2083,7 @@ def _list_antigravity_models(refresh: bool, timeout: float) -> dict:
         "default_model": default_model,
         "default_variant": preferred_variant(variants, meta["variant"]),
         "error": None,
+        "hint": hint,
     }
 
 
