@@ -1719,6 +1719,66 @@
   .key-row { margin-bottom: 12px; }
   .key-input-row { display: flex; gap: 6px; }
   .key-input-row input { flex: 1; font-family: var(--mono); font-size: 12px; padding: 6px 8px; }
+
+  /* —— Cursor fast mode toggle switch —— */
+  #cursor-fast-block { display: none; }
+  #cursor-fast-block.visible { display: block; }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+  }
+  .toggle-switch {
+    position: relative;
+    width: 42px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--surface);
+    border: 1.5px solid var(--line-strong);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .toggle-slider::before {
+    content: "";
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--ink-soft);
+    border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background: var(--amber-soft);
+    border-color: var(--amber);
+  }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateY(-50%) translateX(20px);
+    background: var(--amber);
+  }
+  .toggle-label {
+    font-size: 13px;
+    color: var(--ink);
+    user-select: none;
+  }
+  .toggle-label .toggle-hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: 2px;
+  }
 </style>
 </head>
 <body>
@@ -1908,6 +1968,15 @@
       <div class="field-block">
         <label for="variant">Reasoning effort</label>
         <select id="variant"></select>
+      </div>
+      <div class="field-block" id="cursor-fast-block">
+        <div class="toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="cursor-fast">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label">⚡ Fast mode <span class="toggle-hint">(higher cost, lower latency)</span></span>
+        </div>
       </div>
       <div class="field-block">
         <div class="lbl-row">
@@ -2944,6 +3013,10 @@ async function startJobs({ resume = false, retry = false, phases = null,
     variant: $("variant").disabled ? "" : ($("variant").value || ""),
     backend: $("backend").value || state.backend || "opencode",
   };
+  // Cursor fast mode toggle
+  if (body.backend === "cursor" && $("cursor-fast-block").classList.contains("visible")) {
+    body.fast = $("cursor-fast").checked;
+  }
   if (transcripts.length) body.transcripts = transcripts;
   if (!resume && !retry) body.phases = phases;
   let res;
@@ -3765,10 +3838,25 @@ function fillVariantSelect(prefer) {
   sel.value = pick;
 }
 
+function syncCursorFastToggle() {
+  const block = $("cursor-fast-block");
+  if (!block) return;
+  const backend = $("backend")?.value || state.backend || "opencode";
+  const modelId = $("model")?.value || "";
+  const meta = (state.models || []).find(m => m.id === modelId) || {};
+  if (backend === "cursor" && meta.supports_fast) {
+    block.classList.add("visible");
+  } else {
+    block.classList.remove("visible");
+    $("cursor-fast").checked = false;
+  }
+}
+
 function syncMetaModel() {
   const backend = $("backend")?.value || state.backend || "opencode";
   const model = $("model")?.value || state.defaultModel;
   const variant = $("variant")?.disabled ? "(default)" : ($("variant")?.value || "—");
+  const fastOn = backend === "cursor" && $("cursor-fast-block")?.classList.contains("visible") && $("cursor-fast")?.checked;
   const meta = $("meta");
   if (!meta || !meta.dataset.ready) return;
   const ws = meta.dataset.workspace || "";
@@ -3780,7 +3868,8 @@ function syncMetaModel() {
     `<span class="path" title="${esc(ws)}">ws · ${esc(ws)}</span>` +
     `backend · ${esc(backend)}<br>` +
     `model · ${esc(model)}<br>` +
-    `effort · ${esc(variant)}`;
+    `effort · ${esc(variant)}` +
+    (fastOn ? ` · <span style="color:var(--amber)">⚡ fast</span>` : "");
 }
 
 $("backend").addEventListener("change", async () => {
@@ -3805,10 +3894,12 @@ $("backend").addEventListener("change", async () => {
 });
 $("model").addEventListener("change", () => {
   fillVariantSelect();
+  syncCursorFastToggle();
   syncMetaModel();
   updateRunEstimate();
 });
 $("variant").addEventListener("change", () => { syncMetaModel(); updateRunEstimate(); });
+$("cursor-fast").addEventListener("change", () => { syncMetaModel(); });
 $("refresh-models").addEventListener("click", async () => {
   const btn = $("refresh-models");
   btn.disabled = true;
@@ -3898,6 +3989,7 @@ async function refreshConfig({ refreshModels = false } = {}) {
   const prevVariant = $("variant").value;
   fillModelSelect(prevModel || state.defaultModel);
   fillVariantSelect(prevVariant || state.defaultVariant);
+  syncCursorFastToggle();
   syncMetaModel();
   updateRunEstimate();
   const sel = $("subject");

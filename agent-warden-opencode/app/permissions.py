@@ -117,7 +117,7 @@ def pi_sandbox_args() -> list[str]:
 
 def antigravity_args() -> list[str]:
     """Non-interactive streaming JSON flags for Antigravity (AGY)."""
-    return ["--mode", "json", "--auto", "--approve", "--no-interactive"]
+    return ["--output-format", "stream-json", "--dangerously-skip-permissions"]
 
 
 def cursor_sandbox_args() -> list[str]:

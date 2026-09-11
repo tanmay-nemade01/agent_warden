@@ -111,9 +111,9 @@ def test_permissions_helpers():
     assert "workspace-write" in sandbox_mode
 
     agy_args = permissions.antigravity_args()
-    assert "--mode" in agy_args
-    assert "json" in agy_args
-    assert "--auto" in agy_args
+    assert "--output-format" in agy_args
+    assert "stream-json" in agy_args
+    assert "--dangerously-skip-permissions" in agy_args
 
     cursor_args = permissions.cursor_sandbox_args()
     assert "-p" in cursor_args
@@ -1053,6 +1053,100 @@ def test_parse_antigravity_events():
     assert evs[0]["type"] == "text"
     assert "Resource quota exceeded" in evs[0]["part"]["text"]
     assert pipeline._last_agent_error == "Antigravity error: Resource quota exceeded"
+
+
+def test_parse_antigravity_native_stream_events():
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.stats = {"cost": 0.0, "tokens": {"input": 0, "output": 0, "reasoning": 0}}
+    pipeline._antigravity_tools = {}
+    pipeline.EVENT_TEXT_CAP = 4000
+    pipeline.EVENT_TOOL_OUTPUT_CAP = 4000
+    pipeline.model = "gemini-3.8-flash"
+
+    # 1. init
+    init_line = json.dumps({"event": "init", "init": {"model": "gemini-3.8-flash"}})
+    evs = pipeline._parse_antigravity_line(init_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_start"
+    assert evs[0]["part"]["model"] == "gemini-3.8-flash"
+
+    # 2. step_update agent_response delta
+    resp_line = json.dumps({
+        "event": "step_update",
+        "step_update": {
+            "step_index": 1,
+            "state": "ACTIVE",
+            "step_type": "agent_response",
+            "text_delta": "Hello from AGY",
+        }
+    })
+    evs = pipeline._parse_antigravity_line(resp_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "text"
+    assert evs[0]["part"]["text"] == "Hello from AGY"
+
+    # 3. step_update tool running
+    tool_start = json.dumps({
+        "event": "step_update",
+        "step_update": {
+            "step_index": 2,
+            "state": "ACTIVE",
+            "step_type": "tool",
+            "tool_name": "view_file",
+            "tool_info": {"parameters": {"AbsolutePath": "notes.md"}},
+        }
+    })
+    evs = pipeline._parse_antigravity_line(tool_start)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "tool_use"
+    assert evs[0]["part"]["tool"] == "view_file"
+    assert evs[0]["part"]["state"]["status"] == "running"
+
+    # 4. step_update tool done
+    tool_done = json.dumps({
+        "event": "step_update",
+        "step_update": {
+            "step_index": 2,
+            "state": "DONE",
+            "step_type": "tool",
+            "tool_name": "view_file",
+            "tool_info": {"output": "File content sample"},
+        }
+    })
+    evs = pipeline._parse_antigravity_line(tool_done)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "tool_use"
+    assert evs[0]["part"]["state"]["status"] == "completed"
+    assert evs[0]["part"]["state"]["output"] == "File content sample"
+
+    # 5. result success
+    res_line = json.dumps({
+        "event": "result",
+        "result": {
+            "status": "SUCCESS",
+            "response": "Done",
+            "usage": {"input_tokens": 100, "output_tokens": 50, "thinking_tokens": 20},
+        }
+    })
+    evs = pipeline._parse_antigravity_line(res_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "step_finish"
+    assert evs[0]["part"]["tokens"]["input"] == 100
+    assert evs[0]["part"]["tokens"]["output"] == 50
+
+    # 6. result error
+    err_line = json.dumps({
+        "event": "result",
+        "result": {
+            "status": "ERROR",
+            "error": "Quota limit reached",
+        }
+    })
+    evs = pipeline._parse_antigravity_line(err_line)
+    assert len(evs) == 1
+    assert evs[0]["type"] == "text"
+    assert "Quota limit reached" in evs[0]["part"]["text"]
+    assert "Quota limit reached" in pipeline._last_agent_error
 
 
 def test_parse_cursor_events():

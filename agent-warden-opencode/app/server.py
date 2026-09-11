@@ -700,6 +700,12 @@ class Handler(BaseHTTPRequestHandler):
         catalog = config.list_models(backend=backend)
         model, variant = config.resolve_model_choice(
             body.get("model"), body.get("variant"), catalog, backend=backend)
+        # Cursor fast mode: only meaningful for cursor backend
+        fast = None
+        if backend == config.BACKEND_CURSOR:
+            raw_fast = body.get("fast")
+            if raw_fast is not None:
+                fast = bool(raw_fast)
         transcripts = body.get("transcripts") or []
         single = body.get("transcript")
         if single:
@@ -766,7 +772,7 @@ class Handler(BaseHTTPRequestHandler):
                 "prefix": prefix, "lecture_num": lecture_num,
                 "phases": job_phases, "backend": backend,
                 "model": model, "variant": variant, "docs": docs,
-                "adjusted": adjusted,
+                "adjusted": adjusted, "fast": fast,
             }
             if not start:
                 jobs.append(spec)
@@ -826,7 +832,7 @@ class Handler(BaseHTTPRequestHandler):
             lecture_num=spec["lecture_num"], transcript=spec["transcript"],
             phases=spec["phases"], emit=emit, docs_dir=spec["docs"],
             run_id=run_id, model=spec["model"], variant=spec["variant"],
-            backend=spec["backend"])
+            backend=spec["backend"], fast=spec.get("fast"))
         run["pipeline"] = pipeline
 
         def worker(_rid=run_id, _p=pipeline, _run=run):

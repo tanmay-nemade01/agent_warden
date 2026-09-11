@@ -132,7 +132,7 @@ class Pipeline:
                  transcript: str, phases: list[int] | None = None,
                  emit=None, docs_dir: str | None = None, run_id: str = "",
                  model: str | None = None, variant: str | None = None,
-                 backend: str | None = None):
+                 backend: str | None = None, fast: bool | None = None):
         self.subject = subject
         self.abbr = abbr
         self.prefix = prefix
@@ -163,6 +163,7 @@ class Pipeline:
         self.proc: subprocess.Popen | None = None
         self.stop_flag = False
         self.run_log: Path | None = None
+        self.fast = fast
         self.stats = {
             "cost": 0.0,
             "tokens": {"input": 0, "output": 0, "reasoning": 0},
@@ -613,12 +614,14 @@ class Pipeline:
         job = self._ensure_job_files()
         job["prompt"].write_text(message, encoding="utf-8")
         argv = config.find_antigravity_argv()
-        cmd = argv + [
-            "--model", self.model,
-            "--file", str(job["prompt"]),
-        ] + permissions.antigravity_args()
-        if self.variant:
-            cmd.extend(["--variant", self.variant])
+        cmd = argv + permissions.antigravity_args()
+        if self.model:
+            cmd.extend(["--model", self.model])
+        effort = (self.variant or "high").lower()
+        if effort in {"low", "medium", "high"}:
+            cmd.extend(["--effort", effort])
+        elif effort in {"max", "xhigh"}:
+            cmd.extend(["--effort", "high"])
         env = {"NO_COLOR": "1", "FORCE_COLOR": "0"}
         gemini_key = (extra_env or {}).get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         if gemini_key:
@@ -641,7 +644,17 @@ class Pipeline:
         argv = config.find_cursor_argv()
         cmd = argv + permissions.cursor_sandbox_args()
         if self.model:
-            cmd.extend(["--model", self.model])
+            # Build bracket-notation model string for Cursor CLI parameters.
+            # e.g. 'claude-3.7-sonnet[effort=high,fast=true]'
+            model_str = self.model
+            bracket_parts = []
+            if self.variant:
+                bracket_parts.append(f"effort={self.variant}")
+            if self.fast is not None:
+                bracket_parts.append(f"fast={'true' if self.fast else 'false'}")
+            if bracket_parts:
+                model_str = f"{model_str}[{','.join(bracket_parts)}]"
+            cmd.extend(["--model", model_str])
         cursor_key = (extra_env or {}).get("CURSOR_API_KEY") or os.environ.get("CURSOR_API_KEY")
         if cursor_key:
             cmd.extend(["--api-key", cursor_key])
@@ -1664,6 +1677,97 @@ class Pipeline:
             self._last_agent_error = f"Antigravity error: {err_msg}"
             return [{"type": "text", "part": {
                 "text": f"Error: {err_msg}", "trimmed": False}}]
+
+        if et == "init":
+            init_data = raw.get("init") or {}
+            model = init_data.get("model") or getattr(self, "model", None)
+            return [{"type": "step_start", "part": {"turn": 1, "model": model}}]
+
+        if et == "step_update":
+            su = raw.get("step_update") or {}
+            st = su.get("step_type")
+            state = su.get("state")
+            events = []
+            if st == "agent_response":
+                text = su.get("text_delta") or ""
+                if text:
+                    trimmed = len(text) > self.EVENT_TEXT_CAP
+                    events.append({"type": "text", "part": {
+                        "text": text[:self.EVENT_TEXT_CAP] if trimmed else text,
+                        "trimmed": trimmed,
+                    }})
+                usage = su.get("usage")
+                if state == "DONE" and usage:
+                    events.append({"type": "step_finish", "part": {
+                        "reason": "stop",
+                        "tokens": {
+                            "input": usage.get("input_tokens", 0),
+                            "output": usage.get("output_tokens", 0),
+                            "reasoning": usage.get("thinking_tokens", 0),
+                            "cache_read": usage.get("cache_read_tokens", 0),
+                        },
+                        "cost": 0.0,
+                    }})
+                return events
+            if st == "tool":
+                step_idx = su.get("step_index", 0)
+                call_id = f"agy_tool_{step_idx}"
+                tool_name = su.get("tool_name") or (su.get("tool_info") or {}).get("name") or "tool"
+                tool_info = su.get("tool_info") or {}
+                if state == "ACTIVE":
+                    params = tool_info.get("parameters") or tool_info.get("args")
+                    part = {
+                        "tool": tool_name,
+                        "title": tool_name,
+                        "callID": call_id,
+                        "state": {"status": "running"},
+                    }
+                    if params is not None:
+                        part["state"]["input"] = params
+                    return [{"type": "tool_use", "part": part}]
+                if state == "DONE":
+                    out = tool_info.get("output") or tool_info.get("result") or ""
+                    if not isinstance(out, str):
+                        try:
+                            out = json.dumps(out, ensure_ascii=False)
+                        except (TypeError, ValueError):
+                            out = str(out)
+                    trimmed = len(out) > self.EVENT_TOOL_OUTPUT_CAP
+                    part = {
+                        "tool": tool_name,
+                        "title": tool_name,
+                        "callID": call_id,
+                        "state": {
+                            "status": "completed",
+                            "output": out[:self.EVENT_TOOL_OUTPUT_CAP] if trimmed else out,
+                        },
+                    }
+                    if trimmed:
+                        part["state"]["output_trimmed"] = True
+                    return [{"type": "tool_use", "part": part}]
+            return []
+
+        if et == "result":
+            res = raw.get("result") or {}
+            status = res.get("status")
+            if status == "ERROR" or res.get("error"):
+                err_msg = res.get("error") or "Antigravity execution failed"
+                self._last_agent_error = f"Antigravity error: {err_msg}"
+                return [{"type": "text", "part": {
+                    "text": f"Error: {err_msg}", "trimmed": False}}]
+            usage = res.get("usage") or {}
+            tokens = {
+                "input": usage.get("input_tokens", 0),
+                "output": usage.get("output_tokens", 0),
+                "reasoning": usage.get("thinking_tokens", 0),
+                "cache_read": usage.get("cache_read_tokens", 0),
+            }
+            cost = self._usage_cost(usage)
+            return [{"type": "step_finish", "part": {
+                "reason": "stop",
+                "tokens": tokens,
+                "cost": cost,
+            }}]
 
         events: list[dict] = []
         if et in {"turn_start", "step_start", "session_start"}:
