@@ -58,11 +58,21 @@ class ConfineTests(unittest.TestCase):
 class PermissionShapeTests(unittest.TestCase):
     def test_opencode_denies_question_and_toolkit_edit(self):
         block = permissions.opencode_permission_block()
-        self.assertEqual(block["question"], "deny")
-        self.assertEqual(block["edit"][f"{permissions.TOOLKIT_REL}/**"], "deny")
-        self.assertEqual(block["edit"]["outputs/**"], "allow")
-        self.assertEqual(block["edit"]["topic_mappings/**"], "allow")
-        self.assertEqual(block["edit"]["*.env"], "deny")
+        self.assertIsInstance(block, list)
+        by_action = {}
+        for rule in block:
+            by_action.setdefault(rule["action"], []).append(rule)
+        # question / subagent (v2 names for v1 question/task) are denied
+        self.assertIn({"action": "question", "resource": "*", "effect": "deny"}, block)
+        self.assertIn({"action": "subagent", "resource": "*", "effect": "deny"}, block)
+        # v1 `bash` is `shell` in v2
+        self.assertNotIn("bash", by_action)
+        self.assertNotIn("task", by_action)
+        edit_rules = {(r["resource"], r["effect"]) for r in by_action.get("edit", [])}
+        self.assertIn((f"{permissions.TOOLKIT_REL}/**", "deny"), edit_rules)
+        self.assertIn(("outputs/**", "allow"), edit_rules)
+        self.assertIn(("topic_mappings/**", "allow"), edit_rules)
+        self.assertIn(("*.env", "deny"), edit_rules)
 
     def test_commandcode_deny_list(self):
         perms = permissions.commandcode_permissions()
@@ -75,7 +85,8 @@ class PermissionShapeTests(unittest.TestCase):
             paths = permissions.write_job_configs(Path(td))
             self.assertTrue(paths["opencode"].is_file())
             data = json.loads(paths["opencode"].read_text(encoding="utf-8"))
-            self.assertEqual(data["permission"]["question"], "deny")
+            self.assertIsInstance(data["permissions"], list)
+            self.assertNotIn("permission", data)
             env = permissions.opencode_env(paths["opencode"])
             self.assertEqual(env["OPENCODE_CONFIG"], str(paths["opencode"]))
             from app import config as app_config

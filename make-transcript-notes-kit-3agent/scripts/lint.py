@@ -10,7 +10,7 @@ Usage:
 Checks (each reported as PASS / WARN / FAIL):
   * Template hygiene: no surviving {{PLACEHOLDER}} tokens, no broken comments.
   * <meta viewport> present.
-  * Metadata JSON is valid and complete (title, subject, date, sections, examRevisionNotes).
+  * Metadata JSON is valid and complete (title, subject, date, sections).
   * SEO: Open Graph tags, Twitter Card tags, description length (100–155 chars),
     keywords meta, canonical URL, robots meta, structured data (JSON-LD), author meta.
   * Callout box usage: reports which supported types are used; never requires
@@ -25,7 +25,7 @@ Checks (each reported as PASS / WARN / FAIL):
   * Fancy/academic word detection: advisory WARN.
   * Flesch Reading Ease estimate: scores prose readability (WARN if hard).
   * Suspiciously long unbroken tokens flagged as overflow risk.
-  * Exam revision notes: at least one .exam-revision-entry present.
+  * Exam revision notes: passes when revision notes are omitted (main lecture notes only).
   * No <style> tags, no inline style="" attributes, no Google Fonts links.
   * Leftover *[verify]* math-reconstruction markers (FAIL) — unresolved
     uncertainty stops shipping and requires Agent 2 or human review.
@@ -467,7 +467,7 @@ def check_metadata(raw, parser, report):
     required = {
         "title": str, "subject": str, "gradeLevel": str,
         "datePublished": str, "targetAudience": str,
-        "sections": list, "examRevisionNotes": list,
+        "sections": list,
     }
 
     for field, ftype in required.items():
@@ -484,37 +484,41 @@ def check_metadata(raw, parser, report):
         report.failed("metadata", "\n".join(checks))
         return
 
-    # Validate examRevisionNotes structure
-    exam = data["examRevisionNotes"]
-    if len(exam) < 2:
-        report.warned("metadata", f"examRevisionNotes has only {len(exam)} entries (recommend one per major concept).")
-    exam_ok = True
-    for i, entry in enumerate(exam):
-        echecks = []
-        if "topic" not in entry or not entry["topic"]:
-            echecks.append("missing 'topic'")
-        if "mustKnow" not in entry or not entry["mustKnow"]:
-            echecks.append("missing 'mustKnow'")
-        if "keyFormula" not in entry or not entry["keyFormula"]:
-            echecks.append("missing 'keyFormula'")
-        elif r"\[" in entry["keyFormula"] and (r"\(" in entry["keyFormula"] or r"\)" in entry["keyFormula"]):
-            echecks.append("keyFormula has nested '\\(' or '\\)' inside '\\[' block — use clean LaTeX without nested delimiters")
-        if "commonPitfall" not in entry or not entry["commonPitfall"]:
-            echecks.append("missing 'commonPitfall'")
-        if "quickCheck" not in entry or not entry["quickCheck"]:
-            echecks.append("missing 'quickCheck'")
-        if "connections" not in entry:
-            echecks.append("missing 'connections'")
-        if echecks:
-            exam_ok = False
-            report.warned("metadata", f"examRevisionNotes entry {i} ('{entry.get('topic', 'unknown')}'): {'; '.join(echecks)}")
-    if exam_ok and len(exam) >= 2:
-        report.passed("metadata", f"Valid metadata JSON with {len(data['sections'])} sections, {len(exam)} exam revision entries.")
+    # Validate examRevisionNotes structure if present (optional)
+    if "examRevisionNotes" in data:
+        exam = data["examRevisionNotes"]
+        if not isinstance(exam, list):
+            report.warned("metadata", "examRevisionNotes must be a list if present.")
+        else:
+            exam_ok = True
+            for i, entry in enumerate(exam):
+                echecks = []
+                if "topic" not in entry or not entry["topic"]:
+                    echecks.append("missing 'topic'")
+                if "mustKnow" not in entry or not entry["mustKnow"]:
+                    echecks.append("missing 'mustKnow'")
+                if "keyFormula" not in entry or not entry["keyFormula"]:
+                    echecks.append("missing 'keyFormula'")
+                elif r"\[" in entry["keyFormula"] and (r"\(" in entry["keyFormula"] or r"\)" in entry["keyFormula"]):
+                    echecks.append("keyFormula has nested '\\(' or '\\)' inside '\\[' block — use clean LaTeX without nested delimiters")
+                if "commonPitfall" not in entry or not entry["commonPitfall"]:
+                    echecks.append("missing 'commonPitfall'")
+                if "quickCheck" not in entry or not entry["quickCheck"]:
+                    echecks.append("missing 'quickCheck'")
+                if "connections" not in entry:
+                    echecks.append("missing 'connections'")
+                if echecks:
+                    exam_ok = False
+                    report.warned("metadata", f"examRevisionNotes entry {i} ('{entry.get('topic', 'unknown')}'): {'; '.join(echecks)}")
+            if exam_ok:
+                report.passed("metadata", f"Valid metadata JSON with {len(data['sections'])} sections, {len(exam)} exam revision entries.")
+            else:
+                report.warned("metadata", "Metadata JSON present but has issues in examRevisionNotes.")
     else:
-        report.warned("metadata", "Metadata JSON present but has issues (see above).")
+        report.passed("metadata", f"Valid metadata JSON with {len(data['sections'])} sections (main lecture notes only).")
 
     # Warn if removed fields are still present
-    removed_fields = [f for f in ("summary", "keyConcepts", "quiz") if f in data]
+    removed_fields = [f for f in ("summary", "keyConcepts", "quiz", "examRevisionNotes") if f in data]
     if removed_fields:
         report.warned("metadata",
                       f"Metadata contains removed field(s): {', '.join(removed_fields)}. "
@@ -900,9 +904,7 @@ def check_long_tokens(parser, report):
 
 def check_exam_revision(parser, report):
     if parser.exam_revision_entries == 0:
-        report.warned("exam revision", "No .exam-revision-entry divs found in HTML. Every lecture should have one entry per major concept.")
-    elif parser.exam_revision_entries < 2:
-        report.warned("exam revision", f"Only {parser.exam_revision_entries} exam revision entry found (recommend one per major concept).")
+        report.passed("exam revision", "No exam revision entries (main lecture notes only).")
     else:
         report.passed("exam revision", f"{parser.exam_revision_entries} exam revision entries present.")
 

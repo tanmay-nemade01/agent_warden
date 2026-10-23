@@ -22,13 +22,13 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import config  # noqa: E402
-from app.paths import confine, resolve_under  # noqa: E402
+from app.paths import resolve_configured  # noqa: E402
 from app.pipeline import Pipeline, PhaseError  # noqa: E402
 
 HOST = "127.0.0.1"
 PORT = 8787
 STATIC = Path(__file__).parent / "static"
-MAX_BODY = 1 * 1024 * 1024
+MAX_BODY = 4 * 1024 * 1024
 REQUIRE_TOKEN = False
 STATE_LOCK = threading.RLock()
 
@@ -37,10 +37,30 @@ STATE_LOCK = threading.RLock()
 MAX_PARALLEL = config.MAX_PARALLEL_RUNS
 SLOTS_FREE = config.MAX_PARALLEL_RUNS
 SLOTS_COND = threading.Condition()
+# Per-subject slot usage, so one subject with 40 lectures cannot starve
+# the other subjects queued behind it.
+SLOTS_BY_SUBJECT: dict[str, int] = {}
+# How many jobs a single subject may run at once (0 = no per-subject cap).
+MAX_PARALLEL_PER_SUBJECT = 0
 
 
 def get_max_parallel() -> int:
     return MAX_PARALLEL
+
+
+def get_max_parallel_per_subject() -> int:
+    return MAX_PARALLEL_PER_SUBJECT
+
+
+def set_max_parallel_per_subject(n: int) -> int:
+    """Cap the jobs one subject may hold at a time (0 = unlimited)."""
+    global MAX_PARALLEL_PER_SUBJECT
+    try:
+        n = int(n or 0)
+    except (TypeError, ValueError):
+        return MAX_PARALLEL_PER_SUBJECT
+    MAX_PARALLEL_PER_SUBJECT = max(0, min(n, 64))
+    return MAX_PARALLEL_PER_SUBJECT
 
 
 def set_max_parallel(n: int) -> int:
@@ -57,20 +77,35 @@ def set_max_parallel(n: int) -> int:
     return MAX_PARALLEL
 
 
-def try_acquire_slot() -> bool:
-    """Claim a slot if one is free (non-blocking)."""
+def try_acquire_slot(subject_key: str = "", per_subject: int = 0) -> bool:
+    """Claim a slot if one is free (non-blocking).
+
+    *per_subject* caps how many jobs one subject may run at once, so a
+    multi-subject batch shares the pool fairly.
+    """
     global SLOTS_FREE
+    key = (subject_key or "").strip()
     with SLOTS_COND:
-        if SLOTS_FREE > 0:
-            SLOTS_FREE -= 1
-            return True
-        return False
+        if SLOTS_FREE <= 0:
+            return False
+        if per_subject > 0 and key:
+            if SLOTS_BY_SUBJECT.get(key, 0) >= per_subject:
+                return False
+        SLOTS_FREE -= 1
+        if key:
+            SLOTS_BY_SUBJECT[key] = SLOTS_BY_SUBJECT.get(key, 0) + 1
+        return True
 
 
-def release_slot():
+def release_slot(subject_key: str = ""):
     global SLOTS_FREE
+    key = (subject_key or "").strip()
     with SLOTS_COND:
         SLOTS_FREE += 1
+        if key and SLOTS_BY_SUBJECT.get(key, 0) > 0:
+            SLOTS_BY_SUBJECT[key] -= 1
+            if SLOTS_BY_SUBJECT[key] <= 0:
+                SLOTS_BY_SUBJECT.pop(key, None)
         SLOTS_COND.notify()
 
 
@@ -196,6 +231,9 @@ def inflight_summary(run: dict) -> dict:
         "subject": run.get("subject", ""),
         "prefix": run.get("prefix", ""),
         "abbr": abbr,
+        "output_rel": (run.get("output_rel")
+                       or (getattr(pipeline, "output_rel", None) if pipeline else None)
+                       or ""),
         "status": "running" if run.get("active") else "queued",
         "mtime": run.get("t0") or time.time(),
         "started_at": run.get("t0"),
@@ -264,6 +302,7 @@ def collect_replay_events(get_events_for=None,
             "subject": run["subject"],
             "prefix": run["prefix"],
             "abbr": run.get("abbr"),
+            "output_rel": run.get("output_rel", ""),
             "replay": True,
         })
     return out
@@ -272,15 +311,17 @@ def collect_replay_events(get_events_for=None,
 def _load_jsonl_replay(rid: str, run: dict) -> list[dict]:
     pipeline = run.get("pipeline")
     log = getattr(pipeline, "run_log", None) if pipeline else None
+    fallback = {
+        "type": "pipeline_start",
+        "run_id": rid,
+        "subject": run["subject"],
+        "prefix": run["prefix"],
+        "abbr": run.get("abbr"),
+        "output_rel": run.get("output_rel", ""),
+        "replay": True,
+    }
     if not log or not Path(log).is_file():
-        return [{
-            "type": "pipeline_start",
-            "run_id": rid,
-            "subject": run["subject"],
-            "prefix": run["prefix"],
-            "abbr": run.get("abbr"),
-            "replay": True,
-        }]
+        return [fallback]
     out = []
     try:
         with open(log, encoding="utf-8-sig") as f:
@@ -298,22 +339,8 @@ def _load_jsonl_replay(rid: str, run: dict) -> list[dict]:
                 ev["replay"] = True
                 out.append(ev)
     except OSError:
-        return [{
-            "type": "pipeline_start",
-            "run_id": rid,
-            "subject": run["subject"],
-            "prefix": run["prefix"],
-            "abbr": run.get("abbr"),
-            "replay": True,
-        }]
-    return out or [{
-        "type": "pipeline_start",
-        "run_id": rid,
-        "subject": run["subject"],
-        "prefix": run["prefix"],
-        "abbr": run.get("abbr"),
-        "replay": True,
-    }]
+        return [fallback]
+    return out or [fallback]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -425,8 +452,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(config.list_models(provider=provider, refresh=refresh, backend=backend))
         if path == "/api/docs":
             return self._json(self._docs_folders())
+        if path == "/api/profiles":
+            return self._json(self._profiles())
         if path == "/api/parallel":
             return self._json({"max_parallel": get_max_parallel(),
+                               "max_parallel_per_subject":
+                                   get_max_parallel_per_subject(),
                                "in_flight": self._inflight_runs()})
         if path == "/api/history":
             try:
@@ -443,15 +474,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/artifacts":
             subject = (query.get("subject") or [""])[0]
             prefix = (query.get("prefix") or [""])[0]
+            abbr = (query.get("abbr") or [""])[0] or None
             if not subject or not prefix:
                 return self._json({"error": "subject and prefix required"}, 400)
-            if confine(config.OUTPUTS_DIR, subject, prefix) is None:
+            try:
+                config.output_paths(subject, prefix, abbr=abbr)
+            except ValueError:
                 return self._json({"error": "invalid subject or prefix"}, 400)
-            arts = config.artifacts_status(subject, prefix)
-            events = config.output_paths(subject, prefix)["events"]
+            arts = config.artifacts_status(subject, prefix, abbr=abbr)
+            events = config.output_paths(subject, prefix, abbr=abbr)["events"]
             if events.is_file():
                 arts["last_run"] = config.summarize_run_events(
-                    events, subject, prefix)
+                    events, subject, prefix, abbr=abbr or "")
             else:
                 arts["last_run"] = None
             return self._json(arts)
@@ -460,7 +494,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/run-events":
             subject = (query.get("subject") or [""])[0]
             prefix = (query.get("prefix") or [""])[0]
-            if confine(config.OUTPUTS_DIR, subject, prefix) is None:
+            abbr = (query.get("abbr") or [""])[0] or None
+            try:
+                config.output_paths(subject, prefix, abbr=abbr)
+            except ValueError:
                 return self._json({"error": "invalid subject or prefix"}, 400)
             try:
                 offset = int((query.get("offset") or ["0"])[0] or 0)
@@ -471,13 +508,17 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 limit = 1500
             return self._json(config.read_run_events(
-                subject, prefix, offset=offset, limit=limit))
+                subject, prefix, offset=offset, limit=limit, abbr=abbr))
         if path == "/api/outputs":
             subject = (query.get("subject") or [""])[0]
             prefix = (query.get("prefix") or [""])[0]
-            if confine(config.OUTPUTS_DIR, subject, prefix) is None:
+            abbr = (query.get("abbr") or [""])[0] or None
+            try:
+                config.output_paths(subject, prefix, abbr=abbr)
+            except ValueError:
                 return self._json({"error": "invalid subject or prefix"}, 400)
-            return self._json({"files": config.list_outputs(subject, prefix)})
+            return self._json({"files": config.list_outputs(subject, prefix,
+                                                            abbr=abbr)})
         if path == "/api/keys":
             return self._get_keys()
         if path.startswith("/outputs/"):
@@ -485,7 +526,9 @@ class Handler(BaseHTTPRequestHandler):
         return self._text("not found", 404)
 
     def do_POST(self):
-        path = urllib.parse.urlparse(self.path).path
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
         if not self._api_authed():
             return self._json({"error": "unauthorized"}, 401)
         if path == "/api/run":
@@ -496,6 +539,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._stop_run()
         if path == "/api/subjects":
             return self._add_subject()
+        if path == "/api/subject-instructions":
+            return self._set_subject_instructions()
+        if path == "/api/profiles":
+            if (query.get("action") or [""])[0] == "delete":
+                return self._delete_profile()
+            return self._save_profile()
         if path == "/api/parallel":
             return self._set_parallel()
         if path == "/api/keys":
@@ -520,9 +569,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_output(self, path: str):
-        rel = path[len("/outputs/"):]
-        p = safe_path(config.OUTPUTS_DIR, rel)
-        if not p or not p.is_file():
+        # The path arrives percent-encoded ("Quantum%20Computing/...").
+        rel = urllib.parse.unquote(path[len("/outputs/"):])
+        p = None
+        # Each subject may keep its notes under a different root, so try
+        # every known output root and serve the first match.
+        for root in config.output_roots():
+            cand = safe_path(root, rel)
+            if cand and cand.is_file():
+                p = cand
+                break
+        if not p:
             return self._text("not found", 404)
         body = p.read_bytes()
         suffix = p.suffix.lstrip(".").lower()
@@ -548,10 +605,13 @@ class Handler(BaseHTTPRequestHandler):
                     for a, v in sorted(config.all_subjects().items())]
         docs = self._docs_folders()
         docs_by_abbr = {}
+        profiles = {}
         for a, name in config.all_subjects().items():
-            matched = config.default_docs_dir(a, name)
+            prof = config.subject_profile(a)
+            matched = prof.resolve_docs()
             if matched:
                 docs_by_abbr[a] = {"name": matched.name, "path": str(matched)}
+            profiles[a] = config.profile_to_dict(prof)
         backend = config.normalize_backend(backend)
         catalog = config.list_models(refresh=refresh_models, backend=backend)
         bmeta = config.backend_meta(backend)
@@ -574,11 +634,14 @@ class Handler(BaseHTTPRequestHandler):
             "models_hint": catalog.get("hint"),
             "model_provider": catalog.get("provider") or bmeta["provider"],
             "subjects": subjects,
+            "subject_instructions": config.all_subject_instructions(),
+            "subject_profiles": profiles,
             "transcripts": config.list_transcripts(),
             "docs": docs,
             "docs_by_abbr": docs_by_abbr,
             "runs": runs,
             "max_parallel": get_max_parallel(),
+            "max_parallel_per_subject": get_max_parallel_per_subject(),
         }
 
     def _docs_folders(self) -> list[dict]:
@@ -591,6 +654,63 @@ class Handler(BaseHTTPRequestHandler):
             if p.is_dir():
                 out.append({"name": p.name, "path": str(p)})
         return out
+
+    def _profiles(self) -> dict:
+        """Per-subject profiles plus the transcripts each subject owns."""
+        profiles = config.all_profiles()
+        items = []
+        for abbr, prof in sorted(profiles.items()):
+            entry = config.profile_to_dict(prof)
+            entry["transcripts"] = config.list_transcripts(abbr=abbr)
+            items.append(entry)
+        return {"profiles": items,
+                "file": str(config.SUBJECT_PROFILES_FILE),
+                "fields": {
+                    "transcripts_dir": "Folder holding this subject's "
+                                       "transcripts (.txt).",
+                    "docs_dir": "Companion docs folder for Agent 2. May sit "
+                                "outside the workspace.",
+                    "output_root": "Root folder for this subject's output. "
+                                   "Must be inside the workspace.",
+                    "output_template": "Path under the output root, e.g. "
+                                       "'{subject}/{prefix}'.",
+                    "prefix_template": "Lecture prefix, e.g. "
+                                       "'{abbr}_Lecture_{lecture}'.",
+                    "topic_mapping": "Topic mapping YAML for this subject.",
+                }}
+
+    def _save_profile(self):
+        body = self._body()
+        if body is None:
+            return
+        abbr = (body.get("abbr") or "").strip().upper()
+        if not abbr:
+            return self._json({"error": "abbr required"}, 400)
+        fields = body.get("fields")
+        if not isinstance(fields, dict):
+            fields = {k: v for k, v in body.items()
+                      if k not in ("abbr", "action")}
+        try:
+            prof = config.save_profile(abbr, fields)
+        except ValueError as exc:
+            return self._json({"error": str(exc)}, 400)
+        entry = config.profile_to_dict(prof)
+        entry["transcripts"] = config.list_transcripts(abbr=abbr)
+        return self._json({"ok": True, "profile": entry,
+                           "profiles": self._profiles()["profiles"]})
+
+    def _delete_profile(self):
+        body = self._body()
+        if body is None:
+            return
+        abbr = (body.get("abbr") or "").strip().upper()
+        if not abbr:
+            return self._json({"error": "abbr required"}, 400)
+        try:
+            config.delete_profile(abbr)
+        except ValueError as exc:
+            return self._json({"error": str(exc)}, 400)
+        return self._json({"ok": True, "profiles": self._profiles()["profiles"]})
 
     def _inflight_runs(self) -> list[dict]:
         """Minimal run summaries for jobs in the queue (queued or running)."""
@@ -606,13 +726,21 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         if body is None:
             return
-        try:
-            n = int(body.get("max_parallel"))
-        except (TypeError, ValueError):
-            return self._json(
+        if body.get("max_parallel_per_subject") is not None:
+            set_max_parallel_per_subject(body["max_parallel_per_subject"])
+        elif "max_parallel" not in body:
+            self._json(
                 {"error": "max_parallel must be an integer (1-12)"}, 400)
-        set_max_parallel(n)
+            return
+        if body.get("max_parallel") is not None:
+            try:
+                n = int(body.get("max_parallel"))
+            except (TypeError, ValueError):
+                return self._json(
+                    {"error": "max_parallel must be an integer (1-64)"}, 400)
+            set_max_parallel(n)
         self._json({"ok": True, "max_parallel": get_max_parallel(),
+                    "max_parallel_per_subject": get_max_parallel_per_subject(),
                     "in_flight": self._inflight_runs()})
 
     def _get_keys(self):
@@ -668,22 +796,62 @@ class Handler(BaseHTTPRequestHandler):
         self._json(planned)
 
     def _plan_jobs(self, body: dict, start: bool) -> dict | None:
+        """Plan (and optionally start) jobs for one or many subjects.
+
+        A body carrying a ``subjects`` list is a multi-subject batch: the
+        top-level keys are shared settings and each entry may override
+        them. Otherwise the body describes a single subject (legacy).
+        """
+        entries = body.get("subjects")
+        if isinstance(entries, list) and entries:
+            return self._plan_batch(body, entries, start)
+
         abbr = body.get("abbr") or body.get("subject")
+        result = self._plan_subject_jobs(body, start)
+        if result.get("error"):
+            self._json({"error": result["error"]}, 400)
+            return None
+        return result
+
+    def _plan_batch(self, body: dict, entries: list, start: bool) -> dict:
+        """Plan jobs across many subjects, sharing the top-level settings."""
+        jobs: list[dict] = []
+        rejected: list[dict] = []
+        shared = {k: v for k, v in body.items() if k != "subjects"}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                rejected.append({"subject": "", "reason": "invalid subject entry"})
+                continue
+            merged = dict(shared)
+            merged.update({k: v for k, v in entry.items() if v is not None})
+            abbr = str(merged.get("abbr") or merged.get("subject") or "").strip().upper()
+            merged["abbr"] = abbr
+            result = self._plan_subject_jobs(merged, start)
+            if result.get("error"):
+                rejected.append({"subject": abbr, "reason": result["error"]})
+                continue
+            jobs.extend(result.get("jobs") or [])
+            rejected.extend(result.get("rejected") or [])
+        return {"ok": bool(jobs), "jobs": jobs, "rejected": rejected,
+                "max_parallel": get_max_parallel(),
+                "subjects": len(entries)}
+
+    def _plan_subject_jobs(self, body: dict, start: bool) -> dict:
+        """Plan the jobs for a single subject."""
+        abbr = str(body.get("abbr") or body.get("subject") or "").strip().upper()
         subjects = config.all_subjects()
         if abbr not in subjects:
-            self._json({"error": f"unknown subject {abbr!r}"}, 400)
-            return None
+            return {"ok": False, "error": f"unknown subject {abbr!r}",
+                    "jobs": [], "rejected": []}
         subj = subjects[abbr]
-        if confine(config.OUTPUTS_DIR, subj) is None:
-            self._json({"error": "invalid subject"}, 400)
-            return None
+        prof = config.subject_profile(abbr)
         docs = body.get("docs") or None
         if docs and docs != "__none__":
-            resolved_docs = resolve_under(config.WORKSPACE, docs)
+            resolved_docs = resolve_configured(config.WORKSPACE, docs)
             if resolved_docs is None:
-                self._json(
-                    {"error": "docs folder must be under the workspace"}, 400)
-                return None
+                return {"ok": False,
+                        "error": "docs folder could not be resolved",
+                        "jobs": [], "rejected": []}
             docs = str(resolved_docs)
         resume = bool(body.get("resume"))
         retry = bool(body.get("retry"))
@@ -693,10 +861,11 @@ class Handler(BaseHTTPRequestHandler):
         backend_avail, backend_exe = config.is_backend_available(backend)
         if not backend_avail:
             b_label = config.backend_meta(backend).get("label", backend)
-            self._json({
-                "error": f"Backend '{b_label}' is not available on this machine (executable '{backend_exe}' was not found on PATH). Please select an installed backend (such as OpenCode, Command Code, or Cursor Agent)."
-            }, 400)
-            return None
+            return {"ok": False, "error": (
+                f"Backend '{b_label}' is not available on this machine "
+                f"(executable '{backend_exe}' was not found on PATH). Please "
+                f"select an installed backend (such as OpenCode, Command Code, "
+                f"or Cursor Agent)."), "jobs": [], "rejected": []}
         catalog = config.list_models(backend=backend)
         model, variant = config.resolve_model_choice(
             body.get("model"), body.get("variant"), catalog, backend=backend)
@@ -713,45 +882,44 @@ class Handler(BaseHTTPRequestHandler):
         transcripts = [t for t in dict.fromkeys(
             t.strip() for t in transcripts) if t]
         if not transcripts and (resume or retry) and body.get("prefix"):
-            events = config.output_paths(subj, body["prefix"].strip())["events"]
+            events = config.output_paths(
+                subj, body["prefix"].strip(), abbr=abbr)["events"]
             if events.is_file():
-                prev = config.summarize_run_events(events, subj,
-                                                   body["prefix"].strip())
+                prev = config.summarize_run_events(
+                    events, subj, body["prefix"].strip(), abbr=abbr)
                 if prev.get("transcript") and Path(prev["transcript"]).is_file():
                     transcripts = [prev["transcript"]]
         if not transcripts:
-            self._json({"error": "transcript file required"}, 400)
-            return None
+            return {"ok": False, "error": "transcript file required",
+                    "jobs": [], "rejected": []}
 
         jobs, rejected = [], []
         idents = []
         for t in transcripts:
             prefix, lecture_num = _job_identity(
-                t, body, transcripts, subjects)
+                t, body, transcripts, subjects, prof=prof)
             idents.append((t, prefix, lecture_num))
         resolved = _resolve_batch_prefixes(
             [(Path(t).stem, p) for t, p, _ in idents])
         for (t, prefix, lecture_num), (_, adjusted) in zip(idents, resolved):
             if not prefix:
-                self._json({"error": "prefix required (e.g. NLP_Lecture_9)"}, 400)
-                return None
-            if confine(config.OUTPUTS_DIR, subj, prefix) is None:
-                rejected.append({"transcript": t, "prefix": prefix,
-                                 "reason": "invalid prefix"})
-                continue
-            tpath = resolve_under(config.TRANSCRIPTS_DIR, t)
+                return {"ok": False,
+                        "error": "prefix required (e.g. NLP_Lecture_9)",
+                        "jobs": [], "rejected": []}
+            tpath = _resolve_transcript(prof, t)
             if tpath is None:
                 rejected.append({"transcript": t, "prefix": prefix,
-                                 "reason": "transcript is not under transcripts dir"})
+                                 "reason": "transcript is not under the "
+                                           "subject's transcripts folder"})
                 continue
             t = str(tpath)
             if not lecture_num:
                 lecture_num = _prefix_lecture(prefix)
             job_phases = list(phases)
             if resume or retry:
-                arts = config.artifacts_status(subj, prefix)
-                events = config.output_paths(subj, prefix)["events"]
-                last = (config.summarize_run_events(events, subj, prefix)
+                arts = config.artifacts_status(subj, prefix, abbr=abbr)
+                events = config.output_paths(subj, prefix, abbr=abbr)["events"]
+                last = (config.summarize_run_events(events, subj, prefix, abbr=abbr)
                         if events.is_file() else None)
                 if retry and last and last.get("retry_phases"):
                     job_phases = list(last["retry_phases"])
@@ -767,12 +935,28 @@ class Handler(BaseHTTPRequestHandler):
                 rejected.append({"transcript": t, "prefix": prefix,
                                  "reason": "no phases to run"})
                 continue
+            extra_instructions = body.get("extra_instructions")
+            if not isinstance(extra_instructions, dict):
+                extra_instructions = config.get_subject_instructions(abbr)
+            else:
+                cleaned_inst = {}
+                for ph, inst in extra_instructions.items():
+                    norm_ph = str(ph).strip().lower()
+                    norm_ph = {"1": "extractor", "2": "enricher", "3": "formatter"}.get(norm_ph, norm_ph)
+                    if norm_ph in ("extractor", "enricher", "formatter") and isinstance(inst, str) and inst.strip():
+                        cleaned_inst[norm_ph] = inst.strip()
+                extra_instructions = cleaned_inst
+                if body.get("save_subject_instructions"):
+                    config.save_subject_instructions(abbr, extra_instructions)
+
             spec = {
                 "transcript": t, "subject": subj, "abbr": abbr,
                 "prefix": prefix, "lecture_num": lecture_num,
                 "phases": job_phases, "backend": backend,
                 "model": model, "variant": variant, "docs": docs,
                 "adjusted": adjusted, "fast": fast,
+                "extra_instructions": extra_instructions,
+                "output_rel": config.output_rel_path(subj, prefix, abbr=abbr),
             }
             if not start:
                 jobs.append(spec)
@@ -790,7 +974,8 @@ class Handler(BaseHTTPRequestHandler):
                 run = {"pipeline": None, "subject": subj,
                        "abbr": abbr, "prefix": prefix, "run_id": run_id,
                        "phases": list(job_phases), "t0": time.time(),
-                       "active": False, "current_phase": None}
+                       "active": False, "current_phase": None,
+                       "output_rel": spec.get("output_rel", "")}
                 STATE["runs"][run_id] = run
                 STATE["last_error"] = None
             self._launch_job(spec, run_id, run)
@@ -832,20 +1017,23 @@ class Handler(BaseHTTPRequestHandler):
             lecture_num=spec["lecture_num"], transcript=spec["transcript"],
             phases=spec["phases"], emit=emit, docs_dir=spec["docs"],
             run_id=run_id, model=spec["model"], variant=spec["variant"],
-            backend=spec["backend"], fast=spec.get("fast"))
+            backend=spec["backend"], fast=spec.get("fast"),
+            extra_instructions=spec.get("extra_instructions"))
         run["pipeline"] = pipeline
 
         def worker(_rid=run_id, _p=pipeline, _run=run):
             emit({"type": "queued", "run_id": _rid,
                   "subject": _run["subject"], "prefix": _run["prefix"]})
             slot_acquired = False
+            subject_key = _run.get("abbr") or _run.get("subject") or ""
+            per_subject = get_max_parallel_per_subject()
             try:
                 while True:
                     if _p.stop_flag:
                         BUS.publish({"type": "pipeline_end", "run_id": _rid,
                                      "status": "stopped"})
                         return
-                    if try_acquire_slot():
+                    if try_acquire_slot(subject_key, per_subject):
                         slot_acquired = True
                         break
                     time.sleep(0.25)
@@ -862,7 +1050,7 @@ class Handler(BaseHTTPRequestHandler):
                              "error": f"{type(exc).__name__}: {exc}"})
             finally:
                 if slot_acquired:
-                    release_slot()
+                    release_slot(subject_key)
                 with STATE_LOCK:
                     STATE["runs"].pop(_rid, None)
                 BUS.publish({"type": "idle", "run_id": _rid})
@@ -903,10 +1091,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         subject = (body.get("subject") or "").strip()
         prefix = (body.get("prefix") or "").strip()
+        abbr = (body.get("abbr") or "").strip().upper() or None
         archive = bool(body.get("archive"))
         if not subject or not prefix:
             return self._json({"error": "subject and prefix required"}, 400)
-        if confine(config.OUTPUTS_DIR, subject, prefix) is None:
+        try:
+            config.output_paths(subject, prefix, abbr=abbr)
+        except ValueError:
             return self._json({"error": "invalid subject or prefix"}, 400)
         # Refuse to delete while a live run owns this prefix.
         with STATE_LOCK:
@@ -918,7 +1109,8 @@ class Handler(BaseHTTPRequestHandler):
                 "error": f"run {busy['run_id']} is still using this prefix — stop it first"
             }, 409)
         try:
-            result = config.delete_past_run(subject, prefix, archive=archive)
+            result = config.delete_past_run(subject, prefix, archive=archive,
+                                            abbr=abbr)
         except ValueError as exc:
             return self._json({"error": str(exc)}, 400)
         except OSError as exc:
@@ -946,6 +1138,27 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"ok": True, "abbr": abbr, "name": name,
                            "subjects": [{"abbr": a, "subject": v}
                                         for a, v in sorted(subjects.items())]})
+
+    def _set_subject_instructions(self):
+        body = self._body()
+        if body is None:
+            return
+        abbr = (body.get("abbr") or "").strip().upper()
+        if not abbr:
+            return self._json({"error": "subject abbreviation required"}, 400)
+        instructions = body.get("instructions")
+        if instructions is not None and not isinstance(instructions, dict):
+            return self._json({"error": "instructions must be a mapping of phase to text"}, 400)
+        try:
+            all_inst = config.save_subject_instructions(abbr, instructions or {})
+        except ValueError as exc:
+            return self._json({"error": str(exc)}, 400)
+        return self._json({
+            "ok": True,
+            "abbr": abbr,
+            "instructions": all_inst.get(abbr, {}),
+            "subject_instructions": all_inst,
+        })
 
     def _sse(self):
         self.send_response(200)
@@ -991,8 +1204,33 @@ class Handler(BaseHTTPRequestHandler):
             BUS.unsubscribe(q)
 
 
+def _resolve_transcript(prof, raw: str) -> Path | None:
+    """Resolve a transcript path and require it under the subject's folder.
+
+    Each subject may own a transcripts folder of its own (inside or
+    outside the workspace), so the check follows the profile rather than
+    the shared ``transcript files/`` directory.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        base = Path(prof.transcripts_dir).resolve()
+    except (OSError, RuntimeError, TypeError):
+        return None
+    p = Path(raw)
+    if not p.is_absolute():
+        p = base / raw
+    try:
+        resolved = p.resolve()
+        resolved.relative_to(base)
+    except (ValueError, OSError, RuntimeError):
+        return None
+    return resolved
+
+
 def _job_identity(transcript: str, body: dict, transcripts: list[str],
-                  subjects: dict) -> tuple[str, str]:
+                  subjects: dict, prof=None) -> tuple[str, str]:
     prefix = (body.get("prefix") or "").strip()
     lecture_num = str(body.get("lecture_num") or "").strip()
     name = Path(transcript).name
@@ -1002,6 +1240,12 @@ def _job_identity(transcript: str, body: dict, transcripts: list[str],
     abbr = (body.get("abbr") or body.get("subject") or "").strip()
     lec = guess.get("lecture_num") or derived[1]
 
+    def _auto_prefix(num: str) -> str:
+        """Prefix for a lecture number, honouring the subject's template."""
+        if prof is not None:
+            return prof.prefix_for(num)
+        return f"{abbr}_Lecture_{num}" if num else f"{abbr}_Lecture"
+
     if abbr:
         # Subject was explicitly specified; do not allow a guessed prefix from
         # an unrelated transcript filename to override the chosen subject.
@@ -1010,7 +1254,7 @@ def _job_identity(transcript: str, body: dict, transcripts: list[str],
             lecture_num = lec
         if len(transcripts) > 1:
             if not prefix:
-                prefix = f"{abbr}_Lecture_{lecture_num}" if lecture_num else f"{abbr}_Lecture"
+                prefix = _auto_prefix(lecture_num)
             else:
                 if lecture_num and not _prefix_lecture(prefix):
                     prefix = f"{prefix}_{lecture_num}"
@@ -1018,7 +1262,7 @@ def _job_identity(transcript: str, body: dict, transcripts: list[str],
                     prefix = f"{prefix}_{derived[0]}"
         else:
             if not prefix:
-                prefix = f"{abbr}_Lecture_{lecture_num}" if lecture_num else f"{abbr}_Lecture"
+                prefix = _auto_prefix(lecture_num)
             elif not lecture_num:
                 lecture_num = _prefix_lecture(prefix) or lec
         return prefix, lecture_num
@@ -1044,7 +1288,7 @@ def _job_identity(transcript: str, body: dict, transcripts: list[str],
 
 
 def _prefix_lecture(prefix: str) -> str:
-    parts = prefix.split("_")
+    parts = re.split(r"[_\-]", prefix or "")
     if parts and parts[-1].isdigit():
         return parts[-1]
     return ""
@@ -1139,7 +1383,7 @@ def main():
     print(f"  Notes Studio is starting...", flush=True, file=console_out)
     print(f"  URL:       {url}", flush=True, file=console_out)
     print(f"  Workspace: {config.WORKSPACE}", flush=True, file=console_out)
-    print(f"  Model:     {config.MODEL} (variant: {config.VARIANT})",
+    print(f"  Backend:   opencode (model default resolves live per backend)",
           flush=True, file=console_out)
     print(flush=True, file=console_out)
 
@@ -1156,7 +1400,7 @@ def main():
         pass
     print(f"Notes Studio on {url}", flush=True)
     print(f"Workspace: {config.WORKSPACE}", flush=True)
-    print(f"Model: {config.MODEL} (variant: {config.VARIANT})", flush=True)
+    print("Backend: opencode (model default resolves live per backend)", flush=True)
 
     server = ThreadingHTTPServer((HOST, PORT), Handler)
 

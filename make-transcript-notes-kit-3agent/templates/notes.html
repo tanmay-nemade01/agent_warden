@@ -41,9 +41,9 @@
   <!-- IMPORTANT: This is the ONLY metadata source. No companion .json file
        is created. The viewer reads everything from this embedded script.
        Required fields: title, subject, gradeLevel, datePublished,
-       targetAudience, sections (array), examRevisionNotes (array).
+       targetAudience, sections (array).
        Optional fields: prerequisites (array of {subject, lecture, topics}).
-       NOT included (removed): summary, keyConcepts, quiz. -->
+       NOT included (removed): summary, keyConcepts, quiz, examRevisionNotes. -->
   <script type="application/json" id="lecture-metadata">
 {{RAW_METADATA_JSON}}
 </script>
@@ -83,28 +83,6 @@
     <main>
 {{MAIN_TEXTBOOK_CONTENT}}
     </main>
-
-    <!-- ============================================================
-    EXAM REVISION NOTES
-    Generated AFTER the main lecture-faithful content is complete. Each entry
-    distills one major concept into its most examinable elements.
-    Built FROM the core — never invented independently.
-
-    Each entry is a <div class="exam-revision-entry"> containing:
-      - .revision-topic (h3) — concept name
-      - .revision-mustknow — the single most examinable takeaway
-      - .revision-formula — central formula(s) in \[ ... \] MathJax
-      - .revision-pitfall — the #1 exam mistake
-      - .revision-check — one self-check question (no options)
-      - .revision-connections — linked concepts within this lecture
-    ============================================================ -->
-    <section class="exam-revision-section">
-      <h2>Exam Revision Notes</h2>
-      <p class="revision-intro">Below is the distilled, exam-ready core.
-      Every entry comes from the full explanation above. Use this section
-      for rapid review; return to the main notes when a point needs more context.</p>
-{{EXAM_REVISION_NOTES}}
-    </section>
   </div>
 </body>
 </html>

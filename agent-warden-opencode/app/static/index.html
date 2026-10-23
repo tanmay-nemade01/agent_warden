@@ -714,6 +714,159 @@
     font-size: 11px;
     margin-left: auto;
   }
+  .tlist .tsubj {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0 5px;
+  }
+
+  /* ---- multi-subject batch panel ---- */
+  .batch-panel {
+    background: var(--surface);
+    border: 2px solid var(--line);
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .batch-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    cursor: pointer;
+    list-style: none;
+    flex-wrap: wrap;
+  }
+  .batch-bar::-webkit-details-marker { display: none; }
+  .batch-bar h2 { margin: 0; font-size: 16px; }
+  .batch-bar .chip { margin-left: auto; }
+  .batch-body { padding: 0 18px 18px; }
+  .batch-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 12px 0;
+    border-bottom: 2px solid var(--line);
+  }
+  .batch-toolbar input[type="text"] { width: 220px; }
+  .subjects-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+    max-height: 420px;
+    overflow: auto;
+    padding-right: 4px;
+  }
+  .subj-row {
+    border: 2px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    background: var(--paper);
+  }
+  .subj-row.picked { border-color: var(--teal); background: var(--teal-soft); }
+  .subj-row.empty { opacity: 0.55; }
+  .subj-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .subj-main input { width: auto; accent-color: var(--teal); }
+  .subj-abbr {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--ink);
+    color: var(--surface);
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .subj-name { font-size: 13.5px; }
+  .subj-badge {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 1px 8px;
+    color: var(--muted);
+  }
+  .subj-badge.custom { color: var(--teal); border-color: var(--teal); }
+  .subj-meta {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: 7px 0 0 26px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .subj-meta b { color: var(--ink); font-weight: 600; }
+  .subj-actions { display: flex; gap: 8px; margin: 8px 0 0 26px; }
+  .subj-transcripts {
+    margin: 10px 0 0 26px;
+    border: 2px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    max-height: 190px;
+    overflow: auto;
+    padding: 5px;
+  }
+  .subj-transcripts label {
+    display: flex;
+    gap: 9px;
+    align-items: baseline;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 4px 6px;
+    border-radius: var(--radius);
+    cursor: pointer;
+  }
+  .subj-transcripts label:hover { background: var(--paper); }
+  .subj-transcripts input { width: auto; accent-color: var(--teal); }
+  .subj-transcripts .tsize {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+  }
+  .profile-editor {
+    margin: 10px 0 0 26px;
+    border: 2px dashed var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 10px;
+    background: var(--surface);
+  }
+  .profile-editor label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11.5px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .profile-editor input {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 9px;
+  }
+  .profile-editor .btnrow { grid-column: 1 / -1; display: flex; gap: 8px; }
+  .batch-cta {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .batch-cta .status-line { flex: 1; min-width: 200px; }
 
   .chips {
     display: flex;
@@ -1779,6 +1932,179 @@
     color: var(--muted);
     margin-left: 2px;
   }
+
+  /* —— optional subject-specific phase instructions —— */
+  .extra-inst-details {
+    margin-top: 14px;
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    overflow: hidden;
+    transition: border-color 0.15s, background-color 0.15s;
+  }
+  .extra-inst-details[open] {
+    border-color: color-mix(in srgb, var(--teal) 35%, var(--line));
+    background: var(--surface);
+  }
+  .extra-inst-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 12px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-soft);
+    list-style: none;
+  }
+  .extra-inst-summary::-webkit-details-marker { display: none; }
+  .extra-inst-summary:hover {
+    color: var(--ink);
+    background: color-mix(in srgb, var(--ink) 4%, transparent);
+  }
+  .extra-inst-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .extra-inst-icon {
+    color: var(--teal);
+    flex-shrink: 0;
+  }
+  .extra-inst-badge {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    transition: all 0.2s ease;
+  }
+  .extra-inst-badge.has-active {
+    background: color-mix(in srgb, var(--teal) 15%, var(--surface));
+    border-color: var(--teal);
+    color: var(--teal);
+    font-weight: 600;
+  }
+  .extra-inst-body {
+    padding: 10px 12px 14px;
+    border-top: 1px solid var(--line);
+    background: color-mix(in srgb, var(--paper) 40%, var(--surface));
+  }
+  .extra-inst-desc {
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.4;
+    margin-bottom: 10px;
+  }
+  .extra-inst-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .extra-inst-tab {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 8px;
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .extra-inst-tab:hover {
+    color: var(--ink);
+    border-color: color-mix(in srgb, var(--ink) 30%, var(--line));
+  }
+  .extra-inst-tab.active {
+    color: var(--ink);
+    background: var(--paper);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .extra-inst-tab[data-phase="extractor"].active {
+    border-color: var(--blue);
+    box-shadow: inset 0 -2px 0 var(--blue);
+  }
+  .extra-inst-tab[data-phase="enricher"].active {
+    border-color: var(--teal);
+    box-shadow: inset 0 -2px 0 var(--teal);
+  }
+  .extra-inst-tab[data-phase="formatter"].active {
+    border-color: var(--violet);
+    box-shadow: inset 0 -2px 0 var(--violet);
+  }
+  .tab-pnum {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    display: inline-grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .tab-pnum.pnum-1 { background: color-mix(in srgb, var(--blue) 20%, transparent); color: var(--blue); }
+  .tab-pnum.pnum-2 { background: color-mix(in srgb, var(--teal) 20%, transparent); color: var(--teal); }
+  .tab-pnum.pnum-3 { background: color-mix(in srgb, var(--violet) 20%, transparent); color: var(--violet); }
+  .extra-inst-tab.active .tab-pnum.pnum-1 { background: var(--blue); color: var(--signal-ink); }
+  .extra-inst-tab.active .tab-pnum.pnum-2 { background: var(--teal); color: var(--signal-ink); }
+  .extra-inst-tab.active .tab-pnum.pnum-3 { background: var(--violet); color: var(--signal-ink); }
+  .tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: transparent;
+    transition: background-color 0.2s, box-shadow 0.2s;
+  }
+  .tab-dot.active {
+    background: var(--teal);
+    box-shadow: 0 0 5px var(--teal);
+  }
+  .extra-inst-editor textarea {
+    width: 100%;
+    background-color: var(--surface);
+    color: var(--ink);
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    font: 12.5px/1.4 var(--font);
+    resize: vertical;
+    min-height: 70px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .extra-inst-editor textarea:focus {
+    outline: none;
+    border-color: var(--teal);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--teal) 25%, transparent);
+  }
+  .extra-inst-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .extra-inst-status {
+    font-size: 11.5px;
+    transition: color 0.2s;
+  }
+  .extra-inst-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
 </style>
 </head>
 <body>
@@ -1862,6 +2188,30 @@
     </div>
   </div>
 
+  <details class="batch-panel" id="batch-panel">
+    <summary class="batch-bar">
+      <h2>Batch &middot; many subjects</h2>
+      <span class="chip" id="batch-count">0 subjects</span>
+      <span class="muted">start a pipeline for every selected subject at once</span>
+    </summary>
+    <div class="batch-body">
+      <div class="batch-toolbar">
+        <input id="batch-filter" type="text" placeholder="Filter subjects&hellip;" aria-label="Filter subjects" spellcheck="false">
+        <button class="btn small" id="batch-all" type="button">select all</button>
+        <button class="btn small" id="batch-none" type="button">clear</button>
+        <label class="inline-check" title="Raise the job limit so the whole batch starts immediately">
+          <input type="checkbox" id="batch-raise-parallel" checked> raise parallelism to fit the batch
+        </label>
+        <span class="muted" id="batch-hint"></span>
+      </div>
+      <div class="subjects-list" id="subjects-list"></div>
+      <div class="batch-cta">
+        <button class="btn primary" id="batch-run" type="button">Run selected subjects</button>
+        <div class="status-line" id="batch-status" aria-live="polite"></div>
+      </div>
+    </div>
+  </details>
+
   <div class="workbench">
     <section class="board" aria-labelledby="board-title">
       <div class="board-fill">
@@ -1928,6 +2278,45 @@
         <label><input type="checkbox" id="p2" checked><span class="pnum">2</span>Enricher</label>
         <label><input type="checkbox" id="p3" checked><span class="pnum">3</span>Formatter</label>
       </div>
+
+      <details class="extra-inst-details" id="extra-inst-details">
+        <summary class="extra-inst-summary">
+          <span class="extra-inst-title">
+            <svg class="extra-inst-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            Phase instructions <span class="muted">(optional · per subject)</span>
+          </span>
+          <span class="extra-inst-badge" id="extra-inst-badge">0 configured</span>
+        </summary>
+        <div class="extra-inst-body">
+          <div class="extra-inst-desc">
+            Custom prompt additions for <strong id="extra-inst-subj-label">Subject</strong>. Applied only to this subject when running the phase. Leave blank to run as normal.
+          </div>
+          <div class="extra-inst-tabs" role="tablist">
+            <button type="button" class="extra-inst-tab" data-phase="extractor" id="tab-extractor">
+              <span class="tab-pnum pnum-1">1</span> Extractor
+              <span class="tab-dot" id="dot-extractor" title="Has instructions"></span>
+            </button>
+            <button type="button" class="extra-inst-tab active" data-phase="enricher" id="tab-enricher">
+              <span class="tab-pnum pnum-2">2</span> Enricher
+              <span class="tab-dot" id="dot-enricher" title="Has instructions"></span>
+            </button>
+            <button type="button" class="extra-inst-tab" data-phase="formatter" id="tab-formatter">
+              <span class="tab-pnum pnum-3">3</span> Formatter
+              <span class="tab-dot" id="dot-formatter" title="Has instructions"></span>
+            </button>
+          </div>
+          <div class="extra-inst-editor">
+            <textarea id="extra-inst-textarea" rows="4" spellcheck="false" placeholder="Optional extra instructions for Enricher (e.g. emphasize specific terminology, include extra references, focus on specific concepts)..."></textarea>
+            <div class="extra-inst-footer">
+              <span class="extra-inst-status muted" id="extra-inst-status">Normal (no extra instructions)</span>
+              <div class="extra-inst-actions">
+                <button type="button" class="btn small ghost" id="extra-inst-clear">Clear</button>
+                <button type="button" class="btn small" id="extra-inst-save">Save for subject</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
 
       <div class="guess-hint" id="guess-hint"></div>
       <div id="batch-preview" class="batch-preview"></div>
@@ -2067,8 +2456,8 @@ const state = {
   docs: [],
   docsByAbbr: {},
   models: [],
-  defaultModel: "opencode-go/deepseek-v4-flash",
-  defaultVariant: "max",
+  defaultModel: "",
+  defaultVariant: "",
   backend: "opencode",
   backends: [],
   artifactInfo: null,
@@ -2081,6 +2470,13 @@ const state = {
   starting: false,
   maxParallel: 2,
   sseOk: true,
+  subjectInstructions: {},
+  currentSubjectInstructions: { extractor: "", enricher: "", formatter: "" },
+  activeInstructionPhase: "enricher",
+  subjectProfiles: {},
+  batchPicks: {},        // abbr -> { include: bool, transcripts: Set<string> }
+  batchFilter: "",
+  batchExpanded: {},
 };
 
 const AUTH_TOKEN = new URLSearchParams(location.search).get("token") || "";
@@ -2265,6 +2661,7 @@ function ensureRunCard(ev) {
   card = {
     el, rid,
     subject: ev.subject, prefix: ev.prefix,
+    abbr: ev.abbr, outputRel: ev.output_rel || "",
     phaseLogs: {},
     phaseDots: {},
     phaseGates: {},
@@ -2502,7 +2899,7 @@ function reorderLiveRuns() {
 function refreshFiles(rid) {
   const card = state.runs[rid];
   if (!card || !card.prefix) return;
-  api(`/api/outputs?subject=${encodeURIComponent(card.subject)}&prefix=${encodeURIComponent(card.prefix)}`)
+  api(`/api/outputs?subject=${encodeURIComponent(card.subject)}&prefix=${encodeURIComponent(card.prefix)}&abbr=${encodeURIComponent(card.abbr || "")}`)
     .then(({ files }) => {
       if (!card.el.isConnected) return;
       const el = card.filesEl;
@@ -2510,7 +2907,11 @@ function refreshFiles(rid) {
         el.innerHTML = "<span class='muted'>no files yet</span>";
         return;
       }
-      const base = `/outputs/${encodeURIComponent(card.subject)}/${encodeURIComponent(card.prefix)}/`;
+      // The lecture folder sits at the subject's own path under its output
+      // root, which is not always outputs/<Subject>/<Prefix>/.
+      const rel = card.outputRel ||
+        `${card.subject}/${card.prefix}`;
+      const base = `/outputs/${rel.split("/").map(encodeURIComponent).join("/")}/`;
       el.innerHTML = files.map(f => {
         const url = base + f.name.split("/").map(encodeURIComponent).join("/");
         const isHtml = f.name.endsWith(".html");
@@ -2692,6 +3093,250 @@ function checkedTranscripts() {
   return Array.from(document.querySelectorAll("#tlist input:checked"));
 }
 
+// —— multi-subject batch panel ——
+function batchPick(abbr) {
+  if (!state.batchPicks[abbr]) {
+    state.batchPicks[abbr] = { include: false, transcripts: new Set() };
+  }
+  return state.batchPicks[abbr];
+}
+
+function subjectTranscripts(abbr) {
+  return (state.transcripts || []).filter(t => t.abbr === abbr);
+}
+
+function renderSubjects() {
+  const host = $("subjects-list");
+  if (!host) return;
+  const filter = (state.batchFilter || "").trim().toLowerCase();
+  const rows = [];
+  let pickedSubjects = 0, pickedJobs = 0;
+  for (const s of state.subjects) {
+    const abbr = s.abbr;
+    const prof = state.subjectProfiles[abbr] || {};
+    const tlist = subjectTranscripts(abbr);
+    const pick = batchPick(abbr);
+    if (pick.include) {
+      pickedSubjects++;
+      pickedJobs += pick.transcripts.size;
+    }
+    if (filter &&
+        !(`${abbr} ${s.subject}`.toLowerCase().includes(filter))) {
+      continue;
+    }
+    const outRel = prof.output_template || "{subject}/{prefix}";
+    const outHint = `${prof.output_root || "outputs"}/${outRel}`;
+    const docsHint = prof.docs_resolved || prof.docs_dir || "—";
+    const badge = prof.explicit
+      ? `<span class="subj-badge custom">custom</span>`
+      : `<span class="subj-badge">default</span>`;
+    const emptyCls = tlist.length ? "" : " empty";
+    const rowsHtml = `
+      <div class="subj-row${pick.include ? " picked" : ""}${emptyCls}" data-abbr="${esc(abbr)}">
+        <label class="subj-main">
+          <input type="checkbox" class="subj-pick" value="${esc(abbr)}"${pick.include ? " checked" : ""}${tlist.length ? "" : " disabled"}>
+          <span class="subj-abbr">${esc(abbr)}</span>
+          <span class="subj-name">${esc(s.subject)}</span>
+          ${badge}
+        </label>
+        <div class="subj-meta">
+          <span title="companion docs folder"><b>docs</b> ${esc(docsHint)}</span>
+          <span title="output folder"><b>out</b> ${esc(outHint)}</span>
+          <span title="prefix template"><b>prefix</b> ${esc(prof.prefix_template || "{abbr}_Lecture_{lecture}")}</span>
+          <span><b>files</b> ${tlist.length}</span>
+        </div>
+        <div class="subj-actions">
+          <button class="btn small ghost subj-expand" type="button">transcripts</button>
+          <button class="btn small ghost subj-profile" type="button">profile</button>
+        </div>
+        <div class="subj-transcripts"${state.batchExpanded[abbr] ? "" : " hidden"}>
+          ${tlist.map(t => `<label><input type="checkbox" class="subj-t" value="${esc(t.path)}"${pick.transcripts.has(t.path) ? " checked" : ""}><span>${esc(t.name)}</span><span class="tsize">${fmtBytes(t.bytes)}</span></label>`).join("") || `<div class="muted" style="padding:8px;font-size:12px;">No transcripts found for this subject — set its transcripts folder in the profile.</div>`}
+        </div>
+        <div class="profile-editor" hidden></div>
+      </div>`;
+    rows.push(rowsHtml);
+  }
+  host.innerHTML = rows.join("");
+
+  host.querySelectorAll(".subj-pick").forEach(inp => {
+    inp.addEventListener("change", () => {
+      const abbr = inp.value;
+      const pick = batchPick(abbr);
+      pick.include = inp.checked;
+      if (inp.checked) {
+        // Checking a subject queues all of its transcripts by default.
+        subjectTranscripts(abbr).forEach(t => pick.transcripts.add(t.path));
+      }
+      renderSubjects();
+      updateBatchEstimate();
+    });
+  });
+  host.querySelectorAll(".subj-t").forEach(inp => {
+    inp.addEventListener("change", () => {
+      const row = inp.closest(".subj-row");
+      const pick = batchPick(row.dataset.abbr);
+      if (inp.checked) pick.transcripts.add(inp.value);
+      else pick.transcripts.delete(inp.value);
+      updateBatchEstimate();
+    });
+  });
+  host.querySelectorAll(".subj-expand").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const row = btn.closest(".subj-row");
+      const abbr = row.dataset.abbr;
+      const box = row.querySelector(".subj-transcripts");
+      state.batchExpanded[abbr] = !state.batchExpanded[abbr];
+      box.hidden = !state.batchExpanded[abbr];
+    });
+  });
+  host.querySelectorAll(".subj-profile").forEach(btn => {
+    btn.addEventListener("click", () => openProfileEditor(btn.closest(".subj-row")));
+  });
+
+  $("batch-count").textContent =
+    `${pickedSubjects} subject${pickedSubjects === 1 ? "" : "s"} · ${pickedJobs} job${pickedJobs === 1 ? "" : "s"}`;
+  updateBatchEstimate();
+}
+
+function updateBatchEstimate() {
+  const hint = $("batch-hint");
+  if (!hint) return;
+  let subjects = 0, jobs = 0;
+  for (const s of state.subjects) {
+    const pick = state.batchPicks[s.abbr];
+    if (pick && pick.include) { subjects++; jobs += pick.transcripts.size; }
+  }
+  const cap = state.maxParallel || 2;
+  hint.textContent = subjects
+    ? `${subjects} subject${subjects === 1 ? "" : "s"} · ${jobs} job${jobs === 1 ? "" : "s"} · ${cap} in parallel`
+    : "pick one or more subjects to run";
+  const run = $("batch-run");
+  if (run) run.disabled = subjects === 0 || jobs === 0;
+}
+
+function openProfileEditor(row) {
+  const abbr = row.dataset.abbr;
+  const prof = state.subjectProfiles[abbr] || {};
+  const editor = row.querySelector(".profile-editor");
+  if (!editor) return;
+  if (!editor.hidden) { editor.hidden = true; return; }
+  const field = (key, label, value, placeholder) => `
+    <label>${esc(label)}
+      <input data-f="${key}" value="${esc(value || "")}" placeholder="${esc(placeholder || "")}" spellcheck="false">
+    </label>`;
+  editor.innerHTML =
+    field("transcripts_dir", "Transcripts folder", prof.transcripts_dir, "transcript files/QC") +
+    field("docs_dir", "Companion docs folder", prof.docs_dir, "companion_docs/QC") +
+    field("output_root", "Output root", prof.output_root, "outputs") +
+    field("output_template", "Output path template", prof.output_template, "{subject}/{prefix}") +
+    field("prefix_template", "Prefix template", prof.prefix_template, "{abbr}_Lecture_{lecture}") +
+    field("topic_mapping", "Topic mapping YAML", prof.topic_mapping, "topic_mappings/<Subject>.yaml") +
+    `<div class="btnrow">
+       <button class="btn small primary" id="pf-save-${esc(abbr)}" type="button">Save profile</button>
+       <button class="btn small" id="pf-reset-${esc(abbr)}" type="button">Reset to default</button>
+       <span class="muted" id="pf-msg-${esc(abbr)}" style="font-size:11px;"></span>
+     </div>`;
+  editor.hidden = false;
+  const saveBtn = editor.querySelector(`#pf-save-${CSS.escape(abbr)}`);
+  const resetBtn = editor.querySelector(`#pf-reset-${esc(abbr)}`);
+  const msg = editor.querySelector(`#pf-msg-${esc(abbr)}`);
+  saveBtn.addEventListener("click", async () => {
+    const fields = {};
+    editor.querySelectorAll("input[data-f]").forEach(i => {
+      fields[i.dataset.f] = i.value.trim();
+    });
+    msg.textContent = "saving…";
+    const res = await api("/api/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ abbr, fields }),
+    });
+    if (res.error) { msg.textContent = res.error; return; }
+    msg.textContent = "saved";
+    await refreshConfig();
+  });
+  resetBtn.addEventListener("click", async () => {
+    msg.textContent = "resetting…";
+    const res = await api("/api/profiles?action=delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ abbr }),
+    });
+    if (res.error) { msg.textContent = res.error; return; }
+    msg.textContent = "reset";
+    await refreshConfig();
+  });
+}
+
+async function runBatch() {
+  const entries = [];
+  for (const s of state.subjects) {
+    const pick = state.batchPicks[s.abbr];
+    if (!pick || !pick.include) continue;
+    const transcripts = Array.from(pick.transcripts);
+    if (!transcripts.length) continue;
+    entries.push({ abbr: s.abbr, transcripts });
+  }
+  if (!entries.length) {
+    $("batch-status").innerHTML = `<span class="error">Pick at least one subject with transcripts.</span>`;
+    return;
+  }
+  const phases = selectedPhases();
+  if (!phases.length) {
+    $("batch-status").innerHTML = `<span class="error">Select at least one agent phase.</span>`;
+    return;
+  }
+  const totalJobs = entries.reduce((n, e) => n + e.transcripts.length, 0);
+  const btn = $("batch-run");
+  btn.disabled = true;
+  $("batch-status").innerHTML = `<span class="muted">starting ${totalJobs} job(s) across ${entries.length} subject(s)…</span>`;
+
+  if ($("batch-raise-parallel")?.checked) {
+    const boost = Math.min(Math.max(totalJobs, state.maxParallel || 2), 64);
+    const pr = await api("/api/parallel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        max_parallel: boost,
+        // Share the pool so one subject cannot starve the others.
+        max_parallel_per_subject: Math.max(1, Math.ceil(boost / Math.min(entries.length, 4))),
+      }),
+    });
+    if (!pr.error) {
+      state.maxParallel = pr.max_parallel;
+      const inp = $("parallel");
+      if (inp) inp.value = pr.max_parallel;
+    }
+  }
+
+  const body = {
+    phases,
+    backend: $("backend").value || state.backend || "opencode",
+    model: $("model").value || state.defaultModel,
+    variant: $("variant").disabled ? "" : ($("variant").value || ""),
+    subjects: entries,
+  };
+  const res = await api("/api/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  btn.disabled = false;
+  if (res.error) {
+    $("batch-status").innerHTML = `<span class="error">${esc(res.error)}</span>`;
+    return;
+  }
+  const started = (res.jobs || []).length;
+  const rejected = res.rejected || [];
+  let msg = `Started ${started} run(s) across ${entries.length} subject(s).`;
+  if (rejected.length) {
+    msg += ` Rejected ${rejected.length}: ` +
+      rejected.map(r => `${r.subject || r.prefix || "?"} (${r.reason})`).join("; ");
+  }
+  $("batch-status").innerHTML = `<span class="${rejected.length ? "warn" : "ok"}">${esc(msg)}</span>`;
+  refreshHistory();
+}
+
 function applyGuessFromSelection() {
   if (state.applyingGuess) return;
   const boxes = checkedTranscripts();
@@ -2809,6 +3454,7 @@ $("subject").addEventListener("change", () => {
     }
     refreshBatchPreview();
   }
+  loadSubjectInstructionsFor(abbr);
   refreshArtifacts();
   validateForm();
 });
@@ -2975,6 +3621,43 @@ $("addsubj-save").addEventListener("click", async () => {
   }
 });
 
+// —— batch panel wiring ——
+(function () {
+  const filter = $("batch-filter");
+  if (filter) {
+    filter.addEventListener("input", () => {
+      state.batchFilter = filter.value;
+      renderSubjects();
+    });
+  }
+  const all = $("batch-all");
+  if (all) {
+    all.addEventListener("click", () => {
+      for (const s of state.subjects) {
+        const pick = batchPick(s.abbr);
+        const own = subjectTranscripts(s.abbr);
+        if (!own.length) { pick.include = false; continue; }
+        pick.include = true;
+        own.forEach(t => pick.transcripts.add(t.path));
+      }
+      renderSubjects();
+    });
+  }
+  const none = $("batch-none");
+  if (none) {
+    none.addEventListener("click", () => {
+      for (const s of state.subjects) {
+        const pick = batchPick(s.abbr);
+        pick.include = false;
+        pick.transcripts.clear();
+      }
+      renderSubjects();
+    });
+  }
+  const run = $("batch-run");
+  if (run) run.addEventListener("click", () => runBatch());
+})();
+
 async function startJobs({ resume = false, retry = false, phases = null,
                            abbr = null, prefix = null, lectureNum = null,
                            transcripts = null } = {}) {
@@ -3016,6 +3699,16 @@ async function startJobs({ resume = false, retry = false, phases = null,
   // Cursor fast mode toggle
   if (body.backend === "cursor" && $("cursor-fast-block").classList.contains("visible")) {
     body.fast = $("cursor-fast").checked;
+  }
+  // Optional extra instructions per phase
+  const cleanExtra = {};
+  for (const [ph, text] of Object.entries(state.currentSubjectInstructions || {})) {
+    if (typeof text === "string" && text.trim()) {
+      cleanExtra[ph] = text.trim();
+    }
+  }
+  if (Object.keys(cleanExtra).length > 0) {
+    body.extra_instructions = cleanExtra;
   }
   if (transcripts.length) body.transcripts = transcripts;
   if (!resume && !retry) body.phases = phases;
@@ -3879,18 +4572,14 @@ $("backend").addEventListener("change", async () => {
   $("model").innerHTML = "";
   $("variant").innerHTML = "";
   const hint = $("models-hint");
-  if (backend === "commandcode") {
-    hint.textContent = "Command Code default: deepseek/deepseek-v4-flash. Refresh models is slow.";
-  } else if (backend === "reasonix") {
-    hint.textContent = "Reasonix default: deepseek/deepseek-v4-flash (prefix-cache optimized).";
-  } else if (backend === "pi") {
-    hint.textContent = "Pi Harness default: claude-3-7-sonnet.";
-  } else if (backend === "antigravity") {
-    hint.textContent = "Antigravity default: gemini-3.8-flash (Gemini 3.8 series).";
-  } else if (backend === "cursor") {
-    hint.textContent = "Cursor default: composer-2.5 (or claude-3.7-sonnet via Cursor API key).";
-  }
-  await refreshConfig({ refreshModels: false });
+  // Models follow the chosen backend automatically: re-fetch that backend's
+  // catalog (live except Command Code, whose CLI list is slow to start —
+  // use cached/fallback there until "refresh models" is clicked).
+  const slow = backend === "commandcode";
+  hint.textContent = slow
+    ? "Loading Command Code models from cache (live list is slow — click ↻ refresh models)."
+    : "Loading models for " + backend + "…";
+  await refreshConfig({ refreshModels: !slow });
 });
 $("model").addEventListener("change", () => {
   fillVariantSelect();
@@ -3932,27 +4621,16 @@ async function refreshConfig({ refreshModels = false } = {}) {
   state.models = cfg.models || [];
   state.backend = cfg.backend || backend;
   state.backends = cfg.backends || [];
+  state.subjectInstructions = cfg.subject_instructions || {};
+  state.subjectProfiles = cfg.subject_profiles || {};
   if (cfg.max_parallel) state.maxParallel = cfg.max_parallel;
   const parallelInput = $("parallel");
   if (parallelInput) parallelInput.value = state.maxParallel;
-  const defaultModelFallback = {
-    commandcode: "deepseek/deepseek-v4-flash",
-    claude: "claude-3-7-sonnet",
-    codex: "gpt-5.4-mini",
-    antigravity: "gemini-3.8-flash",
-    cursor: "composer-2.5",
-    opencode: "opencode-go/deepseek-v4-flash",
-  }[state.backend] || "opencode-go/deepseek-v4-flash";
-  const defaultVariantFallback = {
-    commandcode: "high",
-    claude: "high",
-    codex: "",
-    antigravity: "high",
-    cursor: "high",
-    opencode: "max",
-  }[state.backend] || "max";
-  state.defaultModel = cfg.model || defaultModelFallback;
-  state.defaultVariant = cfg.variant || defaultVariantFallback;
+  // No hardcoded model defaults: the server derives the default from each
+  // backend's live catalog (OpenCode: the user's configured default model).
+  // These fallbacks only apply when the catalog came back empty.
+  state.defaultModel = cfg.model || "";
+  state.defaultVariant = cfg.variant || "";
   const bsel = $("backend");
   if (bsel && (cfg.backends || []).length) {
     const prevB = bsel.value || backend;
@@ -4006,10 +4684,20 @@ async function refreshConfig({ refreshModels = false } = {}) {
   const docsSel = $("docs");
   const prevDocs = docsSel.value;
   const wasManual = !!docsSel.dataset.manual;
+  // Companion docs may live outside companion_docs/ (a subject profile can
+  // point anywhere) — surface those folders in the dropdown too.
+  const extraDocs = [];
+  for (const [abbr, prof] of Object.entries(state.subjectProfiles || {})) {
+    const p = prof.docs_resolved;
+    if (p && !(cfg.docs || []).some(d => d.path === p)) {
+      extraDocs.push({ name: `${abbr} · ${p}`, path: p });
+    }
+  }
   docsSel.innerHTML =
     `<option value="">Default (subject's folder)</option>` +
     `<option value="__none__">None — no companion docs</option>` +
-    (cfg.docs || []).map(d => `<option value="${esc(d.path)}">${esc(d.name)}</option>`).join("");
+    (cfg.docs || []).map(d => `<option value="${esc(d.path)}">${esc(d.name)}</option>`).join("") +
+    extraDocs.map(d => `<option value="${esc(d.path)}">${esc(d.name)}</option>`).join("");
   if (wasManual && prevDocs) {
     docsSel.value = prevDocs;
     docsSel.dataset.manual = "1";
@@ -4020,11 +4708,12 @@ async function refreshConfig({ refreshModels = false } = {}) {
   const tlist = $("tlist");
   const checked = new Set(checkedTranscripts().map(c => c.value));
   tlist.innerHTML = cfg.transcripts.map(t =>
-    `<label><input type="checkbox" value="${esc(t.path)}"${checked.has(t.path)?" checked":""}><span>${esc(t.name)}</span><span class="tsize">${fmtBytes(t.bytes)}</span></label>`).join("");
+    `<label><input type="checkbox" value="${esc(t.path)}"${checked.has(t.path)?" checked":""}><span>${esc(t.name)}</span>${t.abbr ? `<span class="tsubj">${esc(t.abbr)}</span>` : ""}<span class="tsize">${fmtBytes(t.bytes)}</span></label>`).join("");
   tlist.querySelectorAll("input").forEach(inp => {
     inp.addEventListener("change", applyGuessFromSelection);
   });
   validateForm();
+  renderSubjects();
 }
 
 function handleEvent(ev) {
@@ -4053,6 +4742,8 @@ function handleEvent(ev) {
   if (ev.type === "pipeline_start") {
     const card = ensureRunCard(ev);
     card.subject = ev.subject; card.prefix = ev.prefix;
+    if (ev.abbr) card.abbr = ev.abbr;
+    if (ev.output_rel) card.outputRel = ev.output_rel;
     if (ev.time) card.startedAt = Number(ev.time) * 1000;
     else if (!ev.replay) {
       card.stats = emptyStats();
@@ -4478,9 +5169,167 @@ if (keysToggle && keysModal) {
     state.backend = saved;
   }
 })();
+
+function initSubjectInstructions() {
+  const tabs = document.querySelectorAll(".extra-inst-tab");
+  tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      const phase = tab.dataset.phase;
+      if (!phase || phase === state.activeInstructionPhase) return;
+      const textarea = $("extra-inst-textarea");
+      if (textarea) {
+        state.currentSubjectInstructions[state.activeInstructionPhase] = textarea.value;
+      }
+      state.activeInstructionPhase = phase;
+      tabs.forEach(t => t.classList.toggle("active", t.dataset.phase === phase));
+      if (textarea) {
+        textarea.value = state.currentSubjectInstructions[phase] || "";
+        updateTextareaPlaceholder();
+      }
+    });
+  });
+
+  const textarea = $("extra-inst-textarea");
+  if (textarea) {
+    textarea.addEventListener("input", () => {
+      state.currentSubjectInstructions[state.activeInstructionPhase] = textarea.value;
+      updateInstructionBadges();
+      const statusEl = $("extra-inst-status");
+      if (statusEl) {
+        statusEl.textContent = "Unsaved changes";
+        statusEl.className = "extra-inst-status warn";
+      }
+    });
+  }
+
+  const clearBtn = $("extra-inst-clear");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      if (textarea) textarea.value = "";
+      state.currentSubjectInstructions[state.activeInstructionPhase] = "";
+      updateInstructionBadges();
+      const statusEl = $("extra-inst-status");
+      if (statusEl) {
+        statusEl.textContent = "Unsaved changes";
+        statusEl.className = "extra-inst-status warn";
+      }
+    });
+  }
+
+  const saveBtn = $("extra-inst-save");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => {
+      const abbr = $("subject").value;
+      saveSubjectInstructionsToServer(abbr);
+    });
+  }
+}
+
+function updateTextareaPlaceholder() {
+  const textarea = $("extra-inst-textarea");
+  if (!textarea) return;
+  const phase = state.activeInstructionPhase;
+  const abbr = $("subject").value || "this subject";
+  const placeholders = {
+    extractor: `Optional extra instructions for Extractor (Agent 1) on ${abbr} transcripts... (e.g. prioritize certain definitions, specific extraction notes)`,
+    enricher: `Optional extra instructions for Enricher (Agent 2) on ${abbr} transcripts... (e.g. specific reference material, CVE/standards emphasis, verification guidelines)`,
+    formatter: `Optional extra instructions for Formatter (Agent 3) on ${abbr} notes... (e.g. layout preferences, callout boxes, styling requirements)`,
+  };
+  textarea.placeholder = placeholders[phase] || "Optional extra instructions for this phase... (leave blank to run as normal)";
+}
+
+function updateInstructionBadges() {
+  const inst = state.currentSubjectInstructions || {};
+  for (const ph of ["extractor", "enricher", "formatter"]) {
+    const dot = $(`dot-${ph}`);
+    if (dot) {
+      dot.classList.toggle("active", Boolean(inst[ph] && inst[ph].trim()));
+    }
+  }
+  const count = Object.values(inst).filter(t => t && t.trim()).length;
+  const badge = $("extra-inst-badge");
+  if (badge) {
+    badge.textContent = count ? `${count} active` : "0 configured";
+    badge.classList.toggle("has-active", count > 0);
+  }
+}
+
+function loadSubjectInstructionsFor(abbr) {
+  abbr = abbr || $("subject").value;
+  const subjObj = state.subjects.find(s => s.abbr === abbr) || {};
+  const subjName = subjObj.subject || abbr;
+  const labelEl = $("extra-inst-subj-label");
+  if (labelEl) labelEl.textContent = abbr ? `${subjName} (${abbr})` : "selected subject";
+
+  const saved = (state.subjectInstructions && state.subjectInstructions[abbr]) || {};
+  state.currentSubjectInstructions = {
+    extractor: saved.extractor || "",
+    enricher: saved.enricher || "",
+    formatter: saved.formatter || "",
+  };
+
+  const textarea = $("extra-inst-textarea");
+  if (textarea) {
+    textarea.value = state.currentSubjectInstructions[state.activeInstructionPhase] || "";
+    updateTextareaPlaceholder();
+  }
+  updateInstructionBadges();
+  const statusEl = $("extra-inst-status");
+  if (statusEl) {
+    const count = Object.values(state.currentSubjectInstructions).filter(t => t && t.trim()).length;
+    statusEl.textContent = count ? `${count} active for ${abbr}` : "Normal (no extra instructions)";
+    statusEl.className = "extra-inst-status muted";
+  }
+}
+
+async function saveSubjectInstructionsToServer(abbr) {
+  abbr = abbr || $("subject").value;
+  if (!abbr) return;
+  const statusEl = $("extra-inst-status");
+  const saveBtn = $("extra-inst-save");
+  if (saveBtn) saveBtn.disabled = true;
+  if (statusEl) {
+    statusEl.textContent = "Saving…";
+    statusEl.className = "extra-inst-status muted";
+  }
+  const clean = {};
+  for (const [ph, text] of Object.entries(state.currentSubjectInstructions || {})) {
+    if (typeof text === "string" && text.trim()) clean[ph] = text.trim();
+  }
+  const res = await api("/api/subject-instructions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ abbr, instructions: clean }),
+  });
+  if (saveBtn) saveBtn.disabled = false;
+  if (res && res.ok) {
+    state.subjectInstructions[abbr] = res.instructions || {};
+    if (statusEl) {
+      statusEl.textContent = `✓ Saved for ${abbr}`;
+      statusEl.className = "extra-inst-status ok";
+      setTimeout(() => {
+        if (statusEl && statusEl.textContent.includes("Saved")) {
+          const count = Object.values(state.currentSubjectInstructions || {}).filter(t => t && t.trim()).length;
+          statusEl.textContent = count ? `${count} active for ${abbr}` : "Normal (no extra instructions)";
+          statusEl.className = "extra-inst-status muted";
+        }
+      }, 3000);
+    }
+    updateInstructionBadges();
+  } else {
+    if (statusEl) {
+      statusEl.textContent = `Error: ${res.error || "Failed to save"}`;
+      statusEl.className = "extra-inst-status error";
+    }
+  }
+}
+
+initSubjectInstructions();
+
 refreshConfig().then(async () => {
   applyGuessFromSelection();
   autoPickDocs();
+  loadSubjectInstructionsFor($("subject").value);
   await refreshHistory();
 });
 </script>

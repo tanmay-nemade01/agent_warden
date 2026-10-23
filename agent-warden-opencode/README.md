@@ -22,10 +22,8 @@ transcript.txt ──► Agent 1 (Extractor) ──► dense.md + extraction_man
                 Agent 3 (Formatter) ──► <prefix>_notes/<prefix>_notes.html
                         │  gates: lint.py · verify_manifest (html)
                         ▼
-                    final HTML (SEO, exam revision, prerequisites embedded)
+                    final HTML (SEO, prerequisites embedded)
 ```
-
-Agent 4 (enhancer) is intentionally skipped, per the toolkit's own guidance.
 
 ## Requirements
 
@@ -78,31 +76,107 @@ Open http://127.0.0.1:8787
    **Delete** the output folder. Refresh mid-run replays buffered SSE events
    so logs come back. Companion docs auto-select when a matching
    `companion_docs/<ABBR>` folder exists.
+5. **Working on many subjects at once?** Open the **Batch · many subjects**
+   panel above the board — see [Many subjects in parallel](#many-subjects-in-parallel).
 
 ## Model & Backends
 
-The job ticket has an **Agent backend** dropdown supporting 8 backends:
-- **OpenCode** — Default: `opencode-go/deepseek-v4-flash` (effort: `max`)
-- **Command Code** — Default: `deepseek/deepseek-v4-flash` (effort: `high`)
-- **Claude Code** — Default: `claude-3-7-sonnet` (effort: `high`)
-- **OpenAI Codex** — Default: `gpt-5.4` (standard model selection)
-- **Reasonix** — Default: `deepseek/deepseek-v4-flash` (prefix-cache optimized, effort: `high`)
-- **Pi Harness** — Default: `claude-3-7-sonnet` (minimalist modular harness, effort: `high`)
-- **Antigravity** — Default: `gemini-3.7-flash` (effort: `high`)
-- **Cursor Agent** — Default: `composer-2.5` (effort: `high`, authenticated via `CURSOR_API_KEY`)
+The job ticket has an **Agent backend** dropdown supporting 8 backends.
+No model is hardcoded: switching backends re-loads that backend's catalog
+automatically and selects its live default (OpenCode uses your configured
+default from `opencode api GET /api/model/default`). The presets below are
+only last-resort fallbacks when live discovery fails:
+
+- **OpenCode** — live catalog via the OpenCode v2 API (`opencode api GET /api/model`)
+- **Command Code** — `deepseek/deepseek-v4-flash` fallback (effort: `high`)
+- **Claude Code** — `claude-3-7-sonnet` fallback (effort: `high`)
+- **OpenAI Codex** — `gpt-5.4` fallback (standard model selection)
+- **Reasonix** — `deepseek/deepseek-v4-flash` fallback (prefix-cache optimized, effort: `high`)
+- **Pi Harness** — `claude-3-7-sonnet` fallback (minimalist modular harness, effort: `high`)
+- **Antigravity** — `gemini-3.7-flash` fallback (effort: `high`)
+- **Cursor Agent** — `composer-2.5` fallback (effort: `high`, authenticated via `CURSOR_API_KEY`)
 
 On each UI load the server discovers OpenCode models via
-`opencode models opencode-go --verbose`. Command Code's `--list-models` is slow,
-so the UI starts from the DeepSeek V4 Flash default until you click
+the OpenCode v2 API (`opencode api GET /api/model`) or `opencode models`. Command Code's `--list-models` is slow,
+so the UI starts from its cached/fallback list until you click
 **refresh models**. Claude Code, OpenAI Codex, Reasonix, Pi Harness, Antigravity, and Cursor Agent provide catalog fallback presets
 covering their flagship and lightweight models.
+
+## Many subjects in parallel
+
+A **subject profile** binds one subject to the few things that actually
+differ from subject to subject: where its transcripts come from, where its
+companion docs live, how its output folder is named, and how a lecture
+prefix is spelled. Everything else in the pipeline is shared.
+
+Profiles live in `subject_profiles.json` (workspace root) and are edited
+from the **Batch · many subjects** panel — click *profile* on a subject
+row, or edit the JSON directly:
+
+```json
+{
+  "QC": {
+    "transcripts_dir": "transcript files/QC",
+    "docs_dir":        "companion_docs/QC",
+    "output_root":     "outputs",
+    "output_template": "{abbr}/notes/{prefix}",
+    "prefix_template": "{abbr}-L{lecture}",
+    "topic_mapping":   "topic_mappings/Quantum Computing.yaml"
+  }
+}
+```
+
+| field | meaning | default |
+| --- | --- | --- |
+| `transcripts_dir` | folder holding this subject's `.txt` transcripts (may be outside the workspace) | the shared `transcript files/` |
+| `docs_dir` | companion docs for Agent 2 (may be outside the workspace) | auto-detected `companion_docs/<ABBR>` |
+| `output_root` | root for this subject's notes — must be inside the workspace | `outputs` |
+| `output_template` | path under the root; `{subject}`, `{abbr}`, `{prefix}` | `{subject}/{prefix}` |
+| `prefix_template` | lecture prefix; `{subject}`, `{abbr}`, `{lecture}` | `{abbr}_Lecture_{lecture}` |
+| `topic_mapping` | the subject's topic-mapping YAML | `topic_mappings/<Subject>.yaml` |
+
+A subject with no profile entry keeps the legacy behaviour exactly
+(`outputs/<Subject Name>/<Prefix>/`, transcripts from the shared flat
+directory, docs auto-detected).
+
+### Running a batch
+
+Tick subjects in the **Batch · many subjects** panel (checking one queues
+all of its transcripts; expand the row to deselect individual files) and
+press **Run selected subjects**. The server plans one job per
+(subject, lecture) and starts them all under a shared parallelism budget
+with an optional per-subject cap, so a subject with 40 lectures cannot
+starve the others.
+
+The same thing over the API — `POST /api/run`:
+
+```json
+{
+  "phases": [1, 2, 3],
+  "backend": "opencode",
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "subjects": [
+    {"abbr": "QC", "transcripts": ["D:/.../transcript files/QC/lecture_1.txt"]},
+    {"abbr": "CV", "transcripts": ["D:/.../transcript files/CV/lecture_1.txt"]}
+  ]
+}
+```
+
+Top-level keys are shared settings; each entry may override them. A
+subject whose transcript is not under its own transcripts folder is
+rejected with a reason instead of silently running on the wrong file.
+
+Because a subject's output folder may not be the skill's default
+`outputs/<Subject>/<LecturePrefix>/`, the orchestrator injects an explicit
+path substitution into the agent prompt, and the per-job write fence is
+derived from that subject's real output root.
 
 ## Layout
 
 ```
 agent-warden-opencode/
 ├── app/
-│   ├── config.py       workspace/toolkit/subject/model constants
+│   ├── config.py       workspace/toolkit/subject/model constants + subject profiles
 │   ├── paths.py        confine() for user-supplied path segments
 │   ├── permissions.py  per-job OpenCode / Command Code write fences
 │   ├── gates.py        toolkit script wrappers + [PASS]/[WARN]/[FAIL] parsing
@@ -115,4 +189,4 @@ agent-warden-opencode/
 ```
 
 Run history per lecture is appended to
-`outputs/<Subject>/<Prefix>/<prefix>_run_events.jsonl`.
+`<output root>/<path>/<prefix>_run_events.jsonl`.

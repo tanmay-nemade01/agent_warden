@@ -86,7 +86,7 @@ python clean_vtt.py
 1. Open a **new chat window**.
 2. Pass the Agent 2 output: `<LecturePrefix>_notes_enriched.md`.
 3. Attach the Agent 3 prompt: `SKILL_agent3_formatter.md`.
-4. Run the agent. It will automatically run script-based Markdown-to-HTML section conversion (`python scripts/section_splitter.py convert ...`), inspect HTML for structural errors (unclosed tags, nested callouts), fill metadata & exam revision notes, and run `lint.py`.
+4. Run the agent. It will automatically run script-based Markdown-to-HTML section conversion (`python scripts/section_splitter.py convert ...`), inspect HTML for structural errors (unclosed tags, nested callouts), fill metadata, and run `lint.py`.
 
 **Input:** Enriched markdown.
 **Output:** `<LecturePrefix>_notes.html` — final HTML file (800+ lines).
@@ -113,7 +113,6 @@ outputs/<Subject>/<LecturePrefix>/
 
 ## Tips
 
-- **Agent 4 is optional and ignored** for now — skip it entirely.
 - **Section-by-section processing** is handled automatically by the toolkit's scripts (`section_splitter.py`).
 - **Topic mappings** are stored in `topic_mappings/<Subject>.yaml` and are updated automatically by Agent 2.
 - **Readability scores** are advisory only — never split formulas or rewrite derivations to improve scores.

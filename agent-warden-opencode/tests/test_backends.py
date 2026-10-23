@@ -4,7 +4,7 @@ import json
 import threading
 import time as _time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from app import config, permissions
 from app.pipeline import Pipeline
@@ -484,6 +484,8 @@ Docs:  https://commandcode.ai/docs/reference/cli/models
 
 
 def test_parse_opencode_models_multi_provider():
+    # V2 API shapes: capabilities {tools,input,output} (no `reasoning`
+    # flag), variants as [{id,...}] list, cost as [{input,output,...}] tiers.
     sample_verbose = """deepseek/deepseek-v4-flash
 {
   "id": "deepseek-v4-flash",
@@ -492,13 +494,17 @@ def test_parse_opencode_models_multi_provider():
   "family": "deepseek-flash",
   "status": "active",
   "capabilities": {
-    "reasoning": true
+    "tools": true,
+    "input": ["text"],
+    "output": ["text"]
   },
-  "variants": {
-    "low": {"reasoningEffort": "low"},
-    "high": {"reasoningEffort": "high"},
-    "max": {"reasoningEffort": "max"}
-  }
+  "variants": [
+    {"id": "low"},
+    {"id": "high"},
+    {"id": "max"}
+  ],
+  "cost": [{"input": 0.2, "output": 0.6, "cache": {"read": 0.02, "write": 0}}],
+  "limit": {"context": 1000000, "output": 384000}
 }
 xiaomi/mimo-v2.5
 {
@@ -508,13 +514,15 @@ xiaomi/mimo-v2.5
   "family": "mimo",
   "status": "active",
   "capabilities": {
-    "reasoning": true
+    "tools": true,
+    "input": ["text"],
+    "output": ["text"]
   },
-  "variants": {
-    "low": {"reasoningEffort": "low"},
-    "medium": {"reasoningEffort": "medium"},
-    "high": {"reasoningEffort": "high"}
-  }
+  "variants": [
+    {"id": "low"},
+    {"id": "medium"},
+    {"id": "high"}
+  ]
 }
 opencode-go/glm-5.2
 {
@@ -523,7 +531,9 @@ opencode-go/glm-5.2
   "name": "GLM 5.2",
   "status": "active",
   "capabilities": {
-    "reasoning": false
+    "tools": true,
+    "input": ["text"],
+    "output": ["text"]
   }
 }
 """
@@ -535,6 +545,8 @@ opencode-go/glm-5.2
     assert ds["provider"] == "deepseek"
     assert ds["reasoning"] is True
     assert ds["variants"] == ["low", "high", "max"]
+    assert ds["cost"] == {"input": 0.2, "output": 0.6,
+                          "cache_read": 0.02, "cache_write": 0}
 
     xm = next(m for m in models if m["id"] == "xiaomi/mimo-v2.5")
     assert xm["name"] == "MiMo-V2.5"
@@ -546,6 +558,41 @@ opencode-go/glm-5.2
     assert glm["name"] == "GLM 5.2"
     assert glm["provider"] == "opencode-go"
     assert glm["reasoning"] is False
+
+
+def test_normalize_opencode_cost_v2_tiers():
+    raw = [
+        {"input": 0.1, "output": 0.5,
+         "cache": {"read": 0.01, "write": 0.125}},
+        {"tier": {"type": "context", "size": 100000},
+         "input": 0.5, "output": 2.5,
+         "cache": {"read": 0.05, "write": 0.625}},
+    ]
+    assert config._normalize_opencode_cost(raw) == {
+        "input": 0.1, "output": 0.5,
+        "cache_read": 0.01, "cache_write": 0.125,
+    }
+    assert config._normalize_opencode_cost({}) == {}
+    assert config._normalize_opencode_cost(None) == {}
+    assert config._normalize_opencode_cost([]) == {}
+    passthrough = {"input": 1.0, "output": 2.0}
+    assert config._normalize_opencode_cost(passthrough) == passthrough
+
+
+def test_parse_models_plain_v2():
+    stdout = ("opencode-go/cat-jam-free\n"
+              "opencode-go/muse-spark-1.3-contributor\n"
+              "openrouter/meta/muse-spark-open\n"
+              "\n"
+              "not a model id\n")
+    models = config._parse_models_plain(stdout)
+    assert [m["id"] for m in models] == [
+        "opencode-go/cat-jam-free",
+        "opencode-go/muse-spark-1.3-contributor",
+        "openrouter/meta/muse-spark-open",
+    ]
+    assert all(m["provider"] == m["id"].split("/", 1)[0] for m in models)
+    assert all(m["cost"] == {} for m in models)
 
 
 def test_resolve_model_choice_multi_provider():
@@ -613,6 +660,228 @@ def test_parse_agent_event_error_capture(tmp_path):
     assert ev["type"] == "text"
     assert "Invalid API Key" in ev["part"]["text"]
     assert pipeline._last_agent_error == "OpenCode error: Invalid API Key"
+
+
+def test_opencode_v2_cmd_syntax(tmp_path):
+    transcript = tmp_path / "dummy_transcript.txt"
+    transcript.write_text("Hello", encoding="utf-8")
+    with patch("app.config.TRANSCRIPTS_DIR", tmp_path), \
+         patch("app.config.OUTPUTS_DIR", tmp_path):
+        pipe = Pipeline("dummy_subject", "DS", "dummy_prefix", "1", str(transcript),
+                        model="opencode-go/deepseek-v4-flash", variant="max")
+    # Pin the model/variant under test: live catalogs change over time and
+    # resolution may clear an unknown variant — command syntax is what's asserted.
+    pipe.model = "opencode-go/deepseek-v4-flash"
+    pipe.variant = "max"
+
+    captured_cmds = []
+
+    def fake_popen(cmd, **kwargs):
+        captured_cmds.append((cmd, kwargs))
+        pipe.proc = MagicMock()
+        pipe.proc.stdout = []
+        pipe.proc.poll.return_value = 0
+        pipe.proc.returncode = 0
+
+    pipe._popen = fake_popen
+    pipe._stream_process = lambda agent, parse: (0, [])
+
+    pipe._run_opencode(1, "extract draft", "Title Agent 1")
+
+    assert len(captured_cmds) == 1
+    cmd, kwargs = captured_cmds[0]
+    # In v2: model variant is passed via `#variant` in -m / --model
+    assert "-m" in cmd
+    m_idx = cmd.index("-m")
+    assert cmd[m_idx + 1] == "opencode-go/deepseek-v4-flash#max"
+    # In v2: --variant and --dir flags do not exist
+    assert "--variant" not in cmd
+    assert "--dir" not in cmd
+    # Cwd is passed to popen
+    assert kwargs.get("cwd") == str(config.WORKSPACE)
+    assert "--format" in cmd and "json" in cmd
+    assert "--thinking" in cmd
+    assert "--auto" in cmd
+
+
+def test_list_opencode_models_v2_api_shape(monkeypatch):
+    """V2 `api GET /api/model` returns bare ids + providerID, variants list,
+    cost tiers list, and an enabled flag — all normalized to catalog rows."""
+    api_payload = {
+        "location": {"directory": "C:\\proj"},
+        "data": [
+            {
+                "id": "cat-jam-free",
+                "providerID": "opencode-go",
+                "name": "Cat Jam Free",
+                "family": "cat",
+                "status": "active",
+                "enabled": True,
+                "capabilities": {"tools": True, "input": ["text"], "output": ["text"]},
+                "variants": [{"id": "low"}, {"id": "max"}],
+                "cost": [{"input": 0.0, "output": 0.0, "cache": {"read": 0, "write": 0}}],
+                "limit": {"context": 100000, "output": 16000},
+            },
+            {
+                "id": "meta/muse-spark-open",
+                "providerID": "openrouter",
+                "name": "Muse Spark Open",
+                "family": "muse",
+                "status": "active",
+                "enabled": True,
+                "capabilities": {"tools": True, "input": ["text"], "output": ["text"]},
+                "variants": [{"id": "high"}],
+                "cost": [{"input": 1.25, "output": 4.25}],
+                "limit": {"context": 1048576, "output": 943718},
+            },
+            {
+                "id": "retired-model",
+                "providerID": "opencode-go",
+                "name": "Retired",
+                "status": "active",
+                "enabled": False,
+                "capabilities": {"tools": True},
+                "variants": [],
+                "cost": [],
+                "limit": {},
+            },
+        ],
+    }
+
+    class FakeProc:
+        returncode = 0
+        stdout = json.dumps(api_payload)
+        stderr = ""
+
+    class FakeDefaultProc:
+        returncode = 0
+        stdout = json.dumps({"data": {
+            "id": "meta/muse-spark-open",
+            "providerID": "openrouter",
+            "name": "Muse Spark Open",
+        }})
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        if cmd[-1] == "/api/model/default":
+            return FakeDefaultProc()
+        return FakeProc()
+
+    monkeypatch.setattr(config, "_MODELS_CACHE", {})
+    monkeypatch.setattr(config, "_MODELS_CACHE_AT", {})
+    with patch("subprocess.run", side_effect=fake_run):
+        catalog = config.list_models(backend=config.BACKEND_OPENCODE, refresh=True)
+
+    assert catalog["ok"] is True
+    ids = {m["id"] for m in catalog["models"]}
+    # Bare API ids are prefixed with their providerID, matching `opencode models`.
+    assert "opencode-go/cat-jam-free" in ids
+    assert "openrouter/meta/muse-spark-open" in ids
+    # The default comes from `api GET /api/model/default`, not a hardcoded id.
+    assert catalog["default_model"] == "openrouter/meta/muse-spark-open"
+    assert catalog["default_variant"] == "high"
+    # Disabled models are filtered out.
+    assert "opencode-go/retired-model" not in ids
+    jam = next(m for m in catalog["models"] if m["id"] == "opencode-go/cat-jam-free")
+    assert jam["reasoning"] is True
+    assert jam["variants"] == ["low", "max"]
+    spark = next(m for m in catalog["models"] if m["id"] == "openrouter/meta/muse-spark-open")
+    # Flat per-million rates for the UI cost estimate.
+    assert spark["cost"]["input"] == 1.25
+    assert spark["cost"]["output"] == 4.25
+
+
+def test_list_opencode_models_default_falls_back_to_first(monkeypatch):
+    """When the default-model endpoint fails, the first catalog model wins."""
+    api_payload = {"data": [
+        {"id": "b-model", "providerID": "prov-b", "name": "B",
+         "status": "active", "capabilities": {"tools": True},
+         "variants": [{"id": "low"}], "cost": [], "limit": {}},
+        {"id": "a-model", "providerID": "prov-a", "name": "A",
+         "status": "active", "capabilities": {"tools": True},
+         "variants": [], "cost": [], "limit": {}},
+    ]}
+
+    class FakeProc:
+        returncode = 0
+        stdout = json.dumps(api_payload)
+        stderr = ""
+
+    class FakeFailProc:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    def fake_run(cmd, **kwargs):
+        if cmd[-1] == "/api/model/default":
+            return FakeFailProc()
+        return FakeProc()
+
+    monkeypatch.setattr(config, "_MODELS_CACHE", {})
+    monkeypatch.setattr(config, "_MODELS_CACHE_AT", {})
+    with patch("subprocess.run", side_effect=fake_run):
+        catalog = config.list_models(backend=config.BACKEND_OPENCODE, refresh=True)
+
+    assert catalog["ok"] is True
+    assert catalog["default_model"] == "prov-b/b-model"
+    assert catalog["default_variant"] == "low"
+
+
+def test_parse_agent_event_v2_tool_use_shape(tmp_path):
+    transcript = tmp_path / "dummy_transcript.txt"
+    transcript.write_text("Hello", encoding="utf-8")
+    with patch("app.config.TRANSCRIPTS_DIR", tmp_path), \
+         patch("app.config.OUTPUTS_DIR", tmp_path):
+        pipeline = Pipeline("dummy_subject", "DS", "dummy_prefix", "1", str(transcript))
+
+    # V2 puts the call ID in part.id and failures in state.error.
+    tool_line = json.dumps({
+        "type": "tool_use",
+        "timestamp": 1,
+        "sessionID": "ses_abc",
+        "part": {
+            "partID": "prt_1",
+            "sessionID": "ses_abc",
+            "messageID": "msg_1",
+            "type": "tool",
+            "id": "call_xyz",
+            "tool": "read",
+            "state": {
+                "status": "error",
+                "input": {"path": "missing.txt"},
+                "error": "File not found: missing.txt",
+                "metadata": {"huge": True},
+            },
+        },
+    })
+    ev = pipeline._parse_agent_event(tool_line)
+    assert ev is not None
+    assert ev["type"] == "tool_use"
+    assert ev["part"]["callID"] == "call_xyz"
+    assert ev["part"]["tool"] == "read"
+    assert ev["part"]["state"]["output"] == "File not found: missing.txt"
+    assert "metadata" not in ev["part"]["state"]
+
+    # V2 step_finish carries tokens + cost at the top of part.
+    finish_line = json.dumps({
+        "type": "step_finish",
+        "timestamp": 2,
+        "sessionID": "ses_abc",
+        "part": {
+            "id": "prt_2",
+            "type": "step-finish",
+            "reason": "stop",
+            "tokens": {"input": 100, "output": 20, "reasoning": 5,
+                       "cache": {"read": 10, "write": 0}},
+            "cost": 0.001,
+        },
+    })
+    ev = pipeline._parse_agent_event(finish_line)
+    assert ev is not None
+    assert ev["type"] == "step_finish"
+    assert ev["part"]["tokens"]["input"] == 100
+    assert ev["part"]["cost"] == 0.001
+
 
 
 def test_parse_models_verbose_openrouter():

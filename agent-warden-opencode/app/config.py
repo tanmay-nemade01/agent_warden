@@ -10,10 +10,12 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import confine, is_safe_component
+from .paths import confine, is_safe_component, rel_glob, resolve_configured
 
 _DEFAULT_WORKSPACE = Path(__file__).resolve().parents[2]
 WORKSPACE = Path(os.environ.get("NOTES_WORKSPACE", str(_DEFAULT_WORKSPACE))).resolve()
@@ -57,7 +59,7 @@ BACKENDS = {
     BACKEND_OPENCODE: {
         "id": BACKEND_OPENCODE,
         "label": "OpenCode",
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "opencode-go/deepseek-v4.1-flash",
         "variant": "max",
         "provider": "opencode-go",
         "effort_variants": ["low", "high", "max"],
@@ -196,6 +198,71 @@ SUBJECTS = {
 }
 
 SUBJECTS_FILE = WORKSPACE / "subjects.json"
+SUBJECT_INSTRUCTIONS_FILE = WORKSPACE / "subject_instructions.json"
+
+
+def all_subject_instructions() -> dict[str, dict[str, str]]:
+    """Return all stored extra instructions per subject abbreviation.
+    Format: { "ABBR": { "extractor": "...", "enricher": "...", "formatter": "..." } }
+    """
+    if not SUBJECT_INSTRUCTIONS_FILE.is_file():
+        return {}
+    try:
+        data = json.loads(SUBJECT_INSTRUCTIONS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        cleaned: dict[str, dict[str, str]] = {}
+        for k, v in data.items():
+            if isinstance(k, str) and isinstance(v, dict):
+                k_upper = k.strip().upper()
+                phase_map: dict[str, str] = {}
+                for phase, inst in v.items():
+                    norm_phase = str(phase).strip().lower()
+                    norm_phase = {"1": "extractor", "2": "enricher", "3": "formatter"}.get(norm_phase, norm_phase)
+                    if norm_phase in ("extractor", "enricher", "formatter") and isinstance(inst, str) and inst.strip():
+                        phase_map[norm_phase] = inst.strip()
+                if phase_map:
+                    cleaned[k_upper] = phase_map
+        return cleaned
+    except (OSError, ValueError):
+        return {}
+
+
+def get_subject_instructions(abbr: str) -> dict[str, str]:
+    """Get extra instructions for a specific subject abbreviation."""
+    if not abbr:
+        return {}
+    abbr = abbr.strip().upper()
+    return all_subject_instructions().get(abbr, {})
+
+
+def save_subject_instructions(abbr: str, instructions: dict[str, str]) -> dict[str, dict[str, str]]:
+    """Persist extra instructions for a subject abbreviation.
+    If all instructions for the subject are empty, removes the subject entry.
+    """
+    abbr = abbr.strip().upper()
+    if not is_safe_component(abbr):
+        raise ValueError("subject abbreviation is not a safe path component")
+    all_inst = all_subject_instructions()
+    phase_map: dict[str, str] = {}
+    for phase, inst in (instructions or {}).items():
+        norm_phase = str(phase).strip().lower()
+        norm_phase = {"1": "extractor", "2": "enricher", "3": "formatter"}.get(norm_phase, norm_phase)
+        if norm_phase in ("extractor", "enricher", "formatter") and isinstance(inst, str) and inst.strip():
+            phase_map[norm_phase] = inst.strip()
+    if phase_map:
+        all_inst[abbr] = phase_map
+    else:
+        all_inst.pop(abbr, None)
+    try:
+        SUBJECT_INSTRUCTIONS_FILE.write_text(
+            json.dumps(all_inst, indent=2) + "\n",
+            encoding="utf-8"
+        )
+    except OSError:
+        pass
+    return all_inst
+
 
 
 def all_subjects() -> dict[str, str]:
@@ -218,19 +285,23 @@ def save_subject(abbr: str, name: str) -> dict[str, str]:
     name = name.strip()
     if not is_safe_component(abbr) or not is_safe_component(name):
         raise ValueError("subject abbreviation or name is not a safe path component")
-    docs_folder = confine(DOCS_DIR, abbr)
-    yaml_path = confine(TOPIC_MAPPINGS_DIR, f"{name}.yaml")
-    if docs_folder is None or yaml_path is None:
-        raise ValueError("subject abbreviation or name is not a safe path component")
     subjects = all_subjects()
     subjects[abbr] = name
     data = {a: n for a, n in sorted(subjects.items())
             if a not in SUBJECTS}
     SUBJECTS_FILE.write_text(json.dumps(data, indent=2) + "\n",
                              encoding="utf-8")
-    docs_folder.mkdir(parents=True, exist_ok=True)
-    if not yaml_path.is_file():
-        yaml_path.write_text(f'subject_name: "{name}"\nlectures: []\n', encoding="utf-8")
+    # The subject now resolves, so honour any profile it already has.
+    prof = subject_profile(abbr)
+    docs_folder = prof.resolve_docs() or confine(DOCS_DIR, abbr)
+    yaml_path = prof.resolve_topic_mapping() or confine(
+        TOPIC_MAPPINGS_DIR, f"{name}.yaml")
+    if docs_folder is not None:
+        docs_folder.mkdir(parents=True, exist_ok=True)
+    if yaml_path is not None and not yaml_path.is_file():
+        yaml_path.parent.mkdir(parents=True, exist_ok=True)
+        yaml_path.write_text(f'subject_name: "{name}"\nlectures: []\n',
+                             encoding="utf-8")
     return subjects
 
 
@@ -246,6 +317,370 @@ def default_docs_dir(abbr: str, subject: str = "") -> Path | None:
         if p.is_dir() and p.name.lower() in wanted:
             return p
     return None
+
+
+# ---------------------------------------------------------------------------
+# Subject profiles
+# ---------------------------------------------------------------------------
+# A profile binds one subject to the places that differ from subject to
+# subject: where its transcripts come from, where its companion docs live,
+# how its output folder is named, and how a lecture prefix is spelled.
+# Everything else in the pipeline is shared.
+#
+#   subject_profiles.json
+#   {
+#     "QC": {
+#       "transcripts_dir": "transcript files/QC",
+#       "docs_dir":        "companion_docs/QC",
+#       "output_root":     "outputs",
+#       "output_template": "{subject}/{prefix}",
+#       "prefix_template": "{abbr}_Lecture_{lecture}"
+#     }
+#   }
+#
+# Every field is optional. A subject without an entry keeps the legacy
+# behaviour exactly: transcripts from the shared flat dir, docs auto-detected
+# under companion_docs/, outputs at outputs/<Subject Name>/<Prefix>/.
+
+SUBJECT_PROFILES_FILE = WORKSPACE / "subject_profiles.json"
+
+DEFAULT_OUTPUT_TEMPLATE = "{subject}/{prefix}"
+DEFAULT_PREFIX_TEMPLATE = "{abbr}_Lecture_{lecture}"
+
+#: Placeholders understood by ``output_template``.
+OUTPUT_TEMPLATE_FIELDS = ("subject", "abbr", "prefix")
+#: Placeholders understood by ``prefix_template``.
+PREFIX_TEMPLATE_FIELDS = ("subject", "abbr", "lecture")
+
+
+@dataclass(frozen=True)
+class SubjectProfile:
+    """Per-subject binding of transcripts, docs, outputs and prefix naming."""
+
+    abbr: str
+    name: str
+    transcripts_dir: Path
+    output_root: Path
+    output_template: str = DEFAULT_OUTPUT_TEMPLATE
+    prefix_template: str = DEFAULT_PREFIX_TEMPLATE
+    docs_dir: Path | None = None
+    topic_mapping: Path | None = None
+    explicit: bool = False
+
+    # ------------------------------------------------------------- naming
+    def prefix_for(self, lecture_num: str | None) -> str:
+        """Build a lecture prefix from the profile's template.
+
+        ``{lecture}`` collapses cleanly when no lecture number is known,
+        so ``{abbr}_Lecture_{lecture}`` yields ``QC_Lecture``.
+        """
+        return self.prefix_for_fields(str(lecture_num or "").strip())
+
+    def prefix_for_fields(self, lecture_num: str) -> str:
+        tpl = self.prefix_template or DEFAULT_PREFIX_TEMPLATE
+        try:
+            out = tpl.format(subject=self.name, abbr=self.abbr,
+                             lecture=str(lecture_num or ""))
+        except (KeyError, IndexError, ValueError):
+            return f"{self.abbr}_Lecture_{lecture_num}".rstrip("_")
+        out = re.sub(r"\s+", "_", out).strip("_-. ")
+        return out or f"{self.abbr}_Lecture_{lecture_num}".rstrip("_")
+
+    def output_rel(self, prefix: str, subject: str | None = None) -> str | None:
+        """Expand the output template into a path relative to the root.
+
+        Returns ``None`` when the template expands to something unsafe
+        (empty segment, separator inside a segment, ``..``).
+        """
+        name = subject if subject is not None else self.name
+        tpl = self.output_template or DEFAULT_OUTPUT_TEMPLATE
+        try:
+            raw = tpl.format(subject=name, abbr=self.abbr, prefix=prefix)
+        except (KeyError, IndexError, ValueError):
+            return None
+        parts = [p.strip() for p in raw.replace("\\", "/").split("/")]
+        parts = [p for p in parts if p not in ("", ".")]
+        if not parts or any(not is_safe_component(p) for p in parts):
+            return None
+        return "/".join(parts)
+
+    def output_dir(self, prefix: str, subject: str | None = None) -> Path | None:
+        """Absolute output directory for one lecture, confined to the root."""
+        rel = self.output_rel(prefix, subject=subject)
+        if rel is None:
+            return None
+        try:
+            root = Path(self.output_root).resolve()
+        except (OSError, RuntimeError):
+            return None
+        joined = root.joinpath(*rel.split("/"))
+        try:
+            resolved = joined.resolve()
+            resolved.relative_to(root)
+        except (ValueError, OSError, RuntimeError):
+            return None
+        return resolved
+
+    # -------------------------------------------------------------- paths
+    def resolve_docs(self) -> Path | None:
+        """The companion-docs folder for this subject.
+
+        An explicit ``docs_dir`` wins; otherwise fall back to the
+        auto-detected ``companion_docs/<abbr|name>`` folder.
+        """
+        if self.docs_dir is not None:
+            return self.docs_dir if self.docs_dir.is_dir() else None
+        return default_docs_dir(self.abbr, self.name)
+
+    def resolve_topic_mapping(self) -> Path | None:
+        """The topic-mapping YAML this subject's lectures update."""
+        if self.topic_mapping is not None:
+            return self.topic_mapping
+        candidate = TOPIC_MAPPINGS_DIR / f"{self.name}.yaml"
+        return candidate
+
+    def write_roots(self) -> list[str]:
+        """Workspace-relative globs this subject's agents may write to.
+
+        The lecture output tree plus the topic-mapping folder (Agent 2
+        updates that YAML). Both are workspace-relative because the agent
+        runs with the workspace as its working directory.
+        """
+        roots: list[str] = []
+        topic_dir = (self.topic_mapping.parent if self.topic_mapping
+                     else TOPIC_MAPPINGS_DIR)
+        for path in (self.output_root, topic_dir):
+            if path is None:
+                continue
+            rel = rel_glob(WORKSPACE, path)
+            if rel and rel != ".":
+                roots.append(f"{rel}/**")
+        if not roots:
+            roots = ["outputs/**", "topic_mappings/**"]
+        return roots
+
+
+def _default_profile(abbr: str, name: str) -> SubjectProfile:
+    return SubjectProfile(
+        abbr=abbr, name=name,
+        transcripts_dir=TRANSCRIPTS_DIR,
+        output_root=OUTPUTS_DIR,
+        output_template=DEFAULT_OUTPUT_TEMPLATE,
+        prefix_template=DEFAULT_PREFIX_TEMPLATE,
+        docs_dir=None, topic_mapping=None, explicit=False)
+
+
+def _load_profile_entries() -> dict[str, dict]:
+    """Raw per-subject overrides from ``subject_profiles.json``."""
+    if not SUBJECT_PROFILES_FILE.is_file():
+        return {}
+    try:
+        data = json.loads(SUBJECT_PROFILES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for k, v in data.items():
+        if isinstance(k, str) and isinstance(v, dict):
+            out[k.strip().upper()] = v
+    return out
+
+
+def _profile_from_entry(abbr: str, name: str, entry: dict) -> SubjectProfile:
+    """Build a profile from a raw override dict, falling back to defaults."""
+    prof = _default_profile(abbr, name)
+
+    def _path(key: str, default: Path | None) -> Path | None:
+        raw = entry.get(key)
+        if raw is None or not isinstance(raw, str) or not raw.strip():
+            return default
+        resolved = resolve_configured(WORKSPACE, raw)
+        return resolved if resolved is not None else default
+
+    transcripts = _path("transcripts_dir", prof.transcripts_dir)
+    output_root = _path("output_root", prof.output_root)
+    docs = _path("docs_dir", None)
+    topic = _path("topic_mapping", None)
+
+    out_tpl = entry.get("output_template")
+    out_tpl = out_tpl.strip() if isinstance(out_tpl, str) and out_tpl.strip() \
+        else prof.output_template
+    pfx_tpl = entry.get("prefix_template")
+    pfx_tpl = pfx_tpl.strip() if isinstance(pfx_tpl, str) and pfx_tpl.strip() \
+        else prof.prefix_template
+
+    return SubjectProfile(
+        abbr=abbr, name=name,
+        transcripts_dir=transcripts or prof.transcripts_dir,
+        output_root=output_root or prof.output_root,
+        output_template=out_tpl,
+        prefix_template=pfx_tpl,
+        docs_dir=docs,
+        topic_mapping=topic,
+        explicit=True)
+
+
+def all_profiles() -> dict[str, SubjectProfile]:
+    """A profile for every known subject (built-in + user-created)."""
+    subjects = all_subjects()
+    entries = _load_profile_entries()
+    out: dict[str, SubjectProfile] = {}
+    for abbr, name in subjects.items():
+        entry = entries.get(abbr)
+        if entry:
+            out[abbr] = _profile_from_entry(abbr, name, entry)
+        else:
+            out[abbr] = _default_profile(abbr, name)
+    return out
+
+
+def subject_profile(key: str, abbr: str | None = None) -> SubjectProfile:
+    """Look up a profile by abbreviation, subject name, or either.
+
+    *abbr* wins when given; otherwise *key* is matched against known
+    abbreviations first and then against subject display names.
+    """
+    subjects = all_subjects()
+    profiles = all_profiles()
+
+    def _by_abbr(candidate: str) -> SubjectProfile | None:
+        cand = (candidate or "").strip().upper()
+        if cand in subjects:
+            return profiles.get(cand)
+        return None
+
+    if abbr:
+        found = _by_abbr(abbr)
+        if found:
+            return found
+    if key:
+        found = _by_abbr(key)
+        if found:
+            return found
+        for a, name in subjects.items():
+            if name == key:
+                return profiles[a]
+        # A display name that is not registered still gets a usable profile.
+        stripped = (key or "").strip()
+        if stripped:
+            return _default_profile(stripped.upper(), stripped)
+    return _default_profile("", "")
+
+
+def profile_for_output(subject: str, abbr: str | None = None) -> SubjectProfile:
+    """The profile whose output root holds *subject*'s lecture folders."""
+    prof = subject_profile(subject, abbr=abbr)
+    if prof.abbr:
+        return prof
+    return prof
+
+
+def save_profile(abbr: str, fields: dict) -> SubjectProfile:
+    """Persist a subject profile and return the resulting profile.
+
+    Only the keys present in *fields* are written; passing ``None`` for a
+    key clears that override and restores the default behaviour.
+    """
+    abbr = (abbr or "").strip().upper()
+    if not abbr or not is_safe_component(abbr):
+        raise ValueError("subject abbreviation is not a safe path component")
+    subjects = all_subjects()
+    if abbr not in subjects:
+        raise ValueError(f"unknown subject {abbr!r}")
+    name = subjects[abbr]
+
+    entries = _load_profile_entries()
+    entry = dict(entries.get(abbr) or {})
+
+    allowed = {"transcripts_dir", "docs_dir", "output_root",
+               "output_template", "prefix_template", "topic_mapping"}
+    for key, value in (fields or {}).items():
+        if key not in allowed:
+            raise ValueError(f"unknown profile field {key!r}")
+        if value is None:
+            entry.pop(key, None)
+            continue
+        if not isinstance(value, str):
+            raise ValueError(f"{key} must be a string")
+        value = value.strip()
+        if not value:
+            entry.pop(key, None)
+            continue
+        if key in ("output_template", "prefix_template"):
+            if "{" in value and not any(
+                    f"{{{f}}}" in value for f in
+                    (OUTPUT_TEMPLATE_FIELDS if key == "output_template"
+                     else PREFIX_TEMPLATE_FIELDS)):
+                raise ValueError(
+                    f"{key} must use one of "
+                    f"{OUTPUT_TEMPLATE_FIELDS if key == 'output_template' else PREFIX_TEMPLATE_FIELDS}")
+            entry[key] = value
+            continue
+        resolved = resolve_configured(WORKSPACE, value)
+        if resolved is None:
+            raise ValueError(f"{key} is not a valid path")
+        if key == "output_root":
+            # The agent runs with the workspace as cwd, so the output root
+            # has to live inside it for write permissions and file serving.
+            if rel_glob(WORKSPACE, resolved) is None:
+                raise ValueError("output_root must be inside the workspace")
+        entry[key] = value
+
+    if entry:
+        entries[abbr] = entry
+    else:
+        entries.pop(abbr, None)
+    try:
+        SUBJECT_PROFILES_FILE.write_text(
+            json.dumps(entries, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"could not write {SUBJECT_PROFILES_FILE.name}: {exc}") from exc
+    return all_profiles()[abbr]
+
+
+def delete_profile(abbr: str) -> None:
+    """Remove a subject's overrides (restores the default behaviour)."""
+    abbr = (abbr or "").strip().upper()
+    entries = _load_profile_entries()
+    if abbr in entries:
+        entries.pop(abbr, None)
+        try:
+            SUBJECT_PROFILES_FILE.write_text(
+                json.dumps(entries, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8")
+        except OSError as exc:
+            raise ValueError(
+                f"could not write {SUBJECT_PROFILES_FILE.name}: {exc}") from exc
+
+
+def profile_to_dict(prof: SubjectProfile) -> dict:
+    """Serialise a profile for the UI / API."""
+
+    def _rel(path: Path | None) -> str | None:
+        if path is None:
+            return None
+        return rel_glob(WORKSPACE, path) or str(path)
+
+    docs = prof.resolve_docs()
+    return {
+        "abbr": prof.abbr,
+        "subject": prof.name,
+        "explicit": prof.explicit,
+        "transcripts_dir": _rel(prof.transcripts_dir),
+        "transcripts_dir_abs": str(prof.transcripts_dir),
+        "docs_dir": _rel(prof.docs_dir) if prof.docs_dir else None,
+        "docs_dir_abs": str(prof.docs_dir) if prof.docs_dir else None,
+        "docs_resolved": str(docs) if docs else None,
+        "output_root": _rel(prof.output_root),
+        "output_root_abs": str(prof.output_root),
+        "output_template": prof.output_template,
+        "prefix_template": prof.prefix_template,
+        "topic_mapping": _rel(prof.topic_mapping),
+        "topic_mapping_abs": str(prof.topic_mapping) if prof.topic_mapping else None,
+        "write_roots": prof.write_roots(),
+    }
 
 
 _OPENCODE_EXE: str | None = None
@@ -702,11 +1137,19 @@ def _parse_models_verbose(stdout: str) -> list[dict]:
             })
             continue
         variants = meta.get("variants") or {}
-        variant_ids = list(variants.keys()) if isinstance(variants, dict) else []
+        if isinstance(variants, list):
+            variant_ids = [v.get("id") for v in variants
+                           if isinstance(v, dict) and v.get("id")]
+        else:
+            variant_ids = list(variants.keys()) if isinstance(variants, dict) else []
         caps = meta.get("capabilities") or {}
         provider_id = meta.get("providerID") or (model_id.split("/", 1)[0] if "/" in model_id else "")
         family = meta.get("family") or ""
-        # Xiaomi / MiMo models do not support reasoning effort variants
+        # Xiaomi / MiMo models do not support reasoning effort variants:
+        # record that they reason, but offer no effort options in the UI.
+        # (OpenCode v2 capabilities are {tools, input, output} — there is
+        # no `reasoning` flag, so pre-clear variants are the signal.)
+        reasoning = bool(variant_ids) or bool(caps.get("reasoning"))
         if provider_id.startswith("xiaomi") or family.lower() == "mimo" or "mimo" in model_id.lower():
             variant_ids = []
         models.append({
@@ -715,10 +1158,69 @@ def _parse_models_verbose(stdout: str) -> list[dict]:
             "provider": provider_id,
             "family": family,
             "status": meta.get("status") or "active",
-            "reasoning": bool(caps.get("reasoning")),
+            "reasoning": reasoning,
             "variants": variant_ids,
-            "cost": meta.get("cost") or {},
+            "cost": _normalize_opencode_cost(meta.get("cost")),
             "limit": meta.get("limit") or {},
+        })
+    return models
+
+
+def _normalize_opencode_cost(raw) -> dict:
+    """Normalize an OpenCode v2 model `cost` payload to a flat dict.
+
+    V2 serves `cost` as a list of per-tier entries
+    (``[{"input": 1.25, "output": 4.25, "cache": {"read": ..., "write": ...}},
+    {"tier": {...}, ...}]``). The UI estimate only needs the base (first)
+    tier as ``{"input", "output", "cache_read", "cache_write"}`` rates per
+    million tokens. V1 dicts pass through unchanged.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list) and raw:
+        base = next((t for t in raw if isinstance(t, dict) and "tier" not in t),
+                    next((t for t in raw if isinstance(t, dict)), {}))
+        cache = base.get("cache") or {}
+        out: dict = {}
+        for k in ("input", "output"):
+            try:
+                if base.get(k) is not None:
+                    out[k] = float(base[k])
+            except (TypeError, ValueError):
+                pass
+        if isinstance(cache, dict):
+            for src, dst in (("read", "cache_read"), ("write", "cache_write")):
+                try:
+                    if cache.get(src) is not None:
+                        out[dst] = float(cache[src])
+                except (TypeError, ValueError):
+                    pass
+        return out
+    return {}
+
+
+def _parse_models_plain(stdout: str) -> list[dict]:
+    """Parse OpenCode v2 `opencode models` output: one `provider/model` per line."""
+    import re
+    models: list[dict] = []
+    seen: set[str] = set()
+    id_re = re.compile(r"^[\w.~@+-]+/[\w.~@+:/-]+$")
+    for line in (stdout or "").splitlines():
+        token = line.strip().strip("`,;|")
+        if not token or token in seen or not id_re.match(token):
+            continue
+        seen.add(token)
+        provider_id = token.split("/", 1)[0]
+        models.append({
+            "id": token,
+            "name": token.split("/", 1)[-1],
+            "provider": provider_id,
+            "family": "",
+            "status": "unknown",
+            "reasoning": False,
+            "variants": [],
+            "cost": {},
+            "limit": {},
         })
     return models
 
@@ -1451,40 +1953,102 @@ def _list_opencode_models(provider: str | None = None, refresh: bool = False,
             "default_variant": VARIANT,
             "error": "opencode executable not found",
         }
-    cmd = [exe, "models"]
-    if provider:
-        cmd.append(str(provider))
-    cmd.append("--verbose")
-    if refresh:
-        cmd.append("--refresh")
+    # Try OpenCode v2 API first for rich metadata (capabilities, variants, costs).
+    # V2 serves {"location": {...}, "data": [{id (bare or nested), providerID,
+    # capabilities {tools,input,output}, variants [{id,...}], cost [tiers],
+    # limit {context,output}, status, enabled}]}. The selectable catalog ID
+    # is always `providerID/id` (e.g. `opencode-go/cat-jam-free`), matching
+    # `opencode models` output.
+    models: list[dict] = []
+    err: str = ""
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=timeout,
+        proc_api = subprocess.run(
+            [exe, "api", "GET", "/api/model"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=min(timeout, 10.0),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return {
-            "ok": False, "backend": BACKEND_OPENCODE, "provider": provider or "",
-            "models": fallback, "default_model": MODEL,
-            "default_variant": VARIANT,
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-    models = _parse_models_verbose(proc.stdout or "")
+        if proc_api.returncode == 0 and proc_api.stdout:
+            api_data = json.loads(proc_api.stdout)
+            raw_items = api_data.get("data", []) if isinstance(api_data, dict) else (api_data if isinstance(api_data, list) else [])
+            for item in raw_items:
+                if not isinstance(item, dict) or not item.get("id"):
+                    continue
+                if item.get("enabled") is False:
+                    continue
+                raw_id = str(item["id"])
+                p_id = item.get("providerID") or (raw_id.split("/", 1)[0] if "/" in raw_id else "")
+                model_id = (raw_id if not p_id or raw_id == p_id or raw_id.startswith(f"{p_id}/")
+                            else f"{p_id}/{raw_id}")
+                raw_vars = item.get("variants") or []
+                if isinstance(raw_vars, list):
+                    variant_ids = [v["id"] for v in raw_vars if isinstance(v, dict) and "id" in v]
+                elif isinstance(raw_vars, dict):
+                    variant_ids = list(raw_vars.keys())
+                else:
+                    variant_ids = []
+                family = item.get("family") or ""
+                # Xiaomi / MiMo models do not support reasoning effort
+                # variants: record that they reason, but offer no options.
+                reasoning = bool(variant_ids)
+                if p_id.startswith("xiaomi") or family.lower() == "mimo" or "mimo" in raw_id.lower():
+                    variant_ids = []
+                models.append({
+                    "id": model_id,
+                    "name": item.get("name") or raw_id.split("/", 1)[-1],
+                    "provider": p_id,
+                    "family": family,
+                    "status": item.get("status") or "active",
+                    "reasoning": reasoning,
+                    "variants": variant_ids,
+                    "cost": _normalize_opencode_cost(item.get("cost")),
+                    "limit": item.get("limit") or {},
+                })
+    except Exception:
+        pass
+
+    # Fallback to OpenCode v2 CLI `opencode models` (v2 takes no --verbose/--refresh/provider flags;
+    # output is one `provider/model` ID per line with no metadata).
+    if not models:
+        cmd = [exe, "models"]
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=timeout,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if proc.returncode == 0 and proc.stdout:
+                models = _parse_models_plain(proc.stdout)
+                if not models:
+                    # Very old output shape (id line + JSON blob).
+                    models = _parse_models_verbose(proc.stdout)
+            else:
+                err = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {
+                "ok": False, "backend": BACKEND_OPENCODE, "provider": provider or "",
+                "models": fallback, "default_model": MODEL,
+                "default_variant": VARIANT,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
     models = [m for m in models
               if (m.get("status") or "active") in {"active", "unknown", "beta"}]
+    if provider:
+        models = [m for m in models
+                  if m.get("provider") == provider or m["id"].startswith(f"{provider}/")]
     if not models:
-        err = (proc.stderr or "").strip() or f"exit {proc.returncode}"
         return {
             "ok": False, "backend": BACKEND_OPENCODE, "provider": provider or "",
             "models": fallback, "default_model": MODEL,
             "default_variant": VARIANT,
-            "error": f"no models parsed ({err})",
+            "error": f"no models parsed ({err or 'empty output'})",
         }
     ids = {m["id"] for m in models}
-    default_model = MODEL if MODEL in ids else (
-        "deepseek/deepseek-v4-flash" if "deepseek/deepseek-v4-flash" in ids
-        else models[0]["id"]
-    )
+    # No hardcoded default: ask OpenCode for the user's configured default
+    # model (`api GET /api/model/default`) and use it when it is in this
+    # catalog; otherwise take the first available model.
+    default_model = _fetch_opencode_default_model(exe, ids, timeout=timeout)
+    if default_model is None:
+        default_model = models[0]["id"]
     variants = next((m["variants"] for m in models if m["id"] == default_model),
                     [])
     return {
@@ -1493,6 +2057,42 @@ def _list_opencode_models(provider: str | None = None, refresh: bool = False,
         "default_variant": preferred_variant(variants, VARIANT),
         "error": None,
     }
+
+
+def _fetch_opencode_default_model(exe: str, ids: set[str],
+                                    timeout: float = 45.0) -> str | None:
+    """Return the user's configured OpenCode default model, if catalogued.
+
+    Queries the v2 ``api GET /api/model/default`` endpoint and maps its
+    ``{providerID, id}`` to the selectable ``provider/id`` form. Returns
+    None when the endpoint fails or the default is not in *ids*, so callers
+    can fall back to the first available model. No model ID is hardcoded.
+    """
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            [exe, "api", "GET", "/api/model/default"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=min(timeout, 10.0),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    try:
+        payload = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    data = payload.get("data", payload) if isinstance(payload, dict) else payload
+    if not isinstance(data, dict) or not data.get("id"):
+        return None
+    raw_id = str(data["id"])
+    p_id = data.get("providerID") or ""
+    candidate = (raw_id if not p_id or raw_id == p_id
+                 or raw_id.startswith(f"{p_id}/")
+                 else f"{p_id}/{raw_id}")
+    return candidate if candidate in ids else None
 
 
 def _list_commandcode_models(refresh: bool, timeout: float) -> dict:
@@ -2291,21 +2891,84 @@ def _natural_key(p: Path):
             for text in re.split(r'(\d+)', p.name)]
 
 
-def list_transcripts() -> list[dict]:
+def transcript_sources() -> dict[str, list[str]]:
+    """Map each transcript directory to the subjects that claim it.
+
+    A subject claims the directory named by its profile. The shared flat
+    ``transcript files/`` directory is claimed by every subject without a
+    profile of its own — those transcripts are attributed by filename.
+    """
+    owners: dict[str, list[str]] = {}
+    profiles = all_profiles()
+    claimed: set[str] = set()
+    for abbr, prof in profiles.items():
+        if not prof.explicit or prof.transcripts_dir is None:
+            continue
+        key = str(Path(prof.transcripts_dir).resolve()).lower()
+        owners.setdefault(key, []).append(abbr)
+        claimed.add(key)
+    shared = str(Path(TRANSCRIPTS_DIR).resolve()).lower()
+    if shared not in owners:
+        owners[shared] = []
+    for abbr, prof in profiles.items():
+        key = str(Path(prof.transcripts_dir).resolve()).lower()
+        if key in claimed:
+            continue
+        if key == shared:
+            owners[key].append(abbr)
+    return {k: v for k, v in owners.items() if v or k == shared}
+
+
+def list_transcripts(abbr: str | None = None) -> list[dict]:
+    """Transcripts available for one subject (or all subjects).
+
+    Each entry carries the subject that owns it (``abbr``) so the UI can
+    group transcripts per subject without guessing from the filename.
+    """
     subjects = all_subjects()
-    out = []
-    if TRANSCRIPTS_DIR.is_dir():
-        for p in sorted(TRANSCRIPTS_DIR.glob("*.txt"), key=_natural_key):
+    out: list[dict] = []
+    seen: set[str] = set()
+    for key, owners in transcript_sources().items():
+        directory = Path(key)
+        if not directory.is_dir():
+            continue
+        for p in sorted(directory.glob("*.txt"), key=_natural_key):
+            resolved = str(p.resolve())
+            if resolved in seen:
+                continue
+            seen.add(resolved)
             guess = guess_from_filename(p.name, subjects)
+            owner = ""
+            if len(owners) == 1:
+                owner = owners[0]
+            else:
+                owner = guess.get("abbr", "")
+            if owner and owner not in subjects:
+                owner = ""
+            if not owner and abbr:
+                continue
+            if abbr and owner and owner != abbr:
+                continue
+            merged = dict(guess)
+            if owner:
+                merged["abbr"] = owner
+                merged["subject"] = subjects.get(owner, merged.get("subject", ""))
             out.append({
-                "name": p.name, "path": str(p), "bytes": p.stat().st_size,
-                "guess": guess,
+                "name": p.name, "path": resolved,
+                "bytes": p.stat().st_size,
+                "guess": merged,
+                "abbr": owner,
+                "subject": subjects.get(owner, merged.get("subject", "")),
             })
+    if abbr:
+        out.sort(key=lambda t: _natural_key(Path(t["name"])))
     return out
 
 
-def list_outputs(subject: str, prefix: str) -> list[dict]:
-    base = confine(OUTPUTS_DIR, subject, prefix)
+def list_outputs(subject: str, prefix: str,
+                abbr: str | None = None) -> list[dict]:
+    prof = subject_profile(subject, abbr=abbr)
+    base = prof.output_dir(prefix, subject=subject)
     if not base or not base.is_dir():
         return []
     out = []
@@ -2389,8 +3052,17 @@ def guess_from_filename(filename: str,
             "subject": subjects.get(abbr, "")}
 
 
-def output_paths(subject: str, prefix: str) -> dict[str, Path]:
-    base = confine(OUTPUTS_DIR, subject, prefix)
+def output_paths(subject: str, prefix: str,
+                 abbr: str | None = None) -> dict[str, Path]:
+    """Artifact paths for one lecture, honouring the subject's profile.
+
+    The output directory is resolved from the subject's profile (output
+    root + output template) so different subjects can use different
+    folder conventions. Subjects without a profile keep the legacy
+    ``outputs/<Subject>/<Prefix>/`` layout.
+    """
+    prof = subject_profile(subject, abbr=abbr)
+    base = prof.output_dir(prefix, subject=subject)
     if base is None:
         raise ValueError("invalid subject or prefix")
     return {
@@ -2403,10 +3075,45 @@ def output_paths(subject: str, prefix: str) -> dict[str, Path]:
     }
 
 
-def artifacts_status(subject: str, prefix: str) -> dict:
+def output_rel_path(subject: str, prefix: str,
+                    abbr: str | None = None) -> str:
+    """The lecture folder relative to its serving root (URL-friendly).
+
+    The serving root is the outermost output root that contains the
+    subject's own root, so a subject rooted at ``outputs/QC`` is served
+    as ``QC/<prefix>`` under the shared ``outputs`` root.
+    """
+    prof = subject_profile(subject, abbr=abbr)
+    rel = prof.output_rel(prefix, subject=subject)
+    if rel is None:
+        return f"{subject}/{prefix}"
+    root = serving_root_for(prof)
+    try:
+        head = Path(prof.output_root).resolve().relative_to(root).as_posix()
+    except (ValueError, OSError):
+        head = ""
+    if head in ("", "."):
+        return rel
+    return f"{head}/{rel}"
+
+
+def serving_root_for(prof: SubjectProfile) -> Path:
+    """The outermost output root that holds this subject's notes."""
+    own = Path(prof.output_root).resolve()
+    for root in output_roots():
+        try:
+            own.relative_to(root)
+            return root
+        except (ValueError, OSError):
+            continue
+    return own
+
+
+def artifacts_status(subject: str, prefix: str,
+                    abbr: str | None = None) -> dict:
     """Which phase artifacts exist, and which phases to run to resume."""
     try:
-        paths = output_paths(subject, prefix)
+        paths = output_paths(subject, prefix, abbr=abbr)
     except ValueError:
         return {
             "subject": subject, "prefix": prefix, "abbr": "",
@@ -2438,10 +3145,12 @@ def artifacts_status(subject: str, prefix: str) -> dict:
         st = p.stat()
         return {"name": p.name, "bytes": st.st_size, "mtime": st.st_mtime}
 
+    rel = output_rel_path(subject, prefix, abbr=abbr)
     return {
         "subject": subject,
         "prefix": prefix,
-        "abbr": abbr_for_subject(subject),
+        "abbr": abbr or abbr_for_subject(subject),
+        "output_rel": rel,
         "artifacts": {
             "extractor": has_extractor,
             "enricher": has_enricher,
@@ -2456,7 +3165,7 @@ def artifacts_status(subject: str, prefix: str) -> dict:
         "resume_phases": resume,
         "resume_label": label,
         "html_url": (
-            f"/outputs/{urllib_quote(subject)}/{urllib_quote(prefix)}/"
+            f"/outputs/{urllib_quote_path(rel)}/"
             f"{urllib_quote(prefix + '_notes')}/{urllib_quote(prefix + '_notes.html')}"
             if has_formatter else None),
         "events_path": str(paths["events"]) if paths["events"].is_file() else None,
@@ -2468,12 +3177,22 @@ def urllib_quote(s: str) -> str:
     return quote(s, safe="")
 
 
+def urllib_quote_path(rel: str) -> str:
+    """URL-encode a relative path, keeping the separators intact.
+
+    Quoting the whole path at once would turn ``a/b`` into ``a%2Fb``,
+    which the server then reads as a single (wrong) file name.
+    """
+    return "/".join(urllib_quote(seg)
+                    for seg in str(rel).replace("\\", "/").split("/"))
+
+
 def _empty_token_bucket() -> dict:
     return {"input": 0, "output": 0, "reasoning": 0, "cost": 0.0}
 
 
 def summarize_run_events(events_path: Path, subject: str = "",
-                         prefix: str = "") -> dict:
+                         prefix: str = "", abbr: str = "") -> dict:
     """Fold a run_events.jsonl into a history-friendly summary."""
     summary = {
         "subject": subject,
@@ -2497,6 +3216,7 @@ def summarize_run_events(events_path: Path, subject: str = "",
         "variant": None,
         "backend": None,
         "current_phase": None,
+        "output_rel": None,
     }
     phase_secs: dict[str, float] = {}
     phase_cost: dict[str, float] = {}
@@ -2522,6 +3242,8 @@ def summarize_run_events(events_path: Path, subject: str = "",
                     summary["prefix"] = ev.get("prefix") or summary["prefix"]
                     summary["abbr"] = (abbr_for_subject(summary["subject"])
                                        or summary["abbr"])
+                    summary["output_rel"] = (ev.get("output_rel")
+                                             or summary["output_rel"])
                     summary["transcript"] = ev.get("transcript")
                     summary["lecture_num"] = str(ev.get("lecture_num") or "")
                     summary["phases_requested"] = ev.get("phases") or []
@@ -2606,7 +3328,8 @@ def summarize_run_events(events_path: Path, subject: str = "",
             summary["seconds"] = round(
                 float(summary["ended_at"]) - float(summary["started_at"]), 1)
 
-    arts = artifacts_status(summary["subject"], summary["prefix"]) \
+    arts = artifacts_status(summary["subject"], summary["prefix"],
+                            abbr=abbr or summary.get("abbr") or None) \
         if summary["subject"] and summary["prefix"] else None
     if arts:
         summary["artifacts"] = arts["artifacts"]
@@ -2639,10 +3362,10 @@ def summarize_run_events(events_path: Path, subject: str = "",
 
 
 def read_run_events(subject: str, prefix: str, offset: int = 0,
-                    limit: int = 1500) -> dict:
-    """Page events from outputs/<subject>/<prefix>/*_run_events.jsonl."""
+                    limit: int = 1500, abbr: str | None = None) -> dict:
+    """Page events from the lecture's ``*_run_events.jsonl``."""
     try:
-        events_path = output_paths(subject, prefix)["events"]
+        events_path = output_paths(subject, prefix, abbr=abbr)["events"]
     except ValueError:
         return {"error": "invalid subject or prefix", "events": [], "total": 0}
     if not events_path.is_file():
@@ -2679,29 +3402,109 @@ def read_run_events(subject: str, prefix: str, offset: int = 0,
     }
 
 
-def list_past_runs(limit: int = 60) -> list[dict]:
-    """Scan outputs/*/ for run_events.jsonl and return newest-first summaries."""
-    if not OUTPUTS_DIR.is_dir():
-        return []
-    found: list[tuple[float, Path, str, str]] = []
-    for subject_dir in OUTPUTS_DIR.iterdir():
-        if not subject_dir.is_dir() or subject_dir.name.startswith("_"):
-            continue
-        for prefix_dir in subject_dir.iterdir():
-            if not prefix_dir.is_dir():
+def output_roots() -> list[Path]:
+    """Every directory that may hold lecture outputs.
+
+    The shared ``outputs/`` root plus one root per subject profile, so a
+    subject that keeps its notes elsewhere is still found by the history
+    scan. Roots nested inside another root are dropped — otherwise the
+    same run would be reported twice.
+    """
+    roots: list[Path] = []
+
+    def _add(raw) -> None:
+        try:
+            resolved = Path(raw).resolve()
+        except (OSError, RuntimeError, TypeError):
+            return
+        if resolved not in roots:
+            roots.append(resolved)
+
+    _add(OUTPUTS_DIR)
+    for prof in all_profiles().values():
+        _add(prof.output_root)
+    # Keep only the outermost roots.
+    outermost: list[Path] = []
+    for root in roots:
+        nested = False
+        for other in roots:
+            if other == root:
                 continue
-            events = prefix_dir / f"{prefix_dir.name}_run_events.jsonl"
-            if not events.is_file():
-                # Fall back to any run-events file in the folder.
-                alts = sorted(prefix_dir.glob("*_run_events.jsonl"))
-                if not alts:
+            try:
+                root.relative_to(other)
+                nested = True
+                break
+            except ValueError:
+                continue
+        if not nested:
+            outermost.append(root)
+    return outermost
+
+
+def _iter_run_event_files(root: Path, max_depth: int = 5):
+    """Yield ``*_run_events.jsonl`` files under *root* (skips ``_`` dirs)."""
+    if not root.is_dir():
+        return
+    base_depth = len(root.parts)
+    for dirpath, dirnames, filenames in os.walk(root):
+        current = Path(dirpath)
+        dirnames[:] = [d for d in dirnames if not d.startswith("_")]
+        if len(current.parts) - base_depth >= max_depth:
+            dirnames[:] = []
+        for name in filenames:
+            if name.endswith("_run_events.jsonl"):
+                yield current / name
+
+
+def _identity_from_events(path: Path) -> tuple[str, str]:
+    """Subject + prefix recorded by the run that wrote *path*."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
                     continue
-                events = alts[-1]
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if ev.get("type") == "pipeline_start":
+                    return (str(ev.get("subject") or ""),
+                            str(ev.get("prefix") or ""))
+    except OSError:
+        pass
+    return ("", "")
+
+
+def _identity_from_path(root: Path, events: Path) -> tuple[str, str]:
+    """Fallback identity derived from the folder layout."""
+    try:
+        rel = events.parent.relative_to(root)
+    except ValueError:
+        return ("", "")
+    parts = rel.parts
+    if len(parts) >= 2:
+        return (parts[-2], parts[-1])
+    if len(parts) == 1:
+        return ("", parts[0])
+    return ("", "")
+
+
+def list_past_runs(limit: int = 60) -> list[dict]:
+    """Scan every output root for run events and return newest-first summaries."""
+    found: list[tuple[float, Path, str, str]] = []
+    for root in output_roots():
+        for events in _iter_run_event_files(root):
+            subject, prefix = _identity_from_events(events)
+            if not subject or not prefix:
+                subject, prefix = _identity_from_path(root, events)
+            if not prefix:
+                continue
             try:
                 mtime = events.stat().st_mtime
             except OSError:
                 continue
-            found.append((mtime, events, subject_dir.name, prefix_dir.name))
+            found.append((mtime, events, subject, prefix))
     found.sort(key=lambda t: t[0], reverse=True)
     return [
         summarize_run_events(path, subject, prefix)
@@ -2709,10 +3512,11 @@ def list_past_runs(limit: int = 60) -> list[dict]:
     ]
 
 
-def delete_past_run(subject: str, prefix: str, archive: bool = False) -> dict:
-    """Delete or archive an outputs/<subject>/<prefix>/ folder.
+def delete_past_run(subject: str, prefix: str, archive: bool = False,
+                    abbr: str | None = None) -> dict:
+    """Delete or archive a lecture's output folder.
 
-    Archive moves it under outputs/_archive/<subject>/<prefix>_<utc>/.
+    Archive moves it under ``<output root>/_archive/<subject>/<prefix>_<utc>/``.
     """
     import shutil
     from datetime import datetime, timezone
@@ -2723,19 +3527,20 @@ def delete_past_run(subject: str, prefix: str, archive: bool = False) -> dict:
         raise ValueError("subject and prefix required")
     if subject.startswith("_"):
         raise ValueError("invalid subject or prefix")
-    base = confine(OUTPUTS_DIR, subject, prefix)
+    prof = subject_profile(subject, abbr=abbr)
+    base = prof.output_dir(prefix, subject=subject)
     if base is None:
         raise ValueError("invalid subject or prefix")
     try:
-        base.relative_to(OUTPUTS_DIR.resolve())
+        base.relative_to(Path(prof.output_root).resolve())
     except ValueError as exc:
-        raise ValueError("path escapes outputs dir") from exc
+        raise ValueError("path escapes the subject's output root") from exc
     if not base.is_dir():
         raise ValueError(f"no output folder for {subject}/{prefix}")
 
     if archive:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        dest_root = OUTPUTS_DIR / "_archive" / subject
+        dest_root = Path(prof.output_root) / "_archive" / subject
         dest_root.mkdir(parents=True, exist_ok=True)
         dest = dest_root / f"{prefix}_{stamp}"
         if dest.exists():
@@ -2745,7 +3550,7 @@ def delete_past_run(subject: str, prefix: str, archive: bool = False) -> dict:
                 "subject": subject, "prefix": prefix}
 
     shutil.rmtree(base)
-    # Remove empty subject folder.
+    # Remove the empty parent folder when nothing else lives there.
     parent = base.parent
     try:
         if parent.is_dir() and not any(parent.iterdir()):

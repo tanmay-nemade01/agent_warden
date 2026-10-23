@@ -12,28 +12,25 @@ made the explanation understandable.
 ## How it works
 
 ```text
-Agent 1 (Extractor)          Agent 2 (Teaching Editor)     Agent 3 (Formatter)          Agent 4 (Enhancer) [OPTIONAL]
-─────────────────          ──────────────────           ───────────────────          ────────────────────────────
-Reads: SKILL_agent1_       Reads: SKILL_agent2_        Reads: SKILL_agent3_        Reads: SKILL_agent4_
-       extractor.md               enricher.md                 formatter.md                enhancer.md
+Agent 1 (Extractor)          Agent 2 (Teaching Editor)     Agent 3 (Formatter)
+─────────────────          ──────────────────           ───────────────────
+Reads: SKILL_agent1_       Reads: SKILL_agent2_        Reads: SKILL_agent3_
+       extractor.md               enricher.md                 formatter.md
 
-Input: raw .txt             Input: split dense draft     Input: split enriched draft  Input: Agent 3's final HTML
+Input: raw .txt             Input: split dense draft     Input: split enriched draft
        transcript                  (markdown sections)          (markdown + annotations)
 
-Does: exhaustive extraction,    Does: manifest closure,     Does: section-by-section     Does: opportunity audit,
-      PII stripping,               lecture-flow preservation,   HTML conversion,              web research for
-      teaching-moment manifest,    math reconciliation,         SEO metadata,                 external resources,
-      source anchors               selective teaching spine,    exam-summary rendering,       interactive widget
-                                   smart readability checks,    prerequisite HTML,            injection (playgrounds,
-                                   topic mapping YAML update    HTML/SEO lint gate            step-throughs, concept
-                                   (processed per-section)                                    checks, concept maps,
-                                                                                              visual diagrams),
-                                                                                              per-lecture CSS/JS
+Does: exhaustive extraction,    Does: manifest closure,     Does: section-by-section
+      PII stripping,               lecture-flow preservation,   HTML conversion,
+      teaching-moment manifest,    math reconciliation,         SEO metadata,
+      source anchors               selective teaching spine,    prerequisite HTML,
+                                   smart readability checks,    HTML/SEO lint gate
+                                   topic mapping YAML update
+                                   (processed per-section)
 
-Output: dense draft         Output: enriched sections    Output: <LecturePrefix>_notes.html   Output: <LecturePrefix>_notes.html (modified)
-        + manifest          (markdown + :::annotations)                                       + _enhancements.css
-                            + updated topic_mappings/*.yaml                                    + _enhancements.js
-                                                                                              + _enhancement_audit.json
+Output: dense draft         Output: enriched sections    Output: <LecturePrefix>_notes.html
+        + manifest          (markdown + :::annotations)
+                            + updated topic_mappings/*.yaml
 ```
 
 ## Topic Mapping
@@ -63,11 +60,8 @@ outputs/<Subject>/<LecturePrefix>/
 ├── <LecturePrefix>_notes_dense.md             ← Agent 1 output (exhaustive draft)
 ├── <LecturePrefix>_notes_enriched.md          ← Agent 2 output (enriched markdown)
 ├── sections/                                  ← Split sections, inventory, and traceable summaries
-└── <LecturePrefix>_notes/                     ← Agent 3 + Agent 4 output directory
-    ├── <LecturePrefix>_notes.html             ← Agent 3 HTML output (modified in-place by Agent 4)
-    ├── <LecturePrefix>_enhancements.css       ← Agent 4 per-lecture CSS (optional)
-    ├── <LecturePrefix>_enhancements.js        ← Agent 4 per-lecture JS (optional)
-    └── <LecturePrefix>_enhancement_audit.json ← Agent 4 audit report (optional)
+└── <LecturePrefix>_notes/                     ← Agent 3 output directory
+    └── <LecturePrefix>_notes.html             ← Agent 3 final HTML output
 ```
 
 All metadata, SEO tags (Open Graph, Twitter Cards, structured data), and lecture content are embedded directly in the single HTML file — **no companion `.json` files are created**. The BitsNotes viewer reads everything from the HTML itself via `<script id="lecture-metadata">`.
@@ -91,8 +85,6 @@ Run the process in the following sequence:
 2. "Use Agent 2 (enricher) to split <LecturePrefix>_notes_dense.md, close every essential manifest item section-by-section, preserve Q&A/correction flow, resolve all *[verify]* markers, apply only useful teaching-spine elements, assemble and re-split <LecturePrefix>_notes_enriched.md, then run lint_dense.py and verify_manifest.py --phase enriched. Treat readability warnings as advisory and never rewrite correct math to shorten text."
 
 3. "Use Agent 3 (formatter) to re-split <LecturePrefix>_notes_enriched.md, convert every section without inventing or dropping content, assemble strictly, read topic_mappings/<Subject>.yaml for prerequisite detection, run lint.py, and produce the final HTML under <LecturePrefix>_notes/. Return placeholders or missing instructional content to Agent 2."
-
-4. (OPTIONAL) "Use Agent 4 (enhancer) to audit <LecturePrefix>_notes.html for interactive enhancement & diagram opportunities, present the audit for approval, then inject approved elements (parameter playgrounds, algorithm step-throughs, concept checks, curated external resources, concept maps, visual diagrams/flowcharts) directly into <LecturePrefix>_notes.html with per-lecture CSS/JS files. If no content qualifies for enhancement, stop after the audit."
 ```
 
 ## What's inside
@@ -102,7 +94,6 @@ make-transcript-notes-kit-3agent/
 ├── SKILL_agent1_extractor.md  ← Agent 1: Exhaustive extraction
 ├── SKILL_agent2_enricher.md   ← Agent 2: Teaching editor + manifest closure
 ├── SKILL_agent3_formatter.md  ← Agent 3: Format-only HTML + SEO + lint
-├── SKILL_agent4_enhancer.md   ← Agent 4: Interactive enhancements (optional post-processor)
 ├── templates/
 │   └── notes.html             ← HTML template (with {{PREREQUISITE_KNOWLEDGE}})
 ├── scripts/
@@ -114,7 +105,6 @@ make-transcript-notes-kit-3agent/
 │   ├── topic_mapping_utils.py ← YAML parser + coverage search (acronym-aware)
 │   └── update_topic_mapping.py ← YAML updater (called by Agent 2)
 └── references/
-    ├── enhancements_reference.css ← Reference CSS for Agent 4 interactive widgets (theme-matched)
     └── prompts.md                 ← Prompt cookbook
 
 Workspace root (shared):

@@ -164,7 +164,7 @@ Capture these FULLY:
 - Which textbook chapters to focus on
 - Which topics get more marks and why
 
-**Format as:** Collect all exam guidance into a dedicated section at the end, but ALSO annotate inline where relevant (e.g., "Exam note: expect a 4-mark numerical here").
+**Format as:** Annotate inline where relevant (e.g., "Exam note: expect a 4-mark numerical here") directly alongside the corresponding concept in the main notes. Do NOT create a separate study guide section, exam guidance summary, or dedicated appendix at the end — only the main lecture notes should be there.
 
 ### Dimension 7 — Professor Pedagogical Moments
 
@@ -538,9 +538,6 @@ Save your output to the file `<LecturePrefix>_notes_dense.md` (creating it if it
   [same structure]
 
 ...
-
-## Exam Guidance Summary
-  [consolidated exam info]
 
 ## Key Industry Applications
   [consolidated real-world connections]

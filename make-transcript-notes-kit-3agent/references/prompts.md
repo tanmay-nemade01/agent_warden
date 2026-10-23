@@ -69,13 +69,6 @@ In the notes for <Lecture Name>, add 2-3 fully-worked examples for
 callouts. Each must end with a one-sentence sense-check.
 ```
 
-## Exam-prep edition
-```text
-Regenerate the exam revision notes from the core content of <Lecture Name>.
-One .exam-revision-entry per major concept with must-know, key formula,
-#1 pitfall, self-check, and connections. Built from the core — never invent.
-```
-
 ## Fix lint failures
 ```text
 lint.py reported FAILs on <path>. Fix every FAIL and re-run until it passes.

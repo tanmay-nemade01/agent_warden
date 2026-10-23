@@ -92,3 +92,48 @@ def resolve_under(root: Path | str, path: str | Path | None) -> Path | None:
     except (ValueError, OSError, RuntimeError, TypeError):
         return None
     return resolved
+
+
+def resolve_configured(base: Path | str, path: str | Path | None) -> Path | None:
+    """Resolve a *configured* path that may be absolute or relative to *base*.
+
+    Unlike :func:`resolve_under` an absolute path is allowed even when it
+    sits outside *base* — companion docs and transcript sources may live on
+    another drive. A relative path is still confined to *base* and may not
+    contain separators that escape it.
+    """
+    if path is None:
+        return None
+    raw = str(path).strip()
+    if not raw:
+        return None
+    try:
+        base_p = Path(base).resolve()
+        p = Path(raw)
+        if p.is_absolute():
+            return p.resolve()
+        parts = [s for s in p.parts if s not in {".", ""}]
+        if not parts:
+            return None
+        for seg in parts:
+            if seg == "..":
+                return None
+        return base_p.joinpath(*parts).resolve()
+    except (ValueError, OSError, RuntimeError, TypeError):
+        return None
+
+
+def rel_glob(base: Path | str, target: Path | str) -> str | None:
+    """Return *target* as a path relative to *base*, or ``None`` if it escapes.
+
+    The result uses forward slashes so it can be used directly as an
+    OpenCode / Command Code permission glob (``<rel>/**``).
+    """
+    try:
+        base_p = Path(base).resolve()
+        target_p = Path(target).resolve()
+        rel = target_p.relative_to(base_p)
+    except (ValueError, OSError, RuntimeError, TypeError):
+        return None
+    text = rel.as_posix()
+    return text or "."

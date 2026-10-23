@@ -76,15 +76,7 @@ For each `section_XX.md` (starting from `section_01.md`, and including `section_
      "analogy": "Professor analogy description, or null",
      "manifest_items_closed": ["L.T.qna.1", "L.T.moment.1"],
      "manifest_items_escalated": [],
-     "verify_markers_resolved": 2,
-     "exam_revision": {
-       "mustKnow": "Exact takeaway distilled from this section",
-       "keyFormula": "\\[copied reconciled formula, or empty string\\]",
-       "commonPitfall": "Pitfall stated in this section",
-       "quickCheck": "Question answerable from this section",
-       "connections": ["Related concept ID"],
-       "source_manifest_items": ["L.T.formula.1", "L.T.moment.1"]
-     }
+     "verify_markers_resolved": 2
    }
    ```
 
@@ -121,7 +113,7 @@ Do not process multiple sections in parallel — do them one at a time to mainta
    a. Scan the assembled `<LecturePrefix>_notes_enriched.md` (or the section files) and compile a flat list of every major topic covered using the section hierarchy.
       - Every `##` (section title) becomes a topic entry, formatted as `lecture_number.topic_number Title` (e.g., `5.1 Concept Name` if processing Lecture 5).
       - Every `###` (subsection title) becomes a sub-topic entry, formatted as `lecture_number.topic_number.sub_topic_number Title` (e.g., `5.1.1 Sub-concept Name`).
-      - Only include real topics (skip appendices like "Exam Guidance Summary" and "Key Industry Applications").
+      - Only include real topics (skip appendices like "Key Industry Applications"). Note: do not create or maintain revision notes, study guide sections, or exam guidance summary sections.
    b. Write these formatted topics (one per line) to a temporary text file named `topics_list.txt` in the workspace root.
    c. Run the topic mapping update script:
       ```bash
@@ -133,7 +125,7 @@ Do not process multiple sections in parallel — do them one at a time to mainta
    d. Delete the temporary `topics_list.txt` file.
    e. Confirm that the corresponding subject topic mapping YAML file (e.g., inside `topic_mappings/`) is successfully updated or created. Note that the update script resolves names robustly and may write to a normalized filename (for example, updating `Deep Neural Networks.yaml` when `<Subject>` is passed as `DNN` or `Deep_Neural_Networks`).
 
-Clean up any other helper files or scripts, but keep `sections/` and every `section_XX_summary.json`; Agent 3 needs the summaries to render traceable exam revision entries, and they remain as audit artifacts:
+Clean up any other helper files or scripts, but keep `sections/` and every `section_XX_summary.json` as audit artifacts:
 Ensure that ONLY `<LecturePrefix>_notes_dense.md`, `<LecturePrefix>_notes_enriched.md`, `<LecturePrefix>_extraction_manifest.json`, and the `sections/` directory (with section files and summaries) remain in the lecture folder.
 
 ---
@@ -420,7 +412,7 @@ An enriched markdown file with:
 - Every `*[verify]*` marker from Agent 1 resolved; unresolved uncertainty stops handoff
 - All prose in easy language
 - No HTML tags yet (Agent 3 handles that)
-- **Appendix sections carried through from Agent 1** (Exam Guidance Summary, Key Industry Applications) if the current section is an appendix section — enriched lightly, never dropped. **Title must be clean** (e.g., "Exam Guidance Summary", not "Exam Guidance Summary (Enriched)").
+- **Appendix sections carried through from Agent 1** (e.g., Key Industry Applications) if applicable — enriched lightly, never dropped. Do NOT create or carry through any study guide section, Exam Guidance Summary, or revision notes. Only the main lecture notes should be there.
 - **NO pipeline jargon, agent names, callout legends, enrichment source attribution, or course codes in the output** — see core rule 8.
 - **NO extraction checklist, quality checklist, verification list, or any intermediate metadata.**
 
@@ -431,7 +423,6 @@ An enriched markdown file with:
 When you finish, the output is ready for Agent 3 (Formatter), who will:
 - Convert your callout annotations to proper HTML `<div class="...">` tags
 - Fill the HTML template with all SEO metadata
-- Render the traceable `exam_revision` objects from section summaries
 - Run the lint gate and self-score against the rubric
 - Stop if any `*[verify]*` marker somehow reaches Phase 3
 

@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 from . import config, gates, permissions
-from .paths import confine, resolve_under
+from .paths import rel_glob, resolve_configured
 
 AGENTS = {1: "extractor", 2: "enricher", 3: "formatter"}
 
@@ -28,6 +28,7 @@ _COMMON_ADAPT = """\
 
 - Working directory (cwd): {workspace} — relative paths below resolve from here.
 - Output directory (create it if missing): {out}
+- Output directory relative to cwd: {out_rel}
 - Toolkit root (READ and RUN scripts only — never write here): {toolkit}
 - Lecture number: {lecture_num}
 - Subject: {subject} ({abbr})
@@ -132,22 +133,15 @@ class Pipeline:
                  transcript: str, phases: list[int] | None = None,
                  emit=None, docs_dir: str | None = None, run_id: str = "",
                  model: str | None = None, variant: str | None = None,
-                 backend: str | None = None, fast: bool | None = None):
+                 backend: str | None = None, fast: bool | None = None,
+                 extra_instructions: dict[int | str, str] | None = None):
         self.subject = subject
         self.abbr = abbr
         self.prefix = prefix
         self.lecture_num = lecture_num
-        resolved_t = resolve_under(config.TRANSCRIPTS_DIR, transcript)
-        if resolved_t is None:
-            # Allow an already-absolute path that still sits under workspace
-            # transcripts, or a path the UI listed.
-            raw = Path(transcript)
-            try:
-                resolved_t = raw.resolve()
-                resolved_t.relative_to(config.TRANSCRIPTS_DIR.resolve())
-            except (ValueError, OSError):
-                raise PhaseError(
-                    f"transcript is not under {config.TRANSCRIPTS_DIR}") from None
+        self.extra_instructions = extra_instructions or {}
+        self.profile = config.subject_profile(subject, abbr=abbr)
+        resolved_t = self._resolve_transcript(transcript)
         self.transcript = str(resolved_t)
         self.phases = [p for p in (phases or [1, 2, 3]) if p in AGENTS]
         self.emit = emit or (lambda ev: None)
@@ -156,10 +150,14 @@ class Pipeline:
         self.backend = config.normalize_backend(backend)
         self.model, self.variant = config.resolve_model_choice(
             model, variant, backend=self.backend)
-        out = confine(config.OUTPUTS_DIR, subject, prefix)
+        out = self.profile.output_dir(prefix, subject=subject)
         if out is None:
             raise PhaseError("invalid subject or prefix")
         self.out = out
+        self.out_rel = rel_glob(config.WORKSPACE, out) or str(out)
+        self.output_rel = config.output_rel_path(subject, prefix, abbr=abbr)
+        self.write_roots = self.profile.write_roots()
+        self.topic_mapping = self.profile.resolve_topic_mapping()
         self.proc: subprocess.Popen | None = None
         self.stop_flag = False
         self.run_log: Path | None = None
@@ -192,6 +190,25 @@ class Pipeline:
     def get_phase_retries(self) -> dict[str, int]:
         return {AGENTS[k]: self.stage_retries.get(k, 0) for k in (1, 2, 3)}
 
+    def _resolve_transcript(self, transcript: str) -> Path:
+        """Resolve the transcript inside this subject's transcripts folder.
+
+        A subject may own a folder of its own (inside or outside the
+        workspace); transcripts outside it are refused so a run can never
+        pick up another subject's material.
+        """
+        base = Path(self.profile.transcripts_dir).resolve()
+        raw = Path(str(transcript).strip())
+        if not raw.is_absolute():
+            raw = base / raw
+        try:
+            resolved = raw.resolve()
+            resolved.relative_to(base)
+        except (ValueError, OSError, RuntimeError):
+            raise PhaseError(
+                f"transcript is not under {base}") from None
+        return resolved
+
 
     # ------------------------------------------------------------------ utils
     def _log(self, ev: dict):
@@ -205,20 +222,72 @@ class Pipeline:
                 pass
 
     def _default_docs_dir(self) -> Path | None:
-        """Resolve a default companion-docs folder by name scan — no
-        hardcoded mapping, so new subject folders just work."""
-        return config.default_docs_dir(self.abbr, self.subject)
+        """Resolve the subject's companion-docs folder.
+
+        Uses the profile's explicit ``docs_dir`` when set; otherwise falls
+        back to the name scan under companion_docs/ — no hardcoded mapping,
+        so new subject folders just work.
+        """
+        return self.profile.resolve_docs()
 
     def _docs_line(self) -> str:
         if self.docs_dir == "__none__":
             return "(none selected — enrich from the draft and web research if needed)"
         if self.docs_dir and self.docs_dir != "__none__":
-            docs_dir = resolve_under(config.WORKSPACE, self.docs_dir)
+            docs_dir = resolve_configured(config.WORKSPACE, self.docs_dir)
             if docs_dir and docs_dir.is_dir():
                 return str(docs_dir)
             return "(selected folder missing — enrich from the draft)"
         doc_root = self._default_docs_dir()
         return str(doc_root) if doc_root else "(no companion-docs folder for this subject)"
+
+    def _get_phase_extra_instructions(self, agent: int) -> str:
+        if not self.extra_instructions:
+            return ""
+        phase_name = AGENTS.get(agent, "")
+        val = (self.extra_instructions.get(agent)
+               or self.extra_instructions.get(str(agent))
+               or (self.extra_instructions.get(phase_name) if phase_name else "")
+               or "")
+        if isinstance(val, str):
+            return val.strip()
+        return ""
+
+    def _path_override_note(self) -> str:
+        """Tell the agent when this subject's folders differ from the skill.
+
+        The SKILL files spell the output location as
+        ``outputs/<Subject>/<LecturePrefix>/``. A subject profile may put
+        the lecture somewhere else, so the exact substitution is spelled
+        out — otherwise the agent would write to the canonical path while
+        the orchestrator gates a different one.
+        """
+        notes: list[str] = []
+        canonical = f"outputs/{self.subject}/{self.prefix}"
+        if self.out_rel.replace("\\", "/") != canonical:
+            notes.append(
+                f"- PATH OVERRIDE: this subject does NOT use the skill's "
+                f"default `outputs/<Subject>/<LecturePrefix>/` folder. "
+                f"Every path of the form `outputs/<Subject>/<LecturePrefix>/...` "
+                f"means `{self.out_rel}/...` for this run. Use the exact "
+                f"absolute paths below and nothing else."
+            )
+        topic = self.topic_mapping
+        default_topic = config.TOPIC_MAPPINGS_DIR / f"{self.subject}.yaml"
+        if topic is not None:
+            try:
+                differs = topic.resolve() != default_topic.resolve()
+            except OSError:
+                differs = True
+            if differs:
+                notes.append(
+                    f"- PATH OVERRIDE: the subject topic mapping YAML is at "
+                    f"`{topic}` — not at `topic_mappings/{self.subject}.yaml`. "
+                    f"Read and update that exact file."
+                )
+        if not notes:
+            return ""
+        return "\n".join(notes) + "\n"
 
     def _agent_message(self, agent: int, extra: str = "") -> str:
         skill = config.skill_path(agent)
@@ -234,6 +303,7 @@ class Pipeline:
             workspace=config.WORKSPACE,
             transcript=self.transcript,
             out=self.out,
+            out_rel=self.out_rel,
             toolkit=config.TOOLKIT,
             lecture_num=self.lecture_num,
             subject=self.subject,
@@ -244,9 +314,23 @@ class Pipeline:
             enriched=enriched,
             html=html,
         )
+        override = self._path_override_note()
+        if override:
+            adapt = adapt.replace(
+                "- Toolkit root (READ and RUN scripts only — never write here):",
+                override + "- Toolkit root (READ and RUN scripts only — never write here):",
+                1)
+        phase_extra = self._get_phase_extra_instructions(agent)
+        extra_block = ""
+        if phase_extra:
+            phase_name = AGENTS.get(agent, f"Phase {agent}").capitalize()
+            extra_block = (
+                f"\n## Subject-Specific Extra Instructions ({self.subject} - {phase_name} Phase)\n"
+                f"{phase_extra}\n"
+            )
         return (f"Read the skill file at {skill} and follow its instructions "
                 f"exactly. It defines your role and the complete process.\n\n"
-                f"{docs_note}{adapt}\n{extra}")
+                f"{docs_note}{adapt}{extra_block}\n{extra}")
 
     # Payloads that can carry large tool outputs / reasoning text.
     EVENT_TEXT_CAP = 6000          # chars kept per event field
@@ -255,8 +339,29 @@ class Pipeline:
     def _ensure_job_files(self) -> dict[str, Path]:
         if self._job_files is None:
             self.out.mkdir(parents=True, exist_ok=True)
-            self._job_files = permissions.write_job_configs(self.out)
+            self._job_files = permissions.write_job_configs(
+                self.out, self.write_roots)
         return self._job_files
+
+    def _profile_env(self) -> dict[str, str]:
+        """Environment overrides implied by the subject's profile.
+
+        The toolkit's topic-mapping helper looks in a fixed directory
+        unless ``BITSNOTES_TOPIC_MAPPINGS_DIR`` says otherwise — a subject
+        whose YAML lives elsewhere needs that redirect.
+        """
+        env: dict[str, str] = {}
+        topic = self.topic_mapping
+        if topic is None:
+            return env
+        default_dir = config.TOPIC_MAPPINGS_DIR
+        try:
+            same = topic.parent.resolve() == default_dir.resolve()
+        except OSError:
+            same = True
+        if not same:
+            env["BITSNOTES_TOPIC_MAPPINGS_DIR"] = str(topic.parent)
+        return env
 
     def _timeout_watch(self, proc: subprocess.Popen):
         deadline = time.time() + config.PHASE_TIMEOUT_SECONDS
@@ -284,6 +389,7 @@ class Pipeline:
                extra_env: dict | None = None,
                cwd: str | None = None) -> None:
         env = dict(os.environ)
+        env.update(self._profile_env())
         if extra_env:
             env.update(extra_env)
         kwargs: dict = {
@@ -447,20 +553,20 @@ class Pipeline:
         job = self._ensure_job_files()
         job["prompt"].write_text(message, encoding="utf-8")
         exe = config.find_opencode()
-        cmd = [exe, "run", "--auto", "-m", self.model]
-        if self.variant:
-            cmd.extend(["--variant", self.variant])
-        cmd.extend([
-            "--format", "json", "--thinking",
-            "--dir", str(config.WORKSPACE),
-        ])
+        # OpenCode v2 CLI syntax:
+        # Variant is passed via `#variant` in `--model` / `-m` (e.g. `provider/model#variant`).
+        # The `--variant` and `--dir` flags are removed in v2. The working directory is passed via `cwd`.
+        model_spec = self.model
+        if self.variant and "#" not in model_spec:
+            model_spec = f"{model_spec}#{self.variant}"
+        cmd = [exe, "run", "--auto", "-m", model_spec, "--format", "json", "--thinking"]
         if session_id:
             # Pin the id — never `--continue` (that is "last session" and
             # races under parallel runs).
             cmd.extend(["--session", session_id])
         else:
             cmd.extend(["--title", title, "--file", str(job["prompt"])])
-        env = permissions.opencode_env(job["opencode"])
+        env = permissions.opencode_env(job["opencode"], self.write_roots)
         if extra_env:
             env.update(extra_env)
         self._last_step_reason = ""
@@ -699,8 +805,13 @@ class Pipeline:
                            "tool_use", "text"}:
             return None
         part = raw.get("part") or {}
+        # V2 tool calls carry their call ID in `part.id` (e.g. "call_...").
+        # Keep it as `callID` for the UI, which keys live tool cards on
+        # `part.callID || part.id`.
+        if ev_type == "tool_use" and not part.get("callID") and part.get("id"):
+            part = {**part, "callID": part.get("id")}
         part = {k: v for k, v in part.items()
-                if k not in {"id", "messageID", "sessionID"}}
+                if k not in {"messageID", "sessionID"}}
         if ev_type == "reasoning":
             text = part.get("text")
             if isinstance(text, str) and len(text) > Pipeline.EVENT_TEXT_CAP:
@@ -715,6 +826,12 @@ class Pipeline:
             state = part.get("state") or {}
             state = {k: v for k, v in state.items()
                      if k not in {"metadata"}}
+            # Failed tools report `state.error` with no `state.output`;
+            # surface the error where the UI looks for output.
+            if not isinstance(state.get("output"), str) and state.get("error"):
+                err = state.get("error")
+                state["output"] = err if isinstance(err, str) else json.dumps(
+                    err, ensure_ascii=False)
             out = state.get("output")
             if isinstance(out, str) and len(out) > Pipeline.EVENT_TOOL_OUTPUT_CAP:
                 state["output"] = out[:Pipeline.EVENT_TOOL_OUTPUT_CAP]
@@ -2427,8 +2544,8 @@ class Pipeline:
             f"Check if {html} already exists and passes all checks. If not, "
             f"format {enriched} into {html} exactly as the skill specifies — "
             "split, convert sections, assemble the body, fill the "
-            f"templates/notes.html placeholders including metadata, exam "
-            "revision and prerequisite knowledge from the topic mapping YAML, "
+            f"templates/notes.html placeholders including metadata and "
+            "prerequisite knowledge from the topic mapping YAML, "
             "then run lint.py and the manifest verifier (phase html) until "
             "both pass."))
         code, _ = self._run_agent(3, msg, f"formatter {self.prefix}")
@@ -2563,7 +2680,10 @@ class Pipeline:
                    "transcript": self.transcript, "phases": self.phases,
                    "backend": self.backend,
                    "model": self.model, "variant": self.variant,
+                   "out_dir": str(self.out), "out_rel": self.out_rel,
+                   "output_rel": self.output_rel,
                    "stage_retries": max_retries,
+                   "extra_instructions": self.extra_instructions,
                    "phase_retries": self.get_phase_retries()})
 
         self.stage_retries = {num: 0 for num in (1, 2, 3)}

@@ -16,8 +16,6 @@ transcript.txt
     → Agent 3 Formatter   → <prefix>_notes/<prefix>_notes.html
 ```
 
-Agent 4 (interactive enhancer) is optional and skipped by Notes Studio.
-
 ---
 
 ## What you need
@@ -113,7 +111,7 @@ Each agent should run in a **fresh** session with only its skill file loaded. Fu
 
 1. **Agent 1** — attach `SKILL_agent1_extractor.md` and one cleaned transcript. Writes `outputs/<Subject>/<Prefix>/` dense draft + manifest.
 2. **Agent 2** — attach `SKILL_agent2_enricher.md`, the dense draft, and `companion_docs/<ABBR>/`. Writes enriched markdown, splits sections, updates `topic_mappings/<Subject>.yaml`.
-3. **Agent 3** — attach `SKILL_agent3_formatter.md` and the enriched draft. Converts sections to HTML, adds SEO / exam revision / prerequisites, runs `lint.py`.
+3. **Agent 3** — attach `SKILL_agent3_formatter.md` and the enriched draft. Converts sections to HTML, adds SEO / prerequisites, runs `lint.py`.
 
 Output layout:
 

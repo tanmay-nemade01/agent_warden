@@ -1,8 +1,11 @@
 """Per-job agent permission fences.
 
-OpenCode: a temp ``opencode.json`` plus ``OPENCODE_CONFIG`` /
-``OPENCODE_CONFIG_CONTENT`` / ``OPENCODE_PERMISSION``. Keep ``--auto``.
-Command Code: deny/allow lists that still apply under ``--yolo``.
+OpenCode v2: a temp ``opencode.json`` plus ``OPENCODE_CONFIG`` /
+``OPENCODE_CONFIG_CONTENT``. Permissions use the native v2 shape —
+an ordered ``permissions`` array of ``{action, resource, effect}``
+(last match wins; ``shell`` replaces v1 ``bash``, ``subagent`` replaces
+v1 ``task``). Keep ``--auto`` so anything not explicitly denied runs
+unattended. Command Code: deny/allow lists that still apply under ``--yolo``.
 """
 from __future__ import annotations
 
@@ -12,34 +15,41 @@ from pathlib import Path
 
 TOOLKIT_REL = "make-transcript-notes-kit-3agent"
 
+#: Where agents may write when a subject has no profile of its own.
+DEFAULT_WRITE_ROOTS = ("outputs/**", "topic_mappings/**")
 
-def opencode_permission_block() -> dict:
-    """Last matching rule wins — catch-all deny, then allow outputs/YAML."""
-    return {
-        "question": "deny",
-        "task": "deny",
-        "read": {
-            "*": "allow",
-            "*.env": "deny",
-            "*.env.*": "deny",
-            "*.env.example": "allow",
-        },
-        "edit": {
-            "*": "deny",
-            f"{TOOLKIT_REL}/**": "deny",
-            "*.env": "deny",
-            "*.env.*": "deny",
-            "outputs/**": "allow",
-            "topic_mappings/**": "allow",
-        },
-        "bash": {
-            "*": "allow",
-            f"python {TOOLKIT_REL}/scripts/*.py *": "allow",
-            f"python.exe {TOOLKIT_REL}/scripts/*.py *": "allow",
-            f"* > *{TOOLKIT_REL}*": "deny",
-            f"* >> *{TOOLKIT_REL}*": "deny",
-        },
-    }
+
+def opencode_permission_block(write_roots: list[str] | None = None) -> list[dict]:
+    """Ordered v2 permission rules — last matching rule wins.
+
+    Catch-all edit deny first, then allow the subject's own write roots
+    (output tree + topic mappings); shell allowlist with toolkit-redirect
+    denies; never interrupt with questions or spawn subagents from these
+    headless phases.
+    """
+    roots = [r for r in (write_roots or DEFAULT_WRITE_ROOTS) if r]
+    block = [
+        {"action": "read", "resource": "*", "effect": "allow"},
+        {"action": "read", "resource": "*.env", "effect": "deny"},
+        {"action": "read", "resource": "*.env.*", "effect": "deny"},
+        {"action": "read", "resource": "*.env.example", "effect": "allow"},
+        {"action": "edit", "resource": "*", "effect": "deny"},
+        {"action": "edit", "resource": f"{TOOLKIT_REL}/**", "effect": "deny"},
+        {"action": "edit", "resource": "*.env", "effect": "deny"},
+        {"action": "edit", "resource": "*.env.*", "effect": "deny"},
+    ]
+    for root in roots:
+        block.append({"action": "edit", "resource": root, "effect": "allow"})
+    block.extend([
+        {"action": "shell", "resource": "*", "effect": "allow"},
+        {"action": "shell", "resource": f"python {TOOLKIT_REL}/scripts/*.py *", "effect": "allow"},
+        {"action": "shell", "resource": f"python.exe {TOOLKIT_REL}/scripts/*.py *", "effect": "allow"},
+        {"action": "shell", "resource": f"* > *{TOOLKIT_REL}*", "effect": "deny"},
+        {"action": "shell", "resource": f"* >> *{TOOLKIT_REL}*", "effect": "deny"},
+        {"action": "question", "resource": "*", "effect": "deny"},
+        {"action": "subagent", "resource": "*", "effect": "deny"},
+    ])
+    return block
 
 
 def _base_opencode_config() -> dict:
@@ -60,15 +70,21 @@ def _base_opencode_config() -> dict:
     return {}
 
 
-def opencode_config() -> dict:
+def opencode_config(write_roots: list[str] | None = None) -> dict:
     cfg = _base_opencode_config().copy()
     cfg["$schema"] = "https://opencode.ai/config.json"
-    cfg["permission"] = opencode_permission_block()
+    cfg["permissions"] = opencode_permission_block(write_roots)
+    cfg.pop("permission", None)
     return cfg
 
 
-def commandcode_permissions() -> dict:
+def commandcode_permissions(write_roots: list[str] | None = None) -> dict:
     """Deny beats allow, including under ``--yolo`` / bypass."""
+    roots = [r for r in (write_roots or DEFAULT_WRITE_ROOTS) if r]
+    allow = []
+    for root in roots:
+        allow.append(f"Edit({root})")
+        allow.append(f"Write({root})")
     return {
         "deny": [
             f"Edit({TOOLKIT_REL}/**)",
@@ -80,19 +96,15 @@ def commandcode_permissions() -> dict:
             "Read(*.env)",
             "Read(*.env.*)",
         ],
-        "allow": [
-            "Edit(outputs/**)",
-            "Write(outputs/**)",
-            "Edit(topic_mappings/**)",
-            "Write(topic_mappings/**)",
+        "allow": allow + [
             f"Shell(python {TOOLKIT_REL}/scripts/*.py *)",
             f"Shell(python.exe {TOOLKIT_REL}/scripts/*.py *)",
         ],
     }
 
 
-def commandcode_settings() -> dict:
-    return {"permissions": commandcode_permissions()}
+def commandcode_settings(write_roots: list[str] | None = None) -> dict:
+    return {"permissions": commandcode_permissions(write_roots)}
 
 
 def claude_allowed_tools() -> str:
@@ -125,29 +137,37 @@ def cursor_sandbox_args() -> list[str]:
     return ["-p", "--output-format", "stream-json", "--force"]
 
 
-def write_job_configs(out_dir: Path) -> dict[str, Path]:
+def write_job_configs(out_dir: Path,
+                      write_roots: list[str] | None = None) -> dict[str, Path]:
     """Write per-run config files under the lecture output tree (writable)."""
     job = Path(out_dir) / "_job"
     job.mkdir(parents=True, exist_ok=True)
     oc = job / "opencode.json"
     cc = job / "commandcode-settings.json"
     prompt = job / "prompt.txt"
-    oc.write_text(json.dumps(opencode_config(), indent=2) + "\n", encoding="utf-8")
-    cc.write_text(json.dumps(commandcode_settings(), indent=2) + "\n",
+    oc.write_text(json.dumps(opencode_config(write_roots), indent=2) + "\n",
+                  encoding="utf-8")
+    cc.write_text(json.dumps(commandcode_settings(write_roots), indent=2) + "\n",
                   encoding="utf-8")
     return {"dir": job, "opencode": oc, "commandcode": cc, "prompt": prompt}
 
 
-def opencode_env(config_path: Path) -> dict[str, str]:
+def opencode_env(config_path: Path,
+                 write_roots: list[str] | None = None,
+                 extra_env: dict[str, str] | None = None) -> dict[str, str]:
     from . import config
-    blob = json.dumps(opencode_config())
-    return {
+    # The inline content must match the file it points at, otherwise the
+    # subject's own write roots would be replaced by the defaults.
+    blob = json.dumps(opencode_config(write_roots))
+    env = {
         "OPENCODE_CONFIG": str(config_path),
         "OPENCODE_CONFIG_CONTENT": blob,
-        "OPENCODE_PERMISSION": json.dumps(opencode_permission_block()),
         # Without this, OpenCode sends max_tokens=32000 even when the
         # model catalog allows far more (DeepSeek V4 output=384000).
         # OpenCode still clamps with min(catalog_output, this value).
         "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX": str(
             config.OPENCODE_OUTPUT_TOKEN_MAX),
     }
+    if extra_env:
+        env.update(extra_env)
+    return env
