@@ -8,10 +8,12 @@ Usage:
     from topic_mapping_utils import load_topic_map, find_previous_coverage
 """
 
+import json
 import os
 import re
 import sys
 import html
+from urllib.parse import quote
 
 # Force UTF-8 encoding for standard output/error on Windows to prevent UnicodeEncodeError
 if sys.platform.startswith("win"):
@@ -32,20 +34,112 @@ TOPIC_MAPPINGS_DIR = os.path.abspath(
 # YAML loading
 # ---------------------------------------------------------------------------
 
-def _parse_yaml(text):
+SUBJECTS_JSON = os.environ.get(
+    "BITSNOTES_SUBJECTS_JSON",
+    os.path.abspath(os.path.join(TOPIC_MAPPINGS_DIR, "..", "subjects.json")),
+)
+
+
+class TopicMapParseError(ValueError):
+    """Raised when an existing topic map file exists but cannot be parsed."""
+
+
+def _parse_yaml(text, path=None, strict=False):
     """Parse a topic_mapping YAML string into a dict.
 
     Uses PyYAML (yaml.safe_load).
 
     Returns:
         dict with keys like subject_name, lectures (list of lecture dicts)
-        or None if parse fails.
+        or None if parse fails. When ``strict`` is True a parse failure raises
+        :class:`TopicMapParseError` instead of returning None, so callers can
+        distinguish "missing file" from "corrupt file".
     """
     import yaml
     try:
         return yaml.safe_load(text)
-    except Exception:
+    except Exception as exc:
+        if strict:
+            label = path or "<string>"
+            raise TopicMapParseError(
+                f"Refusing to treat unparseable topic map as missing: {label}: {exc}"
+            ) from exc
         return None
+
+
+def _load_subjects_map():
+    """Load the canonical subjects.json mapping (acronym -> full name)."""
+    try:
+        with open(SUBJECTS_JSON, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {
+        str(key).strip(): str(value).strip()
+        for key, value in data.items()
+        if str(key).strip() and str(value).strip()
+    }
+
+
+def _normalize_name(value):
+    return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
+
+
+def resolve_subject_name(subject_name):
+    """Resolve a subject name/acronym to its canonical display name.
+
+    Uses ``subjects.json`` when it exists (it is the canonical map shared with
+    the site). Returns None when the name is not listed, so callers can fall
+    back to the legacy fuzzy matcher.
+    """
+    if not subject_name:
+        return None
+    clean = str(subject_name).strip()
+    if clean.lower().endswith((".yaml", ".yml")):
+        clean = clean.rsplit(".", 1)[0]
+
+    subjects = _load_subjects_map()
+    if not subjects:
+        return None
+
+    normalized = _normalize_name(clean)
+    for acronym, full_name in subjects.items():
+        if normalized in {_normalize_name(acronym), _normalize_name(full_name)}:
+            return full_name
+    return None
+
+
+def find_topic_map_path(subject_name):
+    """Return the existing YAML path for a subject, or None if absent.
+
+    Unlike :func:`load_topic_map`, this never parses the file, so callers can
+    detect a corrupt-but-present topic map before overwriting it.
+    """
+    if not subject_name or not os.path.isdir(TOPIC_MAPPINGS_DIR):
+        return None
+
+    clean = str(subject_name)
+    if clean.lower().endswith((".yaml", ".yml")):
+        clean = clean.rsplit(".", 1)[0]
+
+    candidates = [clean]
+    canonical = resolve_subject_name(clean)
+    if canonical and canonical != clean:
+        candidates.insert(0, canonical)
+
+    for name in candidates:
+        for ext in (".yaml", ".yml"):
+            path = os.path.join(TOPIC_MAPPINGS_DIR, name + ext)
+            if os.path.exists(path):
+                return path
+
+    for candidate in os.listdir(TOPIC_MAPPINGS_DIR):
+        if not (candidate.endswith(".yaml") or candidate.endswith(".yml")):
+            continue
+        stem = candidate.rsplit(".", 1)[0]
+        if any(is_subject_match(name, stem) for name in candidates):
+            return os.path.join(TOPIC_MAPPINGS_DIR, candidate)
+    return None
 
 
 def clean_string_to_words(s):
@@ -93,17 +187,20 @@ def is_subject_match(name1, name2):
     return False
 
 
-def load_topic_map(subject_name):
+def load_topic_map(subject_name, strict=False):
     """Load a topic_mapping YAML file by subject name.
 
-    Tries direct filename match first (e.g. "Machine Learning" -> "Machine
-    Learning.yaml"). If that fails, scans ALL YAML files in the directory
-    and matches by the ``subject_name`` field inside each file or by filename.
+    Tries the canonical ``subjects.json`` name first, then a direct filename
+    match (e.g. "Machine Learning" -> "Machine Learning.yaml"). If that fails,
+    scans ALL YAML files in the directory and matches by the ``subject_name``
+    field inside each file or by filename.
 
     Args:
         subject_name: e.g. "Artificial Computational Intelligence" or
                       "Artificial Computational Intelligence.yaml" or
                       "ACI" (acronym that matches a file like ACI.yaml)
+        strict: when True, an existing-but-unparseable file raises
+            :class:`TopicMapParseError` instead of being reported as missing.
 
     Returns:
         dict with keys: subject_name, lectures (list of lecture dicts)
@@ -116,16 +213,20 @@ def load_topic_map(subject_name):
     if clean_name.lower().endswith(".yaml") or clean_name.lower().endswith(".yml"):
         clean_name = clean_name.rsplit(".", 1)[0]
 
-    # 1. Direct filename match
-    fname = clean_name + ".yaml"
-    path = os.path.join(TOPIC_MAPPINGS_DIR, fname)
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8-sig") as f:
-            text = f.read()
-        result = _parse_yaml(text)
-        if result:
-            result["_file_path"] = path
-            return result
+    canonical = resolve_subject_name(clean_name)
+    names = [canonical, clean_name] if canonical and canonical != clean_name else [clean_name]
+
+    # 1. Direct filename match (canonical name first when subjects.json exists)
+    for name in names:
+        for ext in (".yaml", ".yml"):
+            path = os.path.join(TOPIC_MAPPINGS_DIR, name + ext)
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    text = f.read()
+                result = _parse_yaml(text, path=path, strict=strict)
+                if result:
+                    result["_file_path"] = path
+                    return result
 
     # 2. Fallback: scan all YAMLs and match by subject_name field inside or filename
     if not os.path.isdir(TOPIC_MAPPINGS_DIR):
@@ -137,11 +238,25 @@ def load_topic_map(subject_name):
         cpath = os.path.join(TOPIC_MAPPINGS_DIR, candidate)
         with open(cpath, "r", encoding="utf-8-sig") as f:
             text = f.read()
-        parsed = _parse_yaml(text)
+        cand_name = candidate.rsplit(".", 1)[0]
+        # A corrupt file that *looks* like the requested subject must not be
+        # silently skipped when strict mode is on.
+        candidate_matches_subject = any(
+            is_subject_match(name, cand_name) for name in names
+        )
+        parsed = _parse_yaml(
+            text,
+            path=cpath,
+            strict=strict and candidate_matches_subject,
+        )
         if parsed:
             cand_name = candidate.rsplit(".", 1)[0]
             inner_name = parsed.get("subject_name", "")
-            if is_subject_match(clean_name, inner_name) or is_subject_match(clean_name, cand_name):
+            if is_subject_match(clean_name, inner_name) or is_subject_match(clean_name, cand_name) \
+                    or (canonical and (
+                        _normalize_name(canonical) == _normalize_name(inner_name)
+                        or _normalize_name(canonical) == _normalize_name(cand_name)
+                    )):
                 parsed["_file_path"] = cpath
                 return parsed
     return None
@@ -327,7 +442,7 @@ def format_coverage_summary(results):
     if not results:
         return "No previous coverage found across existing topic maps."
 
-    lines = ["### 📚 Previously Covered in Existing Lectures",
+    lines = ["### Previously Covered in Existing Lectures",
              "",
              "The following lectures already cover topics related to this transcript."]
 
@@ -362,7 +477,7 @@ def format_previous_coverage_in_subject(subject_name, current_lecture_number):
         return "No previous lectures found for this subject."
 
     lines = [
-        "### 📕 Previous Lectures in This Subject",
+        "### Previous Lectures in This Subject",
         "",
         f"The following {len(prev)} lecture(s) precede this one. Topics they cover",
         "that overlap with the current transcript should be treated as **review**",
@@ -384,13 +499,194 @@ def format_previous_coverage_in_subject(subject_name, current_lecture_number):
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Prerequisite generation
+# ---------------------------------------------------------------------------
+
+# Administrative / non-technical topics never worth listing as prerequisites.
+_NON_TECHNICAL_TOPIC = re.compile(
+    r"\b(?:course\s+logistics|logistics|administrat\w*|housekeeping|"
+    r"exam\s+guidance|exam\s+note|key\s+industry\s+applications|"
+    r"further\s+reading|glossary|references|bibliography|"
+    r"questions?\s*(?:and|&)\s*answers?|q\s*&\s*a|"
+    r"summary|recap|conclusion|introduction\s+to\s+the\s+course)\b",
+    re.IGNORECASE,
+)
+
+_GENERIC_TOPIC_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "concept", "concepts",
+    "course", "data", "definition", "definitions", "domain", "example",
+    "examples", "for", "from", "in", "intro", "introduction", "is", "it",
+    "its", "lecture", "method", "methods", "model", "models", "of", "on",
+    "overview", "part", "problem", "problems", "recap", "review", "section",
+    "summary", "that", "the", "this", "to", "topic", "topics", "types",
+    "use", "using", "what", "when", "where", "which", "why", "with",
+}
+
+
+def _topic_signature(value):
+    """Return the distinctive lower-case tokens of a topic heading."""
+    if not isinstance(value, str):
+        return set()
+    words = _clean_and_normalize(value)
+    return {
+        word for word in words
+        if len(word) >= 3 and word not in _GENERIC_TOPIC_WORDS
+    }
+
+
+def _is_prerequisite_candidate(topic):
+    text = str(topic).strip()
+    if not text:
+        return False
+    # Keep major topics and first-level subsections; skip micro-subsections.
+    if re.match(r"^\d+\.\d+\.\d+", text):
+        return False
+    return not _NON_TECHNICAL_TOPIC.search(text)
+
+
+def _prerequisite_href(file_name):
+    """Turn a YAML file_name into a link target (forward slashes)."""
+    href = str(file_name or "").replace("\\", "/").strip()
+    if not href:
+        return ""
+    # ``outputs/`` is the local build directory, not a published site path.
+    if href.startswith("outputs/"):
+        href = href[len("outputs/"):]
+    return "/".join(quote(part) for part in href.split("/"))
+
+
+def _current_lecture_topics(topic_map, current_lecture_number):
+    current = _safe_parse_lecture_number(current_lecture_number)
+    for lec in topic_map.get("lectures", []):
+        if _safe_parse_lecture_number(lec.get("lecture_number", "0")) == current:
+            topics = lec.get("topics_covered", [])
+            return lec, topics if isinstance(topics, list) else []
+    return None, []
+
+
+def _select_prerequisites(current_topics, prev_lecs, limit=10):
+    """Select prior topics with real token overlap against this lecture.
+
+    Returns a list of (lecture_dict, topic_string, shared_token_count) in
+    lecture order, capped at ``limit``. Low-confidence matches (one shared
+    distinctive token) are only used to fill the list.
+    """
+    current_tokens = set()
+    for topic in current_topics:
+        if _is_prerequisite_candidate(topic):
+            current_tokens |= _topic_signature(topic)
+    if not current_tokens:
+        return []
+
+    strong, weak = [], []
+    for lecture_index, lec in enumerate(prev_lecs):
+        topics = lec.get("topics_covered", [])
+        if not isinstance(topics, list):
+            continue
+        for topic_index, topic in enumerate(topics):
+            if not _is_prerequisite_candidate(topic):
+                continue
+            shared = _topic_signature(topic) & current_tokens
+            if not shared:
+                continue
+            record = (lec, str(topic).strip(), lecture_index, topic_index, len(shared))
+            (strong if len(shared) >= 2 else weak).append(record)
+
+    selected = sorted(
+        strong,
+        key=lambda item: (-item[4], item[2], item[3]),
+    )[:limit]
+    if len(selected) < limit:
+        selected += sorted(
+            weak,
+            key=lambda item: (item[2], item[3]),
+        )[: limit - len(selected)]
+
+    # Restore chronological order and drop duplicate topic labels.
+    selected.sort(key=lambda item: (item[2], item[3]))
+    seen, deduped = set(), []
+    for item in selected:
+        key = item[1].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def generate_prerequisite_html(subject_name, current_lecture_number, limit=10):
+    """Generate the prerequisite-knowledge HTML section for Agent 3.
+
+    Matches this lecture's topics against prior lectures in the same subject by
+    distinctive token overlap, excludes administrative/appendix topics, caps
+    the list (default 10), groups the result by lecture, and links each topic
+    to the earlier notes file recorded in the topic map.
+
+    Args:
+        subject_name: Course subject name (e.g. 'Machine Learning')
+        current_lecture_number: Current lecture number (e.g. 5)
+        limit: Maximum number of prerequisite topics to emit.
+
+    Returns:
+        Formatted HTML string to replace {{PREREQUISITE_KNOWLEDGE}}, or an
+        empty string when there is no confident match.
+    """
+    topic_map = load_topic_map(subject_name)
+    if not topic_map:
+        return ""
+
+    _, current_topics = _current_lecture_topics(topic_map, current_lecture_number)
+    prev_lecs = find_previous_coverage_in_subject(subject_name, current_lecture_number)
+    selected = _select_prerequisites(current_topics, prev_lecs, limit=limit)
+    if not selected:
+        return ""
+
+    grouped = {}
+    for lec, topic, lecture_index, topic_index, _ in selected:
+        grouped.setdefault(lecture_index, (lec, []))[1].append(topic)
+
+    lines = [
+        '<section class="prerequisite-section">',
+        '  <h2 class="section-title">Prerequisite Knowledge</h2>',
+        '  <p class="prerequisite-intro">This lecture builds on the following concepts from earlier lectures. If any feel unfamiliar, review the linked notes before proceeding.</p>',
+    ]
+    for lecture_index in sorted(grouped):
+        lec, topics = grouped[lecture_index]
+        lec_num = lec.get("lecture_number", "?")
+        lec_topic = lec.get("topic", "Lecture Notes")
+        href = _prerequisite_href(lec.get("file_name", ""))
+        lines.append('  <div class="prerequisite-entry">')
+        lines.append(
+            f'    <h3 class="subsection-title">Lecture {html.escape(str(lec_num))}: '
+            f'{html.escape(str(lec_topic))}</h3>'
+        )
+        lines.append("    <ul>")
+        for topic in topics:
+            label = html.escape(topic)
+            if href:
+                label = f'<a href="{html.escape(href, quote=True)}">{label}</a>'
+            lines.append(f"      <li><strong>{label}</strong></li>")
+        lines.append("    </ul>")
+        lines.append("  </div>")
+    lines.append("</section>")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
-    maps = get_all_topic_maps()
-    print(f"Loaded {len(maps)} topic maps:")
-    for name, m in maps.items():
-        lec_count = len(m.get("lectures", []))
-        print(f"  {name}: {lec_count} lectures")
-        for lec in m.get("lectures", []):
-            tc = lec.get("topics_covered", [])
-            tc_count = len(tc) if isinstance(tc, list) else 0
-            print(f"    L{lec.get('lecture_number')}: \"{lec.get('topic', '?')}\" ({tc_count} topics)")
+    if len(sys.argv) >= 4 and sys.argv[1] == "prerequisites":
+        subject_arg = sys.argv[2]
+        lec_arg = sys.argv[3]
+        prereq_html = generate_prerequisite_html(subject_arg, lec_arg)
+        if prereq_html:
+            print(prereq_html)
+    else:
+        maps = get_all_topic_maps()
+        print(f"Loaded {len(maps)} topic maps:")
+        for name, m in maps.items():
+            lec_count = len(m.get("lectures", []))
+            print(f"  {name}: {lec_count} lectures")
+            for lec in m.get("lectures", []):
+                tc = lec.get("topics_covered", [])
+                tc_count = len(tc) if isinstance(tc, list) else 0
+                print(f"    L{lec.get('lecture_number')}: \"{lec.get('topic', '?')}\" ({tc_count} topics)")

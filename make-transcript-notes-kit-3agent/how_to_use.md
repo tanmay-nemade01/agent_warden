@@ -41,14 +41,20 @@ This step reduces the volume of textbook data by extracting only the chapters re
 
 ## Step 2 — Clean Transcript Files
 
-Use `clean_vtt.py` to strip timestamps and metadata from `.vtt` files, reducing token usage by ~80%.
+Use `utils/clean_vtt.py` to strip timestamps and metadata from `.vtt` files, reducing token usage by ~80%.
 
 ```bash
-python clean_vtt.py
+# Process every .vtt in the current directory
+python utils/clean_vtt.py
+
+# Process one file into an explicit .txt output
+python utils/clean_vtt.py Lecture01.vtt Lecture01.txt
 ```
 
-- All `.vtt` files in the current directory are cleaned and saved as `.txt`.
-- Delete the original `.vtt` files to avoid naming confusion.
+- All `.vtt` files in the specified or current directory are cleaned and saved as `.txt`.
+- By default, source `.vtt` files are kept intact. Pass `--delete-vtt` to remove source `.vtt` files after conversion, or `--keep-vtt` to state the default explicitly.
+- Timestamps are removed by default. Pass `--keep-timestamps` to prefix each spoken line with its cue start time; use this when you want timestamp source anchors in the extraction manifest. Otherwise use transcript line ranges for `source_anchor`.
+- `NOTE`/`STYLE`/`REGION` blocks are skipped in full and short spoken lines (e.g. "Okay.") are preserved.
 
 ---
 
@@ -103,8 +109,11 @@ All outputs are saved under `outputs/<Subject>/<LecturePrefix>/`:
 ```
 outputs/<Subject>/<LecturePrefix>/
 ├── <LecturePrefix>_notes_dense.md          ← Agent 1 output
+├── <LecturePrefix>_extraction_manifest.json ← Agent 1 provenance checksum
 ├── <LecturePrefix>_notes_enriched.md       ← Agent 2 output
 ├── sections/                              ← Split sections for processing
+│   ├── _inventory.json                    ← Locked heading numbering
+│   └── section_XX_summary.json            ← Bound section summaries
 └── <LecturePrefix>_notes/
     └── <LecturePrefix>_notes.html          ← Agent 3 final HTML
 ```

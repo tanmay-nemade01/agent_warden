@@ -23,6 +23,7 @@ if sys.platform.startswith("win"):
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 
+import html
 import uuid
 
 CALLOUT_CLASSES = {
@@ -35,13 +36,29 @@ CALLOUT_CLASSES = {
 
 
 def sanitize_math_block(tok: str) -> str:
-    """Ensure block math \\[ ... \\] does not contain nested \\( or \\) inline delimiters."""
+    """Ensure block math \\[ ... \\] does not contain nested \\( or \\) inline delimiters,
+    and prevent raw '<' followed by letters from breaking browser HTML parsing."""
     if tok.startswith(r"\[") and tok.endswith(r"\]"):
         inner = tok[2:-2]
         # Strip nested inline math delimiters inside display math blocks
         inner_clean = inner.replace(r"\(", "").replace(r"\)", "")
+        # Protect '<' followed by letters to avoid tag parsing in browser
+        inner_clean = re.sub(r"<([a-zA-Z])", r"\\lt \1", inner_clean)
         return rf"\[{inner_clean}\]"
+    elif tok.startswith(r"\(") and tok.endswith(r"\)"):
+        inner = tok[2:-2]
+        inner_clean = re.sub(r"<([a-zA-Z])", r"\\lt \1", inner)
+        return rf"\({inner_clean}\)"
     return tok
+
+
+def _escape_ampersands(text: str) -> str:
+    """Escape bare ampersands without double-escaping existing entities."""
+    return re.sub(
+        r"&(?!(?:[A-Za-z][A-Za-z0-9]*|#\d+|#x[0-9A-Fa-f]+);)",
+        "&amp;",
+        text,
+    )
 
 
 def process_inline(text: str) -> str:
@@ -65,22 +82,48 @@ def process_inline(text: str) -> str:
     pattern_code = re.compile(r"(`[^`]+`)")
     text = pattern_code.sub(save_token, text)
 
-    # 3. Links [text](url)
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
+    # 3. Protect escaped markdown punctuation (\*, \_, etc.) so it renders
+    #    literally instead of becoming emphasis.
+    def save_escape(match):
+        token_key = f"@@BNESC{uuid.uuid4().hex}@@"
+        token_map[token_key] = match.group(1)
+        return token_key
 
-    # 4. Bold **text** or __text__
+    text = re.sub(r"\\([*_`#\[\]\\])", save_escape, text)
+
+    # 4. Links [text](url) with balanced parentheses inside the URL.
+    def replace_link(match):
+        label = match.group(1)
+        url = html.escape(match.group(2), quote=True)
+        return f'<a href="{url}">{label}</a>'
+
+    text = re.sub(
+        r"\[([^\]]+)\]\(((?:[^()\\]|\\.|\([^()]*\))+)\)",
+        replace_link,
+        text,
+    )
+
+    # 5. Escape bare ampersands, then raw '<' that is not an allowed tag.
+    text = _escape_ampersands(text)
+    text = re.sub(
+        r"<(?!(?:strong|/strong|em|/em|code|/code|a\b|/a|span\b|/span|br\s*/?>|b\b|/b|i\b|/i))",
+        "&lt;",
+        text,
+    )
+
+    # 6. Bold **text** or __text__
     text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"__([^_]+)__", r"<strong>\1</strong>", text)
 
-    # 5. Italic *text* or _text_
+    # 7. Italic *text* or _text_
     text = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", text)
     text = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"<em>\1</em>", text)
 
-    # 6. Restore tokens
+    # 8. Restore tokens
     for token_key, tok in token_map.items():
         if tok.startswith("`") and tok.endswith("`"):
-            tok_html = f"<code>{tok[1:-1]}</code>"
-        elif tok.startswith(r"\[") and tok.endswith(r"\]"):
+            tok_html = f"<code>{html.escape(tok[1:-1])}</code>"
+        elif (tok.startswith(r"\[") and tok.endswith(r"\]")) or (tok.startswith(r"\(") and tok.endswith(r"\)")):
             tok_html = sanitize_math_block(tok)
         else:
             tok_html = tok
@@ -90,18 +133,70 @@ def process_inline(text: str) -> str:
 
 
 def make_slug(title: str) -> str:
-    """Generate a clean slug for heading IDs."""
+    """Generate a stable id for a heading.
+
+    Dotted headings use their inventory ID (``5.1`` / ``5.1.2``) so Agent 3's
+    "IDs match _inventory.json" check can actually pass. Unnumbered headings
+    fall back to a readable slug.
+    """
+    dotted = re.match(r"^(\d+(?:\.\d+)+)\s+", str(title).strip())
+    if dotted:
+        return dotted.group(1)
     clean = re.sub(r"<[^>]+>", "", title)
     clean = re.sub(r"[^a-zA-Z0-9.]+", "-", clean).strip("-").lower()
     return clean or "heading"
 
 
+def split_table_row(line: str) -> list[str]:
+    """Split a markdown table row on unescaped pipes outside math spans.
+
+    ``P(A|B)``, ``\\(a|b\\)``, and escaped ``\\|`` stay inside one cell.
+    """
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|") and not stripped.endswith("\\|"):
+        stripped = stripped[:-1]
+
+    cells = []
+    buffer = []
+    math_close = None
+    index = 0
+    while index < len(stripped):
+        char = stripped[index]
+        pair = stripped[index:index + 2]
+        if char == "\\" and index + 1 < len(stripped):
+            if pair in (r"\(", r"\[") and not math_close:
+                math_close = r"\)" if pair == r"\(" else r"\]"
+                buffer.append(pair)
+                index += 2
+                continue
+            if math_close and pair == math_close:
+                math_close = None
+                buffer.append(pair)
+                index += 2
+                continue
+            if pair == r"\|":
+                buffer.append("|")
+                index += 2
+                continue
+            buffer.append(char)
+            index += 1
+            continue
+        if char == "|" and not math_close:
+            cells.append("".join(buffer).strip())
+            buffer = []
+            index += 1
+            continue
+        buffer.append(char)
+        index += 1
+    cells.append("".join(buffer).strip())
+    return cells
+
+
 def convert_table(lines: list[str], indent: str) -> list[str]:
     out = [f"{indent}<table>"]
-    rows = []
-    for line in lines:
-        parts = [p.strip() for p in line.strip().strip("|").split("|")]
-        rows.append(parts)
+    rows = [split_table_row(line) for line in lines]
 
     if not rows:
         out.append(f"{indent}</table>")
@@ -136,9 +231,22 @@ def convert_table(lines: list[str], indent: str) -> list[str]:
     return out
 
 
-def convert_markdown_to_html(md_text: str) -> str:
-    """Convert markdown section text into pretty-printed HTML."""
+def convert_markdown_to_html(md_text: str, drop_leading_h1: bool = False) -> str:
+    """Convert markdown section text into pretty-printed HTML.
+
+    Args:
+        md_text: markdown source for one section.
+        drop_leading_h1: drop a single leading ``# Title`` line. The HTML
+            template already renders ``{{TITLE}}`` as ``h1.lecture-title``, so
+            keeping the preamble heading would create a duplicate H1.
+    """
     lines = md_text.splitlines()
+    if drop_leading_h1:
+        cursor = 0
+        while cursor < len(lines) and not lines[cursor].strip():
+            cursor += 1
+        if cursor < len(lines) and lines[cursor].startswith("# "):
+            lines = lines[cursor + 1:]
     html_lines = []
     indent = ""
     i = 0
@@ -170,14 +278,53 @@ def convert_markdown_to_html(md_text: str) -> str:
             continue
 
         # Headings
-        if stripped.startswith("## ") or stripped.startswith("### "):
-            is_h2 = stripped.startswith("## ")
-            tag = "h2" if is_h2 else "h3"
-            h_text = stripped[3 if is_h2 else 4:].strip()
+        if stripped.startswith("# ") or stripped.startswith("## ") or stripped.startswith("### "):
+            if stripped.startswith("### "):
+                tag = "h3"
+                css_class = "subsection-title"
+                h_text = stripped[4:].strip()
+            elif stripped.startswith("## "):
+                tag = "h2"
+                css_class = "section-title"
+                h_text = stripped[3:].strip()
+            else:
+                tag = "h1"
+                css_class = "lecture-title"
+                h_text = stripped[2:].strip()
             processed_text = process_inline(h_text)
             slug = make_slug(h_text)
-            html_lines.append(f'{indent}<{tag} id="{slug}">{processed_text}</{tag}>')
+            html_lines.append(
+                f'{indent}<{tag} id="{slug}" class="{css_class}">{processed_text}</{tag}>'
+            )
             i += 1
+            continue
+
+        # Raw HTML block: <figure> or <svg>
+        if stripped.startswith("<figure") or stripped.startswith("<svg"):
+            closing_tag = "</figure>" if stripped.startswith("<figure") else "</svg>"
+            raw_block = []
+            while i < n:
+                curr_line = lines[i]
+                raw_block.append(f"{indent}{curr_line.rstrip()}")
+                if closing_tag in curr_line:
+                    i += 1
+                    break
+                i += 1
+            html_lines.extend(raw_block)
+            continue
+
+        # Display math block \[ ... \]
+        if stripped.startswith(r"\["):
+            math_lines = []
+            while i < n:
+                math_lines.append(lines[i].strip())
+                if r"\]" in lines[i]:
+                    i += 1
+                    break
+                i += 1
+            full_math = " ".join(math_lines)
+            full_math = sanitize_math_block(full_math)
+            html_lines.append(f"{indent}<p>{full_math}</p>")
             continue
 
         # Code block ```
@@ -200,13 +347,32 @@ def convert_markdown_to_html(md_text: str) -> str:
 
         # Blockquote >
         if stripped.startswith(">"):
-            bq_lines = []
+            paragraphs = []
+            current = []
             while i < n and lines[i].strip().startswith(">"):
-                bq_lines.append(lines[i].strip()[1:].strip())
+                content = lines[i].strip()[1:].strip()
+                if not content:
+                    if current:
+                        paragraphs.append(" ".join(current))
+                        current = []
+                else:
+                    is_dialog_turn = bool(
+                        re.match(
+                            r"^(\*\*(?:Q|A|Question|Answer):?\*\*|[QA]:)\s+",
+                            content,
+                            re.IGNORECASE,
+                        )
+                    )
+                    if is_dialog_turn and current:
+                        paragraphs.append(" ".join(current))
+                        current = []
+                    current.append(content)
                 i += 1
-            bq_text = " ".join(bq_lines)
+            if current:
+                paragraphs.append(" ".join(current))
             html_lines.append(f"{indent}<blockquote>")
-            html_lines.append(f"{indent}  <p>{process_inline(bq_text)}</p>")
+            for paragraph in paragraphs:
+                html_lines.append(f"{indent}  <p>{process_inline(paragraph)}</p>")
             html_lines.append(f"{indent}</blockquote>")
             continue
 
@@ -248,21 +414,31 @@ def convert_markdown_to_html(md_text: str) -> str:
 
         # Paragraph (collect multiline text block)
         p_lines = []
+        in_display_math = False
         while i < n:
             curr_stripped = lines[i].strip()
-            if not curr_stripped:
-                break
-            if (
-                curr_stripped.startswith(":::")
-                or curr_stripped.startswith("## ")
-                or curr_stripped.startswith("### ")
-                or curr_stripped.startswith("```")
-                or curr_stripped.startswith(">")
-                or re.match(r"^[-*]\s+", curr_stripped)
-                or re.match(r"^\d+\.\s+", curr_stripped)
-            ):
-                break
+            if not in_display_math:
+                if not curr_stripped:
+                    break
+                if (
+                    curr_stripped.startswith(":::")
+                    or curr_stripped.startswith("# ")
+                    or curr_stripped.startswith("## ")
+                    or curr_stripped.startswith("### ")
+                    or curr_stripped.startswith("<figure")
+                    or curr_stripped.startswith("<svg")
+                    or curr_stripped.startswith(r"\[")
+                    or curr_stripped.startswith("```")
+                    or curr_stripped.startswith(">")
+                    or re.match(r"^[-*]\s+", curr_stripped)
+                    or re.match(r"^\d+\.\s+", curr_stripped)
+                ):
+                    break
             p_lines.append(curr_stripped)
+            if r"\[" in curr_stripped and r"\]" not in curr_stripped:
+                in_display_math = True
+            elif in_display_math and r"\]" in curr_stripped:
+                in_display_math = False
             i += 1
 
         if p_lines:
@@ -285,7 +461,10 @@ def convert_section_files(section_dir: str) -> None:
             with open(md_path, "r", encoding="utf-8") as f:
                 md_content = f.read()
 
-            html_content = convert_markdown_to_html(md_content)
+            html_content = convert_markdown_to_html(
+                md_content,
+                drop_leading_h1=filename == "section_00_preamble.md",
+            )
 
             with open(html_path, "w", encoding="utf-8") as f:
                 f.write(html_content + "\n")
@@ -314,7 +493,10 @@ def main():
     elif os.path.isfile(args.input_path):
         with open(args.input_path, "r", encoding="utf-8") as f:
             md_content = f.read()
-        html_content = convert_markdown_to_html(md_content)
+        html_content = convert_markdown_to_html(
+            md_content,
+            drop_leading_h1=os.path.basename(args.input_path) == "section_00_preamble.md",
+        )
         if args.output:
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(html_content + "\n")

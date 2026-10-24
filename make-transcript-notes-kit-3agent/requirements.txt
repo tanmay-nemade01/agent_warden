@@ -1,1 +1,4 @@
+# Python >= 3.10 required (uses PEP 604 `X | None` unions)
 PyYAML>=6
+pymupdf>=1.23.0
+pytest>=8

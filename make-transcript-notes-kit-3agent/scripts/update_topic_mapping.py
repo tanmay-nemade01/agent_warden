@@ -34,6 +34,8 @@ import os
 import re
 import sys
 import json
+import shutil
+import tempfile
 
 # Add parent dirs to path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -51,6 +53,9 @@ import yaml
 
 def write_topic_map(subject_name, lectures, path=None):
     """Write the topic map YAML for a subject using PyYAML.
+
+    The write is atomic (temp file + os.replace) and keeps a ``.bak`` copy of
+    the previous file so a crash can never truncate the existing catalogue.
 
     Args:
         subject_name: the subject display name
@@ -80,9 +85,22 @@ def write_topic_map(subject_name, lectures, path=None):
     lectures_sorted = sorted(lectures, key=_get_lecture_sort_key)
     data = {"subject_name": subject_name, "lectures": lectures_sorted}
 
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True,
-                  sort_keys=False, indent=2, width=1000)
+    target_dir = os.path.dirname(os.path.abspath(path)) or "."
+    fd, temp_path = tempfile.mkstemp(
+        dir=target_dir, prefix=".topic_map_", suffix=".yaml.tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True,
+                      sort_keys=False, indent=2, width=1000)
+            f.flush()
+            os.fsync(f.fileno())
+        if os.path.exists(path):
+            shutil.copy2(path, path + ".bak")
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
     return path
 
@@ -114,13 +132,24 @@ def update_or_add_lecture(subject_name, lecture_number, lecture_topic,
     if not new_topics:
         raise ValueError("At least one final topic is required; refusing an empty mapping update.")
 
-    # Try to load existing map
-    topic_map = TMU.load_topic_map(subject_name)
+    # Resolve acronyms/filename spellings through the canonical subject map so
+    # updates land in the same file the site reads.
+    subject_name = TMU.resolve_subject_name(subject_name) or subject_name
+
+    # Try to load existing map. Strict mode distinguishes "missing" from
+    # "present but corrupt": we must never overwrite an unparseable catalogue.
+    topic_map = TMU.load_topic_map(subject_name, strict=True)
     was_added = False
     was_updated = False
     path = None
 
     if topic_map is None:
+        existing_path = TMU.find_topic_map_path(subject_name)
+        if existing_path and os.path.exists(existing_path):
+            raise RuntimeError(
+                "Refusing to overwrite unparseable topic map: "
+                f"{existing_path}. Repair the YAML or restore the .bak file."
+            )
         # Create new topic map
         lectures = []
         was_added = True

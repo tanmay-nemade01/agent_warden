@@ -2,10 +2,56 @@ import re
 import argparse
 from pathlib import Path
 
-def clean_vtt(input_path, output_path=None, keep_speakers=False, merge_paragraphs=True, delete_vtt=True):
+# Match standard WebVTT timestamp line: 00:00:01.000 --> 00:00:04.000
+TIMESTAMP_RE = re.compile(r"^\s*(?:\d{1,2}:)?\d{2}:\d{2}[\.,]\d{3}\s*-->\s*(?:\d{1,2}:)?\d{2}:\d{2}[\.,]\d{3}")
+# Cue IDs are typically simple integers or alphanumeric slugs without
+# whitespace, periods, or sentence punctuation. A spoken line such as "Okay."
+# must never be mistaken for a cue ID.
+CUE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
+CUE_ID_FORBIDDEN_CHARS = re.compile(r"[.!?,;:'\"\u2026]")
+METADATA_BLOCK_START_RE = re.compile(r"^(?:NOTE|STYLE|REGION)\b")
+
+
+def _strip_vtt_timestamp(timestamp_line):
+    """Return a compact HH:MM:SS (or MM:SS) label for a cue timestamp."""
+    start = timestamp_line.split("-->")[0].strip()
+    return start.split(".")[0].split(",")[0].strip()
+
+
+def segment_into_paragraphs(sentences: list[str], target_words: int = 140) -> list[str]:
+    """Combine sentence strings into readable paragraphs around target_words without splitting sentences."""
+    paragraphs = []
+    current_sentences = []
+    current_word_count = 0
+
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent:
+            continue
+        words = sent.split()
+        current_sentences.append(sent)
+        current_word_count += len(words)
+
+        if current_word_count >= target_words and sent.endswith((".", "!", "?", '."', '!"', '?"')):
+            paragraphs.append(" ".join(current_sentences) + "\n")
+            current_sentences = []
+            current_word_count = 0
+
+    if current_sentences:
+        paragraphs.append(" ".join(current_sentences) + "\n")
+
+    return paragraphs
+
+
+def clean_vtt(input_path, output_path=None, keep_speakers=False,
+              merge_paragraphs=True, delete_vtt=False, keep_timestamps=False):
     """
     Cleans a WebVTT file by removing timestamps, cue IDs, and tags,
-    and returns a clean readable transcript.
+    and returns a clean readable transcript without losing spoken content.
+
+    NOTE/STYLE/REGION blocks are skipped in full (to the next blank line),
+    never just their first line. With ``keep_timestamps`` each spoken line is
+    prefixed with its cue start time, which keeps manifest anchors traceable.
     """
     input_path = Path(input_path)
     if not input_path.exists():
@@ -21,17 +67,23 @@ def clean_vtt(input_path, output_path=None, keep_speakers=False, merge_paragraph
     cleaned_blocks = []
     i = 0
     n = len(lines)
-    
+    current_timestamp = None
+
     # Regex definitions
     tag_re = re.compile(r'<[^>]+>')  # Clean any HTML/XML like tags
     speaker_start_re = re.compile(r'<v\s+([^>]+)>')  # Match speaker tags: <v Speaker Name>
-    
+
+    def _skip_to_blank(index):
+        while index < n and lines[index]:
+            index += 1
+        return index
+
     while i < n:
         line = lines[i]
         
-        # Skip WebVTT header and notes
-        if line.startswith('WEBVTT') or line.startswith('NOTE'):
-            i += 1
+        # Skip the WebVTT header and metadata blocks in full.
+        if line.startswith('WEBVTT') or METADATA_BLOCK_START_RE.match(line):
+            i = _skip_to_blank(i + 1)
             continue
             
         # Skip empty lines
@@ -39,17 +91,28 @@ def clean_vtt(input_path, output_path=None, keep_speakers=False, merge_paragraph
             i += 1
             continue
             
-        # If next line has '-->', then the current line is a cue ID. Skip both.
-        if i + 1 < n and '-->' in lines[i + 1]:
-            i += 2
-            continue
-            
-        # If current line is a timestamp, skip it
-        if '-->' in line:
+        # Check if current line is a timestamp line
+        timestamp_match = TIMESTAMP_RE.search(line)
+        if timestamp_match:
+            current_timestamp = _strip_vtt_timestamp(timestamp_match.group(0))
             i += 1
             continue
-            
-        # We have a content line. Check for speaker tag
+
+        # Check if next line is a timestamp line (in which case current line might be a cue ID)
+        if i + 1 < n and TIMESTAMP_RE.search(lines[i + 1]):
+            # A cue ID is a short alphanumeric slug with no sentence punctuation.
+            if (
+                CUE_ID_RE.match(line)
+                and len(line) < 60
+                and not CUE_ID_FORBIDDEN_CHARS.search(line)
+            ):
+                current_timestamp = _strip_vtt_timestamp(
+                    TIMESTAMP_RE.search(lines[i + 1]).group(0)
+                )
+                i += 2  # skip cue ID and the timestamp line
+                continue
+
+        # We have a spoken content line. Check for speaker tag
         speaker = None
         m = speaker_start_re.search(line)
         if m:
@@ -62,6 +125,8 @@ def clean_vtt(input_path, output_path=None, keep_speakers=False, merge_paragraph
         cleaned_line = tag_re.sub('', line).strip()
         
         if cleaned_line:
+            if keep_timestamps and current_timestamp:
+                cleaned_line = f"[{current_timestamp}] {cleaned_line}"
             cleaned_blocks.append({
                 'speaker': speaker,
                 'text': cleaned_line
@@ -108,16 +173,13 @@ def clean_vtt(input_path, output_path=None, keep_speakers=False, merge_paragraph
         all_text_blocks = [block['text'] for block in cleaned_blocks]
         
         if merge_paragraphs:
-            # Combine all text with spaces, clean multiple whitespaces
+            # Reconstruct sentences and split paragraphs cleanly at sentence boundaries
             full_text = " ".join(all_text_blocks)
             full_text = re.sub(r'\s+', ' ', full_text)
             
-            # Segment into paragraphs of ~150 words for readability
-            words = full_text.split()
-            chunk_size = 150
-            for k in range(0, len(words), chunk_size):
-                paragraph = " ".join(words[k:k+chunk_size])
-                output_lines.append(paragraph + "\n")
+            # Sentence splitter
+            raw_sentences = re.split(r'(?<=[.!?])\s+', full_text)
+            output_lines = segment_into_paragraphs(raw_sentences, target_words=140)
         else:
             output_lines.extend(all_text_blocks)
             
@@ -138,36 +200,40 @@ def clean_vtt(input_path, output_path=None, keep_speakers=False, merge_paragraph
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Clean WebVTT transcript files for LLMs.")
-    parser.add_argument("input", nargs="?", help="Path to the input .vtt file (if omitted, processes all .vtt files in script folder)")
+    parser.add_argument("input", nargs="?", help="Path to input .vtt file or directory (if omitted, processes all .vtt files in current directory)")
     parser.add_argument("output", nargs="?", help="Path to save the cleaned text file (optional)")
-    parser.add_argument("--keep-speakers", action="store_true", help="Keep speaker names in the output (default: remove speakers)")
+    parser.add_argument("--keep-speakers", action="store_true", help="Keep speaker names in output (default: false)")
     parser.add_argument("--no-merge", action="store_true", help="Do not merge lines into paragraphs")
-    parser.add_argument("--keep-vtt", action="store_true", help="Keep the .vtt file after conversion (by default it is deleted)")
+    parser.add_argument("--keep-timestamps", action="store_true", help="Prefix each spoken line with its cue start time (for source anchors)")
+    parser.add_argument("--delete-vtt", action="store_true", help="Delete source .vtt file after conversion (default: keep source file)")
+    parser.add_argument("--keep-vtt", action="store_true", help="Keep source .vtt file (default behavior)")
     
     args = parser.parse_args()
+    should_delete = args.delete_vtt and not args.keep_vtt
     
-    if args.input:
+    if args.input and Path(args.input).is_file():
         # Single file mode
+        input_path = Path(args.input)
         if not args.output:
-            input_path = Path(args.input)
             args.output = input_path.with_suffix('.txt')
         
         clean_vtt(
-            input_path=args.input,
+            input_path=input_path,
             output_path=args.output,
             keep_speakers=args.keep_speakers,
             merge_paragraphs=not args.no_merge,
-            delete_vtt=not args.keep_vtt
+            delete_vtt=should_delete,
+            keep_timestamps=args.keep_timestamps,
         )
     else:
-        # Batch mode: process all .vtt files in the script's directory
-        script_dir = Path(__file__).resolve().parent
-        vtt_files = list(script_dir.glob("*.vtt"))
+        # Batch mode: process all .vtt files in the specified directory or current working directory
+        search_dir = Path(args.input) if args.input and Path(args.input).is_dir() else Path.cwd()
+        vtt_files = sorted(list(search_dir.glob("*.vtt")))
         
         if not vtt_files:
-            print(f"No .vtt files found in {script_dir}")
+            print(f"No .vtt files found in {search_dir}")
         else:
-            print(f"Found {len(vtt_files)} .vtt file(s) in {script_dir}\n")
+            print(f"Found {len(vtt_files)} .vtt file(s) in {search_dir}\n")
             for vtt_file in vtt_files:
                 output_file = vtt_file.with_suffix('.txt')
                 clean_vtt(
@@ -175,6 +241,7 @@ if __name__ == '__main__':
                     output_path=str(output_file),
                     keep_speakers=args.keep_speakers,
                     merge_paragraphs=not args.no_merge,
-                    delete_vtt=not args.keep_vtt
+                    delete_vtt=should_delete,
+                    keep_timestamps=args.keep_timestamps,
                 )
-                print()  # blank line between files
+                print()

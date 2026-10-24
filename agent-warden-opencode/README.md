@@ -76,8 +76,7 @@ Open http://127.0.0.1:8787
    **Delete** the output folder. Refresh mid-run replays buffered SSE events
    so logs come back. Companion docs auto-select when a matching
    `companion_docs/<ABBR>` folder exists.
-5. **Working on many subjects at once?** Open the **Batch · many subjects**
-   panel above the board — see [Many subjects in parallel](#many-subjects-in-parallel).
+5. **Working on many subjects at once?** In the **New job** ticket, uncheck **All transcripts belong to the same subject** to assign individual subjects and companion doc folders to each transcript — see [Many subjects in parallel](#many-subjects-in-parallel).
 
 ## Model & Backends
 
@@ -109,9 +108,7 @@ differ from subject to subject: where its transcripts come from, where its
 companion docs live, how its output folder is named, and how a lecture
 prefix is spelled. Everything else in the pipeline is shared.
 
-Profiles live in `subject_profiles.json` (workspace root) and are edited
-from the **Batch · many subjects** panel — click *profile* on a subject
-row, or edit the JSON directly:
+Profiles live in `subject_profiles.json` (workspace root) or can be edited directly:
 
 ```json
 {
@@ -141,12 +138,11 @@ directory, docs auto-detected).
 
 ### Running a batch
 
-Tick subjects in the **Batch · many subjects** panel (checking one queues
-all of its transcripts; expand the row to deselect individual files) and
-press **Run selected subjects**. The server plans one job per
-(subject, lecture) and starts them all under a shared parallelism budget
-with an optional per-subject cap, so a subject with 40 lectures cannot
-starve the others.
+In the **New job** ticket:
+- Check the transcript files you wish to process.
+- Leave **All transcripts belong to the same subject** checked if they all share the selected subject and companion doc folder.
+- Or **uncheck** it if the transcripts belong to different subjects. When unchecked, each transcript card lets you select its individual subject and companion doc folder (with an auto-detect button), while sharing backend, model, phases, and parallelism.
+- Review the live batch preview table and click **Start pipeline**. The server plans one job per transcript/subject and starts them all under your shared parallelism budget (with an optional per-subject cap, so a subject with 40 lectures cannot starve the others).
 
 The same thing over the API — `POST /api/run`:
 

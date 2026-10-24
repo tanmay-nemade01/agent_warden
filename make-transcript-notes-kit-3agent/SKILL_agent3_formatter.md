@@ -14,7 +14,7 @@ description: >-
 
 **Critical: Automated Script-Based Conversion.** Convert section markdown files to HTML using the built-in conversion script (`python scripts/section_splitter.py convert ...`). This guarantees consistent heading IDs, pretty-printed HTML formatting, and fast token-efficient processing without token-expensive manual section emitting.
 
-**Your input:** Agent 2's enriched draft, extraction manifest, and `section_XX_summary.json` files. Stop if any are missing.
+**Your input:** Agent 2's enriched draft, extraction manifest, and any available `section_XX_summary.json` files (summary validation is non-blocking). Stop if the enriched draft or manifest is missing.
 
 **Your output:** Create the directory `<LecturePrefix>_notes/` and write `outputs/<Subject>/<LecturePrefix>/<LecturePrefix>_notes/<LecturePrefix>_notes.html` — passes lint with zero FAILs, scores ≥ 85/100 against the rubric, zero red-list items. This is the ONLY file produced. All metadata is embedded in the HTML. The BitsNotes viewer reads the metadata from `<script id="lecture-metadata">` inside this single HTML file.
 
@@ -27,7 +27,7 @@ description: >-
 2. **Math must render** — Single backslash delimiters only. Every symbol named. Wide formulas scroll horizontally (platform CSS handles this via `mjx-container`).
 3. **No styling in the HTML** — No `<style>` tags, no inline `style=""`, no Google Fonts links. All styling comes from `/lecture-notes.css`.
 4. **SEO must be complete** — Every SEO element is mandatory. The lint gate enforces this.
-5. **No revision notes or study guide section** — Only main lecture notes are rendered. Do not generate or include an exam revision section, revision notes, or study guide section in the HTML or metadata.
+5. **Lecture-faithful content scope** — Render only the main lecture notes and educational appendices within `<main>...</main>` (preceded only by the optional prerequisite section).
 6. **STRIP intermediate metadata** — Remove process checklists and internal verification data. Preserve educational structures such as anonymous Q&A, misconception corrections, professor-origin analogies, and terminology contrasts.
 7. **Math is final and reconciled** — Agent 2 must resolve every `*[verify]*` marker before handoff. If any marker remains, stop and return the section; never hide the marker or convert uncertainty into polished prose.
 8. **Strict File Attachment Guard Rail** — Focus *only and only* on the files attached to the prompt/context. Do *not* search for or read other files in the workspace (such as other drafts or notes) unless you are absolutely certain that the attached files do not match the expected context at all (e.g., they are completely blank, corrupted, or clearly belong to a different course/lecture, suggesting an accidental attachment). Only under that absolute certainty may you check for other files in the workspace; otherwise, restrict your processing strictly to the attached files (while allowing necessary reads of templates/notes.html and the resolved subject topic mapping YAML file in `topic_mappings/` as instructed in Step 8).
@@ -69,7 +69,7 @@ Before anything else, scan the enriched draft for intermediate/process metadata 
 
 **How to identify:** Look for sections whose heading contains words like "checklist", "self-check", "verification", or sections that are just long bulleted/ticked lists of concept names with `[x]` markers. Also search for keywords like "TODO", "placeholder", and instructions such as "Define [Concept]". These have zero educational value for the end reader.
 
-**Do NOT strip educational appendices.** Agent 1 produces consolidated educational content (such as real-world connections in "Key Industry Applications") and Agent 2 carries them through. These are legitimate educational content, NOT process metadata. Preserve and render them as normal sections. However, do NOT create or retain any exam revision notes or study guide sections. Only strip the internal checklists/self-checks listed above.
+**Do NOT strip educational appendices.** Agent 1 produces consolidated educational content (such as real-world connections in "Key Industry Applications") and Agent 2 carries them through. These are legitimate educational content, NOT process metadata. Preserve and render them as normal sections. Only strip the internal checklists/self-checks listed above.
 
 After stripping, preserve the educational preamble—title and introduction—when present, followed by the first concept section.
 
@@ -228,6 +228,9 @@ This metadata is placed inside `<script type="application/json" id="lecture-meta
   "targetAudience": "Who these notes are for (no course codes)",
   "sections": [
     { "title": "Section name", "description": "What this section covers" }
+  ],
+  "prerequisites": [
+    { "subject": "Subject name", "lecture": "3", "topics": ["Topic A", "Topic B"] }
   ]
 }
 ```
@@ -236,13 +239,14 @@ This metadata is placed inside `<script type="application/json" id="lecture-meta
 - `title` must be a clean topic title — same as `{{LECTURE_TITLE}}`. **No** "Enriched", "Complete Enriched Lecture Notes", agent names, or pipeline jargon.
 - `targetAudience` must be human-readable — **no course codes** (e.g., never include "S1-25_AIMLCZG565").
 - `sections` must include every major concept from the core.
-- **Do NOT include** `examRevisionNotes`, `summary`, `keyConcepts`, or `quiz` fields. These sections are not part of the output.
+- `prerequisites` is optional. Include it only when the prerequisite section was populated; omit it otherwise.
+- **Metadata schema hygiene** — include only the standard schema fields (`title`, `subject`, `gradeLevel`, `datePublished`, `targetAudience`, `sections`, and optional `prerequisites`). Any other key is a lint FAIL.
 
 ---
 
-## Step 6 — Main Lecture Notes Only (No Revision Notes or Study Guide Section)
+## Step 6 — Main Lecture Notes Scope
 
-Do NOT generate, author, or render any Exam Revision Notes section, revision notes, or study guide section. The output HTML must contain only the main lecture notes in `<main>...</main>` (preceded by the optional prerequisite section if applicable).
+The output HTML contains the main lecture notes and educational appendices in `<main>...</main>` (preceded by the optional prerequisite section if applicable).
 
 
 ---
@@ -261,26 +265,20 @@ All SEO tags (OG, Twitter Card, canonical, robots, keywords, JSON-LD) are alread
 
 This step reads the topic mapping YAML for the **same subject only** (which has already been updated by Agent 2) and generates the prerequisite HTML section.
 
-### 8.1 — Find the YAML file for this subject
+Run the deterministic CLI prerequisite generator:
 
-Look for `topic_mappings/<Subject>.yaml`. The filename may use an acronym (e.g., `ML.yaml` for "Machine Learning"). The helper function `load_topic_map()` in `scripts/topic_mapping_utils.py` handles this — it tries the direct filename first, then falls back to scanning all YAML files and matching robustly by comparing normalized subject names, stripping spaces/underscores/hyphens/stopwords, and checking for acronym/abbreviation matches against both the internal `subject_name` and the candidate filename.
+```bash
+python scripts/topic_mapping_utils.py prerequisites "<Subject>" <LectureNumber>
+```
 
-**If no YAML file exists for this subject** (or no previous lectures exist):
-- Set `{{PREREQUISITE_KNOWLEDGE}}` to an empty string (section will be omitted).
+**Example:**
+```bash
+python scripts/topic_mapping_utils.py prerequisites "Machine Learning" 5
+```
 
-**Do NOT scan other subjects' YAML files.** Cross-subject prerequisite detection is not part of this step.
-
-### 8.2 — Identify previously covered topics
-
-From the YAML, get the `topics_covered` lists from all **previous** lectures (lecture numbers lower than the current one). Compare them against the major topics in the completed HTML core (the h2/h3 section headings).
-
-For each topic in the current lecture that matches a topic from a previous lecture, record:
-- The matching topic name
-- The previous lecture number and topic title
-
-### 8.3 — Generate the Prerequisite Knowledge HTML
-
-If matches were found, generate the `{{PREREQUISITE_KNOWLEDGE}}` HTML using the prerequisite template shown in the Step 4 placeholder table (one `<li>` per matched concept). If no matches found, set `{{PREREQUISITE_KNOWLEDGE}}` to an empty string.
+- **If matches are found:** The script prints the complete, ready-to-insert `<section class="prerequisite-section">...</section>` block. Paste this output into `{{PREREQUISITE_KNOWLEDGE}}`.
+- **If no previous lectures exist** (or new subject): The script exits cleanly with no output. In that case, replace `{{PREREQUISITE_KNOWLEDGE}}` with an empty string and the section will be omitted from the final HTML.
+- **Do NOT scan other subjects' YAML files.** Cross-subject prerequisite detection is not part of this step.
 
 ---
 
@@ -340,14 +338,14 @@ The lint checks: HTML tag balance & callout nesting, template hygiene, viewport 
 - SEO absent/broken: missing description, OG/Twitter/JSON-LD, or description outside 100-155 chars
 - **Pipeline jargon in any visible text** — title, headings, body, or metadata title containing "Enriched", "Dense Draft", "Agent 1/2/3", "Extractor", "Enricher", "Formatter", "enriched by", "created by agent", "based on agent output", callout legends, or enrichment source attribution
 - **Course codes in audience or visible text** (e.g., "S1-25_AIMLCZG565")
-- **Metadata contains removed fields** — `summary`, `keyConcepts`, `quiz`, or `examRevisionNotes` fields present in the metadata JSON
+- **Metadata contains extraneous fields** — unexpected or deprecated fields present in the metadata JSON
 - **Leftover placeholder tasks or TODOs** — any leftover placeholder text, TODOs, or task instructions (e.g., 'Define ...') in the visible HTML or metadata JSON
 
 ---
 
 ## Ship checklist
 
-Run the lint gate (Step 9) and score against the rubric (Step 10). Both must pass with zero FAILs and zero red-list violations. Score must be ≥ 85/100. Additionally verify: no `*[verify]*` markers reached this phase, no pipeline jargon in any visible text (title, headings, body, metadata), no placeholders/TODOs remain, no `summary`/`keyConcepts`/`quiz`/`examRevisionNotes` fields in metadata JSON, topic mapping prerequisite section is populated or correctly omitted, and HTML is pretty-printed (not minified).
+Run the lint gate (Step 9) and score against the rubric (Step 10). Both must pass with zero FAILs and zero red-list violations. Score must be ≥ 85/100. Additionally verify: no `*[verify]*` markers reached this phase, no pipeline jargon in any visible text (title, headings, body, metadata), no placeholders/TODOs remain, metadata JSON contains only standard schema fields, topic mapping prerequisite section is populated or correctly omitted, and HTML is pretty-printed (not minified).
 
 > [!IMPORTANT]
 > **LOG FILE PROTECTION**: During file cleanup, **NEVER** delete or remove `*_run_events.jsonl` files from output folders. The event log is critical for live run tracking and job history auditing.

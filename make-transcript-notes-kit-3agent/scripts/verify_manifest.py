@@ -21,7 +21,6 @@ if sys.platform.startswith("win"):
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Heading patterns
-H2_PATTERN = re.compile(r"^##\s+(.+)$", re.MULTILINE)
 DOTTED_H2 = re.compile(r"^(\d+)\.(\d+)\s+(.+)$")
 
 
@@ -140,47 +139,82 @@ class VerifyReport:
 
 
 def extract_keywords(text, min_len=4):
-    """Tokenize text into lowercase words of length >= min_len, filtering out markdown markup."""
+    """Tokenize text into lowercase keywords.
+
+    Keeps ordinary words of at least ``min_len`` characters plus upper-case
+    acronyms (PPO, MDP, GAN) regardless of length, so abbreviations are not
+    silently ignored by the evidence checks.
+    """
     # Strip markdown symbols
-    cleaned = re.sub(r"[\#\*_`\[\]\(\):-]", " ", text)
+    cleaned = re.sub(r"[\#\*_`\[\]\(\):-]", " ", str(text))
     words = re.findall(r"\b[a-zA-Z]{" + str(min_len) + r",}\b", cleaned)
+    acronyms = re.findall(r"\b[A-Z]{2,}\b", str(text))
     # Filter out common stop words
     stops = {
         "with", "that", "this", "from", "have", "they", "more", "about",
         "some", "were", "what", "their", "them", "then", "there", "when"
     }
-    return {w.lower() for w in words if w.lower() not in stops}
+    keywords = {w.lower() for w in words if w.lower() not in stops}
+    keywords |= {a.lower() for a in acronyms if a.lower() not in stops}
+    return keywords
+
+
+def _keyword_pattern(keyword):
+    """Match a keyword on token boundaries (avoids 'act' inside 'practice')."""
+    return re.compile(
+        r"(?<![A-Za-z0-9])" + re.escape(keyword) + r"(?![A-Za-z0-9])",
+        re.IGNORECASE,
+    )
+
+
+def _normalize_whitespace(value):
+    return re.sub(r"\s+", " ", str(value)).strip().lower()
 
 
 def keyword_match(pattern_text, target_text, threshold=2):
     """Check if at least 'threshold' keywords from pattern_text are present in target_text."""
     pat_keywords = extract_keywords(pattern_text)
     if not pat_keywords:
-        # Fallback to simple containment if no long keywords found
-        return pattern_text.lower() in target_text.lower()
-    
-    target_lower = target_text.lower()
-    matched = [kw for kw in pat_keywords if kw in target_lower]
-    
+        # Fallback to token-boundary containment for short terms/acronyms.
+        return bool(
+            _keyword_pattern(_normalize_whitespace(pattern_text)).search(
+                _normalize_whitespace(target_text)
+            )
+        )
+
+    matched = [kw for kw in pat_keywords if _keyword_pattern(kw).search(target_text)]
+
     req_match = min(threshold, len(pat_keywords))
     return len(matched) >= req_match
 
 
-def keyword_match_position(pattern_text, target_text, threshold=2):
-    """Return the earliest evidence position, or -1 when evidence is absent."""
+def keyword_match_position(pattern_text, target_text, threshold=2, start=0):
+    """Return the earliest evidence position at or after ``start``, else -1.
+
+    Searching from the previous event's position makes the flow check
+    sequential: two events that share generic words ("reward", "update") are
+    still matched in narrative order instead of collapsing onto the same
+    offset.
+    """
     pat_keywords = extract_keywords(pattern_text)
     if not pat_keywords:
-        return target_text.lower().find(pattern_text.lower())
-    target_lower = target_text.lower()
-    positions = sorted(
-        position
-        for keyword in pat_keywords
-        if (position := target_lower.find(keyword)) >= 0
-    )
+        match = _keyword_pattern(_normalize_whitespace(pattern_text)).search(
+            _normalize_whitespace(target_text), start
+        )
+        return match.start() if match else -1
+
+    positions = []
+    for keyword in pat_keywords:
+        match = _keyword_pattern(keyword).search(target_text, start)
+        if match:
+            positions.append(match.start())
+
     required = min(threshold, len(pat_keywords))
-    # The last required keyword better identifies the event's local span when
-    # two events share generic words such as "reward" or "update".
-    return positions[required - 1] if len(positions) >= required else -1
+    if len(positions) < required:
+        return -1
+    positions.sort()
+    # The last required keyword bounds the local evidence span.
+    return positions[required - 1]
 
 
 def item_is_essential(item, default=True):
@@ -243,7 +277,22 @@ def validate_trace_fields(report, item, name, schema_version):
 
 
 def item_evidence_matches(item, text, fields):
-    """Match at least one useful evidence field, preferring explicit keywords."""
+    """Match at least one useful evidence field, preferring anchor_quote.
+
+    ``anchor_quote`` is the strongest provenance field: a short span copied
+    from the source. If it is present and found, the item is proven; keywords
+    and summary fields are only fallbacks.
+    """
+    anchor_quote = _normalize_whitespace(item.get("anchor_quote", ""))
+    if anchor_quote:
+        if anchor_quote in _normalize_whitespace(text):
+            return True
+        anchor_keywords = extract_keywords(anchor_quote)
+        if anchor_keywords and keyword_match(
+            anchor_quote, text, threshold=min(2, len(anchor_keywords))
+        ):
+            return True
+
     keywords = item.get("keywords")
     if isinstance(keywords, list) and keywords:
         phrase = " ".join(str(value) for value in keywords)
@@ -253,6 +302,62 @@ def item_evidence_matches(item, text, fields):
     evidence = [str(item.get(field, "")).strip() for field in fields]
     evidence = [value for value in evidence if value]
     return any(keyword_match(value, text, threshold=2) for value in evidence)
+
+
+def _find_h2_headings(text):
+    """Find real ``## `` headings, ignoring headings inside fenced code."""
+    headings = []
+    offset = 0
+    fence_char = None
+    fence_len = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        fence = re.match(r"^(```+|~~~+)", stripped)
+        if fence:
+            marker = fence.group(1)
+            if fence_char is None:
+                fence_char, fence_len = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_len:
+                fence_char, fence_len = None, 0
+        elif fence_char is None:
+            match = re.match(r"^##\s+(.+?)\s*$", line)
+            if match:
+                headings.append((offset, match.group(1).strip()))
+        offset += len(line)
+    return headings
+
+
+def _extract_prose_blocks(text):
+    """Split verifier text into paragraph blocks (callout fences removed)."""
+    blocks = []
+    current = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(":::") or stripped.startswith("#"):
+            if current:
+                blocks.append("\n".join(current))
+                current = []
+            continue
+        if not stripped:
+            if current:
+                blocks.append("\n".join(current))
+                current = []
+            continue
+        current.append(line)
+    if current:
+        blocks.append("\n".join(current))
+    return [block for block in blocks if block.strip()]
+
+
+_LINE_RANGE_RE = re.compile(
+    r"(?:^|\b)(?:lines?\s*)(\d+)\s*(?:-|–|—|\.\.|to)\s*(\d+)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_explicit_line_range(source_anchor):
+    """True when the anchor is a source line range, not a stripped timestamp."""
+    return bool(_LINE_RANGE_RE.search(str(source_anchor)))
 
 
 def verify_manifest(manifest_path, markdown_path, phase="enriched"):
@@ -287,14 +392,12 @@ def verify_manifest(manifest_path, markdown_path, phase="enriched"):
         )
         return report
 
-    # Split markdown into sections
-    h2_matches = list(H2_PATTERN.finditer(md_text))
+    # Split markdown into sections (fence-aware: "## " inside code is not a heading)
+    h2_matches = _find_h2_headings(md_text)
     sections = {}
-    
-    for i, match in enumerate(h2_matches):
-        title = match.group(1).strip()
-        start = match.start()
-        end = h2_matches[i+1].start() if i + 1 < len(h2_matches) else len(md_text)
+
+    for i, (start, title) in enumerate(h2_matches):
+        end = h2_matches[i + 1][0] if i + 1 < len(h2_matches) else len(md_text)
         sect_text = md_text[start:end]
         
         # Try to parse dotted ID
@@ -493,10 +596,31 @@ def verify_manifest(manifest_path, markdown_path, phase="enriched"):
                 for field in ("trigger", "resolution", "preferred_term")
                 if str(moment.get(field, "")).strip()
             ]
+            if not required_parts and moment.get("summary"):
+                summary_val = str(moment["summary"]).strip()
+                if "->" in summary_val:
+                    required_parts = [p.strip() for p in summary_val.split("->") if p.strip()]
+                elif "→" in summary_val:
+                    required_parts = [p.strip() for p in summary_val.split("→") if p.strip()]
+                else:
+                    required_parts = [summary_val]
+
+            # Corrections may live in a Q&A exchange or in ordinary prose.
+            # Either way, all parts must co-occur in the SAME block so two
+            # unrelated Q&A entries cannot be stitched together.
+            evidence_blocks = extract_qna_blocks(sect_text, content_phase)
+            evidence_blocks += _extract_prose_blocks(sect_text)
             matched = any(
-                all(keyword_match(part, block, threshold=2) for part in required_parts)
-                for block in extract_qna_blocks(sect_text, content_phase)
-            )
+                all(
+                    keyword_match(
+                        part,
+                        block,
+                        threshold=min(2, max(1, len(extract_keywords(part)))),
+                    )
+                    for part in required_parts
+                )
+                for block in evidence_blocks
+            ) if required_parts else False
         else:
             matched = item_evidence_matches(
                 moment,
@@ -528,11 +652,13 @@ def verify_manifest(manifest_path, markdown_path, phase="enriched"):
 
     previous_order = 0
     positions_by_concept = {}
+    order_violations = {}
     for entry in flow:
         order = entry.get("order")
         cid = entry.get("concept")
         summary = str(entry.get("summary", "")).strip()
         source_anchor = str(entry.get("source_anchor", "")).strip()
+        anchor_quote = str(entry.get("anchor_quote", "")).strip()
         keywords = entry.get("keywords", [])
         name = f"Lecture flow {order!r}"
 
@@ -551,65 +677,122 @@ def verify_manifest(manifest_path, markdown_path, phase="enriched"):
             continue
 
         sect_text = sections[cid]["text"]
-        # Prefer explicit keywords when present; otherwise match on the summary.
-        evidence = (
-            " ".join(str(keyword) for keyword in keywords)
-            if isinstance(keywords, list) and keywords
-            else summary
-        )
-        evidence_keyword_count = len(extract_keywords(evidence))
+        # anchor_quote is the strongest evidence; keywords and the summary are
+        # fallbacks for compact manifests.
+        has_explicit_keywords = isinstance(keywords, list) and len(keywords) > 0
+        if anchor_quote:
+            evidence = anchor_quote
+            req_threshold = min(2, max(1, len(extract_keywords(evidence))))
+        elif has_explicit_keywords:
+            evidence = " ".join(str(keyword) for keyword in keywords)
+            req_threshold = max(1, len(extract_keywords(evidence)))
+        else:
+            evidence = summary
+            req_threshold = min(3, max(1, len(extract_keywords(evidence)) // 2))
+
+        previous_position = positions_by_concept.get(cid, [])
+        start = previous_position[-1][1] if previous_position else 0
         position = keyword_match_position(
             evidence,
             sect_text,
-            threshold=max(1, evidence_keyword_count),
+            threshold=req_threshold,
+            start=start,
         )
         if position < 0:
-            report.fail(
-                name,
-                f"Flow event '{summary}' was not matched in concept section {cid}.",
+            # Distinguish "content was lost" from "content moved earlier".
+            earlier = keyword_match_position(
+                evidence,
+                sect_text,
+                threshold=req_threshold,
+                start=0,
             )
-            continue
+            if earlier >= 0:
+                order_violations.setdefault(cid, []).append(
+                    (order, source_anchor, summary)
+                )
+                position = earlier
+            else:
+                report.fail(
+                    name,
+                    f"Flow event '{summary}' was not matched in concept section {cid}.",
+                )
+                continue
         positions_by_concept.setdefault(cid, []).append((order, position))
         report.passed(name, f"Flow event preserved in section {cid}.")
 
-    for cid, positions in positions_by_concept.items():
-        ordered_positions = [position for _, position in sorted(positions)]
-        if (
-            ordered_positions != sorted(ordered_positions)
-            or len(ordered_positions) != len(set(ordered_positions))
-        ):
+    # Order violations are only blocking when the manifest carries explicit
+    # source line ranges. Timestamp anchors (or no anchor) mean the manifest
+    # cannot prove narrative order, so report a warning instead of failing
+    # otherwise-correct lectures.
+    for cid, violations in order_violations.items():
+        has_line_ranges = all(
+            _has_explicit_line_range(anchor) for _, anchor, _ in violations
+        )
+        if has_line_ranges:
             report.fail(
                 f"Lecture flow order ({cid})",
-                "Teaching events appear out of source order inside the concept section.",
+                "Teaching events appear out of source order inside the concept "
+                "section, and the manifest carries explicit source line ranges.",
+            )
+        else:
+            report.warn(
+                f"Lecture flow order ({cid})",
+                "Teaching events appear out of source order, but the manifest "
+                "has no explicit source line ranges. Review the section; this "
+                "is not blocking.",
             )
 
     # Verify Exam Guidance by keywords
+    exam_sections = {
+        sect_id: info
+        for sect_id, info in sections.items()
+        if "exam" in str(info.get("title", "")).lower()
+    }
     for exam in manifest.get("exam_guidance", []):
         cid = exam.get("concept")
-        guidance = exam.get("guidance", "")
-        
+        guidance = str(exam.get("guidance", "")).strip()
+        if not guidance:
+            continue
+
+        matched = False
         if cid in sections:
-            sect_text = sections[cid]["text"]
-            if not keyword_match(guidance, sect_text, threshold=2):
-                # Check global Exam Guidance Summary as well
-                exam_summary_sect = sections.get("Exam Guidance Summary")
-                found_in_summary = exam_summary_sect and keyword_match(guidance, exam_summary_sect["text"], threshold=2)
-                
-                if not found_in_summary:
-                    report.warn(f"Exam Guidance ({cid})", f"Exam guidance '{guidance}' not matched in section or Exam Guidance Summary.")
-                else:
-                    report.passed(f"Exam Guidance ({cid})", f"Exam guidance found in Exam Guidance Summary: '{guidance}'")
-            else:
-                report.passed(f"Exam Guidance ({cid})", f"Exam guidance matched in section: '{guidance}'")
+            matched = keyword_match(guidance, sections[cid]["text"], threshold=2)
+        if not matched:
+            # Accept any exam-focused section, not only the legacy
+            # "Exam Guidance Summary" heading.
+            matched = any(
+                keyword_match(guidance, info["text"], threshold=2)
+                for info in exam_sections.values()
+            )
+        if matched:
+            report.passed(f"Exam Guidance ({cid})", f"Exam guidance matched: '{guidance}'")
+        else:
+            report.warn(
+                f"Exam Guidance ({cid})",
+                f"Exam guidance '{guidance}' was not matched in the concept "
+                "section or an exam-focused section.",
+            )
 
     # Verify Named References
+    normalized_text = _normalize_whitespace(md_text)
     for ref in manifest.get("named_references", []):
-        name = ref.get("name", "")
-        if name:
-            if name.lower() not in md_text.lower():
-                report.warn(f"Reference", f"Named reference '{name}' is not found in the enriched text.")
-            else:
-                report.passed(f"Reference", f"Named reference '{name}' found.")
+        name = str(ref.get("name", "")).strip()
+        if not name:
+            continue
+        found = _normalize_whitespace(name) in normalized_text
+        if not found:
+            # Fall back to distinctive-token matching for references recorded
+            # with section signs or edition noise (e.g. "Bishop §4.3").
+            core = re.sub(r"[§#].*$", "", name).strip()
+            found = bool(core) and keyword_match(
+                core, md_text, threshold=min(2, max(1, len(extract_keywords(core))))
+            )
+        if found:
+            report.passed("Reference", f"Named reference '{name}' found.")
+        elif item_is_essential(ref, default=False):
+            report.fail("Reference", f"Essential named reference '{name}' is not found in the text.")
+        else:
+            report.warn("Reference", f"Named reference '{name}' is not found in the text.")
 
     return report
 

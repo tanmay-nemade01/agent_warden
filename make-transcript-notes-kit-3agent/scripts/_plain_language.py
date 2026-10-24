@@ -133,6 +133,62 @@ CLICHES_AND_JARGON = {
     "paradigm shifts": "major changes",
 }
 
+# --------------------------------------------------------------------------- #
+# 5. PII / anonymisation — shared by the dense and HTML lint gates.
+#
+# Severity policy (single source of truth):
+#   FAIL — direct transcript/recording references (notes must stand alone)
+#   WARN — professor/university mention candidates (may be academic citations)
+# --------------------------------------------------------------------------- #
+PII_PATTERNS = [
+    ("transcript reference", re.compile(
+        r"\b(?:transcript|lecture\s+recording|audio\s+recording|this\s+recording)\b",
+        re.IGNORECASE)),
+    # Match the role word case-insensitively but keep the proper noun's case
+    # requirement, so "professor Bishop" is caught without flagging
+    # "professor of physics".
+    ("professor/instructor mention", re.compile(
+        r"\b(?:[Pp]rofessor|[Ii]nstructor|[Ll]ecturer)\s+[A-Z][a-z]+\b")),
+    ("university mention candidate", re.compile(
+        r"\b(?:[Uu]niversity|[Ii]nstitute|[Cc]ollege)\s+of\s+[A-Z]")),
+]
+
+_PII_FAIL_LABELS = {
+    "transcript reference",
+    "professor/instructor mention",
+}
+
+
+def find_pii(text):
+    """Return [(label, matched_text)] for every PII candidate."""
+    hits = []
+    for label, pattern in PII_PATTERNS:
+        for match in pattern.finditer(text):
+            hits.append((label, match.group(0)))
+    return hits
+
+
+def pii_severity(label):
+    """Return "FAIL" or "WARN" for a PII label using the shared policy."""
+    return "FAIL" if label in _PII_FAIL_LABELS else "WARN"
+
+
+# --------------------------------------------------------------------------- #
+# 6. Shared pre-processing helpers
+# --------------------------------------------------------------------------- #
+VERIFY_MARKER_RE = re.compile(r"\*\[verify\b[^\]]*\]\*", re.IGNORECASE)
+
+
+def strip_verify_markers(text):
+    """Remove *[verify: ...]* markers before prose heuristics run.
+
+    A marker's reason can legitimately contain a phrase like "after
+    simplification"; that is metadata about the reconstruction, not
+    hand-waving prose.
+    """
+    return VERIFY_MARKER_RE.sub(" ", text)
+
+
 # Pre-compiled matchers ------------------------------------------------------ #
 _FANCY_RE = {
     w: re.compile(r"\b" + re.escape(w) + r"\b", re.IGNORECASE)

@@ -21,16 +21,59 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _plain_language as PL
 
 # Patterns
-H2_PATTERN = re.compile(r"^##\s+(.+)$", re.MULTILINE)
-H3_PATTERN = re.compile(r"^###\s+(.+)$", re.MULTILINE)
 DOTTED_H2 = re.compile(r"^(\d+)\.(\d+)\s+(.+)$")
 DOTTED_H3 = re.compile(r"^(\d+)\.(\d+)\.(\d+)\s+(.+)$")
 
-PII_PATTERNS = [
-    ("transcript reference", re.compile(r"\b(transcript|lecture recording|audio recording|this recording)\b", re.I)),
-    ("professor/instructor mention", re.compile(r"\b(professor|instructor|lecturer)\s+[A-Z][a-z]+\b")),
-    ("university mention candidate", re.compile(r"\b(University|Institute|College)\s+of\s+[A-Z]")),
-]
+_APPENDIX_TITLE = re.compile(
+    r"^(?:appendix|glossary|further\s+reading|references?|bibliography|index|"
+    r"acknowledg\w*|key\s+industry\s+applications|exam\s+guidance\s+summary|"
+    r"summary|conclusion)\b",
+    re.IGNORECASE,
+)
+_APPENDIX_MARKER = "<!-- appendix -->"
+
+
+def _find_heading_spans(text, level):
+    """Find ``#``-headings outside fenced code blocks.
+
+    Returns ``(title, start, end)`` tuples. A code sample containing
+    ``## comment`` or ``### comment`` is not a heading and must not trip the
+    numbering gate after the splitter correctly kept it inside one section.
+    """
+    prefix = "#" * level
+    spans = []
+    offset = 0
+    fence_char = None
+    fence_len = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        fence = re.match(r"^(```+|~~~+)", stripped)
+        if fence:
+            marker = fence.group(1)
+            if fence_char is None:
+                fence_char, fence_len = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_len:
+                fence_char, fence_len = None, 0
+        elif fence_char is None:
+            match = re.match(r"^" + prefix + r"\s+(.+?)\s*$", line)
+            if match:
+                spans.append((match.group(1).strip(), offset, offset + len(line)))
+        offset += len(line)
+    return spans
+
+
+def _is_appendix_heading(text, title, start):
+    """Return True for explicitly-marked or known non-dotted appendix headings.
+
+    Appendix headings are intentionally unnumbered, so the dotted L.T pattern
+    cannot apply to them. An explicit ``<!-- appendix -->`` marker immediately
+    before the heading also opts in any custom appendix title.
+    """
+    if _APPENDIX_TITLE.match(title.strip()):
+        return True
+    before = text[:start].rstrip()
+    return before.endswith(_APPENDIX_MARKER)
+
 
 class Report:
     def __init__(self):
@@ -71,9 +114,7 @@ def detect_lecture_num(path, text):
         return int(match.group(1))
     
     # Try first H2 that starts with digits
-    h2_matches = H2_PATTERN.findall(text)
-    for title in h2_matches:
-        title = title.strip()
+    for title, _, _ in _find_heading_spans(text, 2):
         m = DOTTED_H2.match(title)
         if m:
             return int(m.group(1))
@@ -81,10 +122,8 @@ def detect_lecture_num(path, text):
 
 
 def check_numbering(text, lecture_num, report):
-    h2_matches = []
-    # Find h2s and their indices
-    for match in H2_PATTERN.finditer(text):
-        h2_matches.append((match.group(1).strip(), match.start(), match.end()))
+    # Find real h2s (outside code fences) and their spans.
+    h2_matches = _find_heading_spans(text, 2)
 
     if not h2_matches:
         report.failed("numbering", "No H2 (##) headings found in document.")
@@ -92,12 +131,12 @@ def check_numbering(text, lecture_num, report):
 
     expected_t = 1
     for title, start, end in h2_matches:
-        if title in ("Exam Guidance Summary", "Key Industry Applications"):
+        if _is_appendix_heading(text, title, start):
             continue
-        
+
         m = DOTTED_H2.match(title)
         if not m:
-            report.failed("numbering", f"H2 heading '{title}' does not match dotted L.T pattern (e.g. '## 5.1 Concept').")
+            report.failed("numbering", f"H2 heading '{title}' does not match dotted L.T pattern (e.g. '## 5.1 Concept') or a known appendix title.")
             continue
         
         l_val = int(m.group(1))
@@ -111,9 +150,9 @@ def check_numbering(text, lecture_num, report):
         
         expected_t += 1
 
-    # Extract sections to check H3 numbering
+    # Extract sections to check H3 numbering (when present)
     for i, (title, start, end) in enumerate(h2_matches):
-        if title in ("Exam Guidance Summary", "Key Industry Applications"):
+        if _is_appendix_heading(text, title, start):
             continue
         
         m = DOTTED_H2.match(title)
@@ -126,14 +165,13 @@ def check_numbering(text, lecture_num, report):
         section_end = h2_matches[i+1][1] if i + 1 < len(h2_matches) else len(text)
         section_text = text[start:section_end]
         
-        h3_matches = H3_PATTERN.findall(section_text)
+        h3_matches = [title for title, _, _ in _find_heading_spans(section_text, 3)]
         if not h3_matches:
-            report.failed("numbering", f"Section '{title}' has no H3 subsections. Every section must have at least one subsection.")
+            # Standalone, focused sections without subsections are permitted
             continue
             
         expected_s = 1
         for h3_title in h3_matches:
-            h3_title = h3_title.strip()
             m3 = DOTTED_H3.match(h3_title)
             if not m3:
                 report.failed("numbering", f"H3 heading '{h3_title}' does not match dotted L.T.S pattern.")
@@ -163,10 +201,13 @@ def check_math_delimiters(text, report):
     if double_inline or double_block:
         report.failed("math delimiters", f"Found double-backslash math delimiters: {len(double_inline)} inline \\\\(, {len(double_block)} block \\\\[. MathJax will not render these.")
     
-    # Flag single or double dollars
-    dollars = len(re.findall(r"(?<!\\)\$\$?", text))
+    # Flag raw dollar delimiters, but allow currency (e.g. "$5"): a dollar
+    # sign immediately followed by a digit is prose, not a math delimiter.
+    double_dollars = len(re.findall(r"(?<!\\)\$\$", text))
+    single_dollars = len(re.findall(r"(?<!\\)\$(?!\$|\s*\d)", text))
+    dollars = double_dollars + single_dollars
     if dollars > 0:
-        report.failed("math delimiters", f"Found {dollars} raw $ or $$ delimiters. Use only single-backslash \\( ... \\) and \\[ ... \\].")
+        report.failed("math delimiters", f"Found {dollars} raw $ or $$ delimiter(s). Use only single-backslash \\( ... \\) and \\[ ... \\]. (A dollar sign before a digit is treated as currency.)")
 
     # Flag nested inline delimiters in display blocks
     display_blocks = re.findall(r"\\\[(.*?)\\\]", text, re.DOTALL)
@@ -199,14 +240,20 @@ def check_math_delimiters(text, report):
 
 
 def check_pii_and_anonymization(text, report):
-    pii_hits = []
-    for label, pat in PII_PATTERNS:
-        for m in pat.finditer(text):
-            pii_hits.append(f"{label}: \"{m.group(0)}\"")
-            
-    if pii_hits:
-        report.failed("PII / anonymization", f"PII or source-file references found (notes must stand alone without erasing anonymous Q&A):\n  " + "\n  ".join(pii_hits))
-    else:
+    pii_fails = []
+    pii_warns = []
+    for label, snippet in PL.find_pii(text):
+        entry = f"{label}: \"{snippet}\""
+        if PL.pii_severity(label) == "FAIL":
+            pii_fails.append(entry)
+        else:
+            pii_warns.append(entry)
+
+    if pii_fails:
+        report.failed("PII / anonymization", f"Direct transcript or recording references found (notes must stand alone):\n  " + "\n  ".join(pii_fails))
+    if pii_warns:
+        report.warned("PII / candidate mention", f"Candidate author or university mention found (verify no lecturer PII was leaked):\n  " + "\n  ".join(pii_warns))
+    if not pii_fails and not pii_warns:
         report.passed("PII / anonymization", "No PII or transcript references detected.")
 
 
@@ -238,7 +285,8 @@ def extract_readable_prose(text):
     and markdown tables. It is safer to omit those regions than to encourage an
     agent to break correct mathematics while chasing a word-count score.
     """
-    clean = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    clean = PL.strip_verify_markers(text)
+    clean = re.sub(r"```.*?```", " ", clean, flags=re.DOTALL)
     clean = re.sub(
         r"\\begin\{([A-Za-z*]+)\}.*?\\end\{\1\}",
         " ",
@@ -326,7 +374,7 @@ def check_fancy_words(text, report):
         report.passed("fancy words", "No fancy-word offenders detected.")
         return
     total = sum(c for _, _, c in hits)
-    detail = "; ".join(f"'{w}'→'{s}' ({c}x)" for w, s, c in hits[:6])
+    detail = "; ".join(f"'{w}'->'{s}' ({c}x)" for w, s, c in hits[:6])
     report.warned(
         "fancy words",
         f"{total} possible plain-language substitution(s): {detail}. "

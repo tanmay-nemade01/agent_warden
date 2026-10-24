@@ -430,6 +430,40 @@ class BatchPlanningTests(unittest.TestCase):
         })
         self.assertEqual(res["jobs"][0]["prefix"], "QC-L1")
 
+    def test_batch_honours_per_entry_docs_folder(self):
+        custom_docs = self.ws.root / "custom_docs_folder"
+        custom_docs.mkdir(parents=True, exist_ok=True)
+        res = self._plan({
+            "phases": [1],
+            "subjects": [
+                {"abbr": "QC", "transcripts": [str(self.ws.transcripts / "QC" / "qc_lecture_1.txt")],
+                 "docs": str(custom_docs)},
+                {"abbr": "NLP", "transcripts": [str(self.ws.transcripts / "NLP" / "nlp_lecture_1.txt")],
+                 "docs": "__none__"},
+            ],
+        })
+        self.assertTrue(res["ok"])
+        self.assertEqual(len(res["jobs"]), 2)
+        self.assertEqual(res["jobs"][0]["docs"], str(custom_docs))
+        self.assertEqual(res["jobs"][1]["docs"], "__none__")
+
+    def test_batch_disambiguates_prefixes_across_entries_for_same_subject(self):
+        extra_t = self.ws.transcripts / "QC" / "qc_lecture_1_copy.txt"
+        extra_t.write_text("Hello duplicate QC lecture", encoding="utf-8")
+        res = self._plan({
+            "phases": [1],
+            "subjects": [
+                {"abbr": "QC", "transcripts": [str(self.ws.transcripts / "QC" / "qc_lecture_1.txt")]},
+                {"abbr": "QC", "transcripts": [str(extra_t)]},
+            ],
+        })
+        self.assertTrue(res["ok"])
+        self.assertEqual(len(res["jobs"]), 2)
+        prefixes = [j["prefix"] for j in res["jobs"]]
+        self.assertEqual(len(prefixes), 2)
+        self.assertNotEqual(prefixes[0], prefixes[1])
+        self.assertTrue(res["jobs"][1]["adjusted"])
+
 
 class OutputServingTests(unittest.TestCase):
     """/outputs/<path> must resolve percent-encoded names and templates."""

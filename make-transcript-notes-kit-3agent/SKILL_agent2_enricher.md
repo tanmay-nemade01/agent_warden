@@ -9,8 +9,8 @@ description: >-
   and an alternate procedural spine for algorithm/process concepts. Supplements missing
   domain knowledge. Reconciles every reconstructed formula and derivation against the
   enrichment docs (resolving [verify] markers, filling skipped derivation steps,
-  aligning notation) WITHOUT introducing new topics. Carries Agent 1's exam-guidance
-  and industry-application appendices through to output. Output is an enriched markdown
+  aligning notation) WITHOUT introducing new major topics from generic textbooks or instructor companion documents. Authoritative instructor slides/handouts may add supporting subsections and callouts, but never a new major (`##`) topic. Carries Agent 1's
+  industry-application appendix through to output. Output is an enriched markdown
   draft with callout type annotations, ready for Agent 3. Trigger after Agent 1
   (extractor) and before Agent 3 (formatter).
 ---
@@ -21,7 +21,7 @@ description: >-
 
 **Your input:**
 1. Agent 1's dense draft `<LecturePrefix>_notes_dense.md` (located in the same directory).
-2. Companion Documents provided for reference (Textbooks, Reference Books `T1`/`T2`/`R1`/`R2`, Lecture Notes `LN-*`, Slides, Handouts). Follow the Document Taxonomy Rules for introducing new vs supporting topics.
+2. Companion Documents provided for reference (Textbooks, Reference Books `T1`/`T2`/`R1`/`R2`, Lecture Notes `LN-*`, Slides, Handouts). Follow the Document Taxonomy Rules: companion documents add supporting detail, never new major topics.
 3. `<LecturePrefix>_extraction_manifest.json`, including source-anchored `teaching_moments` and `lecture_flow`. If the manifest is missing, stop rather than enriching without a preservation contract.
 
 **Critical math role:** Agent 1 reconstructed LaTeX from the transcript's plain-language math and left `*[verify]*` markers wherever the reconstruction was uncertain, and wherever a derivation step was skipped. **It is YOUR job to resolve every `*[verify]*` marker in each section** by reconciling the math against the enrichment docs (and web research if needed), and to fill any skipped derivation step with the real algebra. See the "Math reconciliation from enrichment docs" section below. A `*[verify]*` marker reaching Agent 3 is a failure of this phase.
@@ -69,12 +69,12 @@ For each `section_XX.md` (starting from `section_01.md`, and including `section_
 6. **Write the section summary.** Save a short JSON object to `sections/section_XX_summary.json` containing:
    ```json
    {
-     "id": "L.T",
+     "id": "<concept-id>",
      "title": "Concept Name",
      "summary": "Brief 1-2 sentence concept summary",
      "symbols": ["list", "of", "symbols", "defined"],
      "analogy": "Professor analogy description, or null",
-     "manifest_items_closed": ["L.T.qna.1", "L.T.moment.1"],
+     "manifest_items_closed": ["<concept-id>.qna.1", "<concept-id>.moment.1"],
      "manifest_items_escalated": [],
      "verify_markers_resolved": 2
    }
@@ -93,10 +93,13 @@ Do not process multiple sections in parallel — do them one at a time to mainta
    ```bash
    python scripts/section_splitter.py split outputs/<Subject>/<LecturePrefix>/<LecturePrefix>_notes_enriched.md \
        --output-dir outputs/<Subject>/<LecturePrefix>/sections/
+   ```
+   The splitter automatically invalidates all section summaries when the heading tree changed (sections added, removed, renamed, or renumbered), because stale summaries would otherwise bind to the wrong content. If that happens, regenerate the affected `section_XX_summary.json` files before binding:
+   ```bash
    python scripts/section_splitter.py bind-summaries \
        outputs/<Subject>/<LecturePrefix>/sections/
    ```
-   `bind-summaries` records each final section's heading ID and SHA-256 in its summary. It fails on missing or orphaned summaries.
+   `bind-summaries` records each final section's heading ID and SHA-256 in its summary. It fails on missing or orphaned summaries. Because new major topics are prohibited, the heading tree should normally be unchanged.
 4. **Run the quality lint gate** against the assembled enriched draft. Structural, math-delimiter, anonymization, hand-waving, and unresolved-marker failures are blocking. Readability findings are advisory:
    ```bash
    python scripts/lint_dense.py outputs/<Subject>/<LecturePrefix>/<LecturePrefix>_notes_enriched.md \
@@ -113,20 +116,20 @@ Do not process multiple sections in parallel — do them one at a time to mainta
    a. Scan the assembled `<LecturePrefix>_notes_enriched.md` (or the section files) and compile a flat list of every major topic covered using the section hierarchy.
       - Every `##` (section title) becomes a topic entry, formatted as `lecture_number.topic_number Title` (e.g., `5.1 Concept Name` if processing Lecture 5).
       - Every `###` (subsection title) becomes a sub-topic entry, formatted as `lecture_number.topic_number.sub_topic_number Title` (e.g., `5.1.1 Sub-concept Name`).
-      - Only include real topics (skip appendices like "Key Industry Applications"). Note: do not create or maintain revision notes, study guide sections, or exam guidance summary sections.
+      - Only include real topics (skip appendices like "Key Industry Applications").
    b. Write these formatted topics (one per line) to a temporary text file named `topics_list.txt` in the workspace root.
    c. Run the topic mapping update script:
       ```bash
       python scripts/update_topic_mapping.py "<Subject>" "<LectureNumber>" \
-          "<Lecture Topic>" "<Subject>/<LecturePrefix>_notes/<LecturePrefix>_notes.html" \
+          "<Lecture Topic>" "outputs/<Subject>/<LecturePrefix>/<LecturePrefix>_notes/<LecturePrefix>_notes.html" \
           topics_list.txt
       ```
-      Where `<Subject>` is the full subject name, `<LectureNumber>` is the lecture number, `<Lecture Topic>` is the clean main lecture topic (from the `#` header), and the HTML path parameter is standardized as `<Subject>/<LecturePrefix>_notes/<LecturePrefix>_notes.html`.
+      Where `<Subject>` is the full subject name, `<LectureNumber>` is the lecture number, `<Lecture Topic>` is the clean main lecture topic (from the `#` header), and the HTML path parameter is standardized as `outputs/<Subject>/<LecturePrefix>/<LecturePrefix>_notes/<LecturePrefix>_notes.html`.
    d. Delete the temporary `topics_list.txt` file.
    e. Confirm that the corresponding subject topic mapping YAML file (e.g., inside `topic_mappings/`) is successfully updated or created. Note that the update script resolves names robustly and may write to a normalized filename (for example, updating `Deep Neural Networks.yaml` when `<Subject>` is passed as `DNN` or `Deep_Neural_Networks`).
 
-Clean up any other helper files or scripts, but keep `sections/` and every `section_XX_summary.json` as audit artifacts:
-Ensure that ONLY `<LecturePrefix>_notes_dense.md`, `<LecturePrefix>_notes_enriched.md`, `<LecturePrefix>_extraction_manifest.json`, and the `sections/` directory (with section files and summaries) remain in the lecture folder.
+Clean up any other helper files or scripts, but keep `sections/`, every `section_XX_summary.json`, and run logs as audit artifacts:
+Ensure that ONLY `<LecturePrefix>_notes_dense.md`, `<LecturePrefix>_notes_enriched.md`, `<LecturePrefix>_extraction_manifest.json`, `*_run_events.jsonl`, and the `sections/` directory (with section files and summaries) remain in the lecture folder.
 
 ---
 
@@ -163,8 +166,10 @@ Ensure that ONLY `<LecturePrefix>_notes_dense.md`, `<LecturePrefix>_notes_enrich
   - **Major Topics ($##$):** Strict prohibition on introducing new top-level major topics not mentioned in `_notes_dense.md`.
   - **Supporting Topics ($###$ or Callouts):** **PERMITTED.** Include supporting topics, prerequisites, background math, intermediate derivation steps, and intuitive explanations from textbooks that directly support and enhance existing major topics.
 - **Professor-Provided Companion Documents (`LN-*`, Slides, Lecture Notes, Handouts, non-T/R files):**
-  - **Curriculum Extension:** Treat as authoritative instructor-provided lecture material.
-  - **New Topics Allowed:** **NEW major (`##`) and minor (`###`) topics CAN and SHOULD be introduced** if present in these documents, even if omitted in the transcript/dense draft.
+  - **Authoritative Supporting Detail:** Treat these as ground truth for depth, worked examples, notation, and the instructor's intended emphasis.
+  - **New Major Topics (`##`) are PROHIBITED.** The major section outline must come only from the transcript/dense draft. Even authoritative instructor documents cannot add a new `##` topic. This keeps the manifest, heading inventory, and section summaries synchronized.
+  - **Supporting Topics (`###` or Callouts) are PERMITTED.** Add subsections, prerequisites, background math, intermediate derivation steps, and intuitive explanations that directly support an existing major topic.
+  - **Timing Requirement:** Any supporting subsection changes must be finished before the final re-split and summary binding.
 
 ### 2. Math Discrepancy & Verbal Audit Trail
 **Never silently override the professor:** if the professor's stated formula differs from the standard form in the docs, keep BOTH: present the professor's version (it is what their exam will likely test), then add a note giving the standard form and the relationship. Example: "The professor writes the loss as \(-\log p(y\mid x)\). The standard form in [doc] is the same; some texts write it as the cross-entropy \( -\sum_k y_k \log p_k \), which is equivalent for one-hot \(y\)." Never erase the professor's version.
@@ -184,7 +189,7 @@ Use this arc as a coverage guide for every major concept. Preserve the source ex
 | 3. Formalize | Math built step by step. Every symbol named on first use. Show intermediate forms before final equation. **Reconciled against the enrichment docs** — every `*[verify]*` marker from Agent 1 resolved (confirmed, corrected, or filled). Full derivations with no skipped algebra. | `:::key-concept` (blue) |
 | 4. Worked Example | Real numbers, every step, final answer **bolded**. End with one-sentence sense-check. | `:::example-box` (green) |
 | 5. Assumptions & Scope | When the formula/idea applies and when it breaks. State the assumptions (e.g., IID, linearity, large n) and what goes wrong if they fail. This is about applicability boundaries — NOT beginner mistakes (those go in Pitfalls). | `:::warning-box` (red) |
-| 6. Visual Intuition | Describe a chart/figure: name both axes, describe shape, point out landmarks, state one-sentence takeaway. Where a simple diagram materially helps (a curve, a tree, a flow), sketch it as an inline figure; otherwise describe it vividly. If the transcript described a specific diagram, preserve and enhance that description. | (inline prose) |
+| 6. Visual Intuition | Real visual element: Inline SVG figure (`<figure class="visual-intuition"><svg ...>...</svg><figcaption>...</figcaption></figure>`) depicting the geometric intuition (e.g. curve, decision boundary, pipeline architecture, or state diagram) with labeled axes/landmarks and a 1-sentence takeaway caption. | `<figure class="visual-intuition">` |
 | 7. Pitfalls | 2-4 common beginner traps. Flag any the professor explicitly called out. | `:::warning-box` (red) |
 | 8. Recap + Bridge | One-line recap of the concept + a handoff. The handoff may point to the next concept, loop back to an earlier one, note a parallel track, or tie together a capstone — match the lecture's actual structure, not a forced linear sequence. | `:::key-takeaway` (amber) |
 | 9. Real-World & Domain Connection | Specific named application AND where this matters in the broader field, in one place. Combine the concrete use case ("civil engineers use this to check bridge load capacity") with the one-paragraph domain placement. Do not split into two thin, redundant sections. | (inline prose) |
@@ -256,7 +261,7 @@ Annotate with `:::type` / `:::` fenced blocks. The five types match the teaching
 | Repeated student questions on one concept | Deduplicate into one canonical Q&A per confusion point (see Q&A guardrail). Note frequency; drop pure repetition |
 | Professor contrasts this concept with a sibling | Add a Comparison situational step (table + one-line "when to pick which") |
 | Concept is an algorithm or process | Use the procedural spine, not the definition-centric core |
-| Agent 1's Exam Guidance Summary / Key Industry Applications sections | Carry them through as appendix sections after the concepts; enrich lightly, never drop |
+| Agent 1's Key Industry Applications section | Carry it through as an appendix section after the concepts; enrich lightly, never drop |
 
 ---
 
@@ -361,9 +366,130 @@ Before handoff, search your output for `*[verify]*`. No marker may survive into 
 
 ---
 
-## Visual intuition rules
+## Visual intuition rules — Real Visual Elements (Inline SVG)
 
-When describing charts/figures: name both axes (with units), describe shape (linear/exponential/U/S-curve/bell), point out landmarks (peak, trough, crossing, asymptote — where + what it means), state one-sentence takeaway, connect to the analogy. If the transcript described a specific diagram, preserve and enhance that description.
+Rather than merely describing what a graph looks like in text ("imagine a curve..."), generate a real, high-quality, self-contained **Inline SVG element** inside a `<figure class="visual-intuition">` block. A clean visual element anchors mathematical abstraction in immediate spatial intuition.
+
+### Container & Structure
+
+Every visual intuition block follows this structure:
+
+```html
+<figure class="visual-intuition">
+  <svg viewBox="0 0 500 220" role="img" aria-label="Descriptive diagram title" xmlns="http://www.w3.org/2000/svg">
+    <!-- SVG elements with presentation attributes -->
+  </svg>
+  <figcaption><strong>Figure X.Y:</strong> One-sentence takeaway explaining the geometric meaning of the concept.</figcaption>
+</figure>
+```
+
+### Design Standards & Palette
+
+- **Coordinate System:** Standard `viewBox="0 0 500 220"`. Keeps diagrams uniform and responsive across mobile and desktop.
+- **Palette (High-contrast, Accessible):**
+  - Grid / Axes: `stroke="#94a3b8"` (stroke-width="1.5"), arrow markers at ends.
+  - Primary Curve / Function: `stroke="#2563eb"` (stroke-width="2.5", fill="none").
+  - Comparison / Alternate Curve: `stroke="#0d9488"` or `stroke="#7c3aed"` (stroke-width="2.5").
+  - Landmarks (Minima, maxima, optima, inflection points): `fill="#ef4444"` or `fill="#f59e0b"` with `<circle r="4" ... />`.
+  - Annotation Text: `fill="#334155"`, `font-size="12px"`, `font-family="system-ui, sans-serif"`, `text-anchor="middle"`.
+- **Presentation Attributes Only:** Use XML presentation attributes (`stroke`, `fill`, `stroke-width`, `font-size`) directly on SVG elements rather than inline CSS styles.
+- **Unique Element & Marker IDs:** Prefix all SVG `id` attributes (e.g., `marker id="fig1-arrow"`, `url(#fig1-arrow)`) with the figure or section identifier so multiple figures on the same page never collide on duplicate IDs like `id="arrow"` or `id="flow-arrow"`.
+- **Self-contained:** No external script engines, no external image links, no `<style>` blocks.
+
+### Canonical Pattern Library
+
+#### Pattern A — 2D Coordinate Function & Optimization Landscape (e.g. Convex Loss, Activation Function)
+```html
+<figure class="visual-intuition">
+  <svg viewBox="0 0 500 220" role="img" aria-label="Convex Cost Function Landscape" xmlns="http://www.w3.org/2000/svg">
+    <!-- Axes with Arrowheads -->
+    <defs>
+      <marker id="fig-a-arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#64748b" />
+      </marker>
+    </defs>
+    <line x1="50" y1="180" x2="460" y2="180" stroke="#64748b" stroke-width="1.5" marker-end="url(#fig-a-arrow)" />
+    <line x1="70" y1="190" x2="70" y2="25" stroke="#64748b" stroke-width="1.5" marker-end="url(#fig-a-arrow)" />
+    <text x="460" y="200" fill="#475569" font-size="12px" text-anchor="end">Parameter θ</text>
+    <text x="60" y="20" fill="#475569" font-size="12px" text-anchor="start">Cost J(θ)</text>
+
+    <!-- Convex Loss Curve -->
+    <path d="M 90 40 Q 250 220 430 40" fill="none" stroke="#2563eb" stroke-width="3" />
+
+    <!-- Global Minimum Landmark -->
+    <circle cx="250" cy="130" r="5" fill="#ef4444" />
+    <line x1="250" y1="130" x2="250" y2="180" stroke="#ef4444" stroke-width="1" stroke-dasharray="4" />
+    <text x="250" y="115" fill="#ef4444" font-size="12px" font-weight="bold" text-anchor="middle">Global Minimum θ*</text>
+  </svg>
+  <figcaption><strong>Figure:</strong> The convex loss curve exhibits a single stationary point where the gradient vanishes, ensuring gradient descent converges to the global minimum.</figcaption>
+</figure>
+```
+
+#### Pattern B — Flowchart / Architectural Pipeline (e.g. Forward Pass, Model Workflow)
+```html
+<figure class="visual-intuition">
+  <svg viewBox="0 0 500 160" role="img" aria-label="Pipeline Architecture" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="fig-b-flow-arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#3b82f6" />
+      </marker>
+    </defs>
+    <!-- Stage 1 -->
+    <rect x="30" y="50" width="110" height="60" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2" />
+    <text x="85" y="77" fill="#1e3a8a" font-size="13px" font-weight="bold" text-anchor="middle">Input x</text>
+    <text x="85" y="95" fill="#64748b" font-size="11px" text-anchor="middle">Raw Features</text>
+
+    <!-- Arrow 1 -> 2 -->
+    <line x1="140" y1="80" x2="190" y2="80" stroke="#3b82f6" stroke-width="2" marker-end="url(#fig-b-flow-arrow)" />
+
+    <!-- Stage 2 -->
+    <rect x="195" y="50" width="120" height="60" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="2" />
+    <text x="255" y="77" fill="#14532d" font-size="13px" font-weight="bold" text-anchor="middle">Transform φ(x)</text>
+    <text x="255" y="95" fill="#64748b" font-size="11px" text-anchor="middle">Basis Projection</text>
+
+    <!-- Arrow 2 -> 3 -->
+    <line x1="315" y1="80" x2="365" y2="80" stroke="#3b82f6" stroke-width="2" marker-end="url(#fig-b-flow-arrow)" />
+
+    <!-- Stage 3 -->
+    <rect x="370" y="50" width="100" height="60" rx="8" fill="#faf5ff" stroke="#9333ea" stroke-width="2" />
+    <text x="420" y="77" fill="#581c87" font-size="13px" font-weight="bold" text-anchor="middle">Output ŷ</text>
+    <text x="420" y="95" fill="#64748b" font-size="11px" text-anchor="middle">Linear Predictor</text>
+  </svg>
+  <figcaption><strong>Figure:</strong> Non-linear basis expansion maps raw inputs into higher-dimensional feature space where linear regression can separate complex targets.</figcaption>
+</figure>
+```
+
+#### Pattern C — Classification & Decision Boundary (e.g. Linear Separator, Margins)
+```html
+<figure class="visual-intuition">
+  <svg viewBox="0 0 500 220" role="img" aria-label="Linear Decision Boundary" xmlns="http://www.w3.org/2000/svg">
+    <!-- Axes -->
+    <line x1="60" y1="190" x2="450" y2="190" stroke="#94a3b8" stroke-width="1.5" />
+    <line x1="60" y1="190" x2="60" y2="30" stroke="#94a3b8" stroke-width="1.5" />
+    <text x="450" y="208" fill="#475569" font-size="12px" text-anchor="end">Feature x₁</text>
+    <text x="50" y="25" fill="#475569" font-size="12px" text-anchor="start">Feature x₂</text>
+
+    <!-- Decision Boundary Line -->
+    <line x1="100" y1="180" x2="400" y2="40" stroke="#2563eb" stroke-width="2.5" />
+    <text x="405" y="45" fill="#2563eb" font-size="12px" font-weight="bold">wᵀx + b = 0</text>
+
+    <!-- Class Positive Points -->
+    <circle cx="150" cy="80" r="5" fill="#16a34a" />
+    <circle cx="180" cy="65" r="5" fill="#16a34a" />
+    <circle cx="210" cy="50" r="5" fill="#16a34a" />
+    <circle cx="230" cy="75" r="5" fill="#16a34a" />
+    <text x="170" y="105" fill="#16a34a" font-size="12px" font-weight="bold">Class +1</text>
+
+    <!-- Class Negative Points -->
+    <circle cx="280" cy="160" r="5" fill="#dc2626" />
+    <circle cx="310" cy="145" r="5" fill="#dc2626" />
+    <circle cx="340" cy="170" r="5" fill="#dc2626" />
+    <circle cx="360" cy="135" r="5" fill="#dc2626" />
+    <text x="320" y="190" fill="#dc2626" font-size="12px" font-weight="bold">Class -1</text>
+  </svg>
+  <figcaption><strong>Figure:</strong> The linear decision boundary partitions feature space into two half-spaces based on the sign of the dot product.</figcaption>
+</figure>
+```
 
 ---
 
@@ -392,8 +518,8 @@ Maintain Agent 1's easy-language style (define terms on first use, common words 
 - Professor's notation preserved; standard alternatives noted, not substituted
 - Domain connections are specific and named (not "used in engineering")
 - **Student Q&A has been deduplicated** — one canonical entry per distinct confusion point; pure repetition dropped; frequency noted where several students asked
-- **Exam Guidance Summary and Key Industry Applications sections carried through** if processing the corresponding appendix sections (enriched lightly, never dropped)
-- IRON RULE followed — no new topics introduced (math reconciliation of existing topics is allowed)
+- **Key Industry Applications section carried through** if processing the corresponding appendix section (enriched lightly, never dropped)
+- IRON RULE followed — no new major (`##`) topics introduced from any source; companion documents may add supporting `###` subsections and callouts only
 - Ordinary prose is understandable; readability warnings were reviewed without damaging math
 - **No extraction checklist, quality checklist, or intermediate metadata present in the output**
 - **No `*[verify]*` markers remain in the assembled output**
@@ -411,8 +537,8 @@ An enriched markdown file with:
 - Every derivation complete end-to-end with annotated steps
 - Every `*[verify]*` marker from Agent 1 resolved; unresolved uncertainty stops handoff
 - All prose in easy language
-- No HTML tags yet (Agent 3 handles that)
-- **Appendix sections carried through from Agent 1** (e.g., Key Industry Applications) if applicable — enriched lightly, never dropped. Do NOT create or carry through any study guide section, Exam Guidance Summary, or revision notes. Only the main lecture notes should be there.
+- No rendered HTML blocks yet (except the required inline `<figure><svg>` diagram; Agent 3 handles final HTML layout)
+- **Appendix sections carried through from Agent 1** (e.g., Key Industry Applications) if applicable — enriched lightly, never dropped. Only the main lecture notes and educational appendices should be there.
 - **NO pipeline jargon, agent names, callout legends, enrichment source attribution, or course codes in the output** — see core rule 8.
 - **NO extraction checklist, quality checklist, verification list, or any intermediate metadata.**
 

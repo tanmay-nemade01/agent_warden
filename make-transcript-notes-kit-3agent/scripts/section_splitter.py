@@ -44,8 +44,6 @@ if sys.platform.startswith("win"):
 # ---------------------------------------------------------------------------
 # Regex patterns
 # ---------------------------------------------------------------------------
-H2_PATTERN = re.compile(r"^##\s+(.+)$", re.MULTILINE)
-H3_PATTERN = re.compile(r"^###\s+(.+)$", re.MULTILINE)
 DOTTED_H2 = re.compile(r"^(\d+\.\d+)\s+(.+)$")
 DOTTED_H3 = re.compile(r"^(\d+\.\d+\.\d+)\s+(.+)$")
 GENERATED_SECTION_FILE = re.compile(
@@ -57,6 +55,50 @@ SUMMARY_FILE = re.compile(r"^section_\d+_summary\.json$", re.IGNORECASE)
 # ---------------------------------------------------------------------------
 # Split
 # ---------------------------------------------------------------------------
+
+def _find_headings(text: str, level: int) -> list[tuple[int, str]]:
+    """Find markdown headings of ``level`` outside fenced code blocks.
+
+    A fence is opened by ``` or ~~~ and closed by the same character with at
+    least the same length. ``## comment`` inside a code sample must never
+    become a section boundary.
+    """
+    prefix = "#" * level
+    headings = []
+    offset = 0
+    fence_char = None
+    fence_len = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        fence = re.match(r"^(```+|~~~+)", stripped)
+        if fence:
+            marker = fence.group(1)
+            if fence_char is None:
+                fence_char, fence_len = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_len:
+                fence_char, fence_len = None, 0
+        elif fence_char is None:
+            match = re.match(r"^" + prefix + r"\s+(.+?)\s*$", line)
+            if match:
+                headings.append((offset, match.group(1).strip()))
+        offset += len(line)
+    return headings
+
+
+def _inventory_signature(inventory):
+    """Summarise an inventory for heading-tree comparison.
+
+    A hand-edited or older ``_inventory.json`` may contain non-dict entries;
+    ignore them rather than crashing the split.
+    """
+    if not isinstance(inventory, list):
+        return []
+    return [
+        (entry.get("num"), str(entry.get("title", "")).strip())
+        for entry in inventory
+        if isinstance(entry, dict)
+    ]
+
 
 def split_markdown(
     md_path: str,
@@ -85,6 +127,35 @@ def split_markdown(
         text = f.read()
 
     os.makedirs(output_dir, exist_ok=True)
+
+    # Find all real h2 headings with their positions (fence-aware).
+    h2_matches = _find_headings(text, 2)
+    preamble_text = text[: h2_matches[0][0]] if h2_matches else text
+    expected_signature = []
+    if h2_matches and preamble_text.strip():
+        expected_signature.append((0, "(Preamble)"))
+    if h2_matches:
+        for index, (_, title) in enumerate(h2_matches, start=1):
+            expected_signature.append((index, title))
+    else:
+        expected_signature.append((1, "(Full Document)"))
+
+    # If the heading tree changed (sections added, removed, renamed, or
+    # renumbered), old summaries are orphaned or bound to the wrong content.
+    # Invalidate them automatically so `bind-summaries` cannot silently bind
+    # stale summaries to the new tree.
+    inv_path = os.path.join(output_dir, "_inventory.json")
+    if os.path.exists(inv_path):
+        try:
+            with open(inv_path, "r", encoding="utf-8") as handle:
+                previous_inventory = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            previous_inventory = None
+        if previous_inventory is not None and \
+                _inventory_signature(previous_inventory) != expected_signature:
+            invalidate_summaries = True
+            print("Heading tree changed; invalidating section summaries.")
+
     # A fresh split invalidates every prior generated fragment. Otherwise a
     # stale section_03.html can survive and be silently assembled after the
     # markdown or heading tree changes.
@@ -93,9 +164,6 @@ def split_markdown(
             invalidate_summaries and SUMMARY_FILE.match(filename)
         ):
             os.remove(os.path.join(output_dir, filename))
-
-    # Find all h2 headings with their positions
-    h2_matches = list(H2_PATTERN.finditer(text))
 
     if not h2_matches:
         # No h2 headings — write entire file as a single section
@@ -116,7 +184,7 @@ def split_markdown(
     inventory = []
 
     # Preamble (content before first h2)
-    first_h2_start = h2_matches[0].start()
+    first_h2_start = h2_matches[0][0]
     if first_h2_start > 0:
         preamble = text[:first_h2_start].strip()
         if preamble:
@@ -131,12 +199,10 @@ def split_markdown(
             })
 
     # Extract each h2 section
-    for i, match in enumerate(h2_matches):
+    for i, (start, title) in enumerate(h2_matches):
         section_num = i + 1
-        title = match.group(1).strip()
         heading_match = DOTTED_H2.match(title)
-        start = match.start()
-        end = h2_matches[i + 1].start() if i + 1 < len(h2_matches) else len(text)
+        end = h2_matches[i + 1][0] if i + 1 < len(h2_matches) else len(text)
         body = text[start:end].strip()
 
         # Extract h3 subsections within this section
@@ -168,16 +234,14 @@ def split_markdown(
 
 def _extract_h3s(text: str) -> list[dict]:
     """Extract h3 headings from a section body, assigning subsection numbers."""
-    h3s = []
-    for j, m in enumerate(H3_PATTERN.finditer(text)):
-        title = m.group(1).strip()
-        heading_match = DOTTED_H3.match(title)
-        h3s.append({
-            "sub_num": j + 1,
+    return [
+        {
+            "sub_num": index,
             "title": title,
-            "heading_id": heading_match.group(1) if heading_match else None,
-        })
-    return h3s
+            "heading_id": (match.group(1) if (match := DOTTED_H3.match(title)) else None),
+        }
+        for index, (_, title) in enumerate(_find_headings(text, 3), start=1)
+    ]
 
 
 def _sha256_file(path: str) -> str:
@@ -344,7 +408,7 @@ def assemble_files(
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(body)
 
-    print(f"Assembled {len(parts)} section(s) → {output_path}")
+    print(f"Assembled {len(parts)} section(s) -> {output_path}")
     return output_path
 
 

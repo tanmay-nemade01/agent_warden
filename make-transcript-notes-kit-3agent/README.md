@@ -24,7 +24,8 @@ Does: exhaustive extraction,    Does: manifest closure,     Does: section-by-sec
       PII stripping,               lecture-flow preservation,   HTML conversion,
       teaching-moment manifest,    math reconciliation,         SEO metadata,
       source anchors               selective teaching spine,    prerequisite HTML,
-                                   smart readability checks,    HTML/SEO lint gate
+                                   SVG visual intuition,        HTML/SEO lint gate
+                                   smart readability checks,
                                    topic mapping YAML update
                                    (processed per-section)
 
@@ -42,8 +43,8 @@ The `topic_mappings/` directory (at the workspace root) contains YAML files cata
    - Scans the completed enriched draft to compile all `##` and `###` heading titles.
    - Updates the subject's YAML file (`topic_mappings/<Subject>.yaml`) with this lecture's topics by running the `update_topic_mapping.py` script.
 2. **Agent 3 (Formatter)**:
-   - Reads the YAML file for the same subject to identify overlapping topics in previous lectures (lectures with a lower number).
-   - Generates the **Prerequisite Knowledge** HTML section listing prior coverage.
+   - Runs the deterministic prerequisite generator (`python scripts/topic_mapping_utils.py prerequisites "<Subject>" <LectureNumber>`), which matches this lecture's topics against earlier lectures in the same subject by distinctive token overlap.
+   - It excludes administrative/appendix topics, caps the list, links each item to the earlier notes file, and prints the **Prerequisite Knowledge** HTML section.
    - Does NOT write back to the YAML (Agent 2 has already updated it).
 
 ### Benefits
@@ -67,6 +68,8 @@ outputs/<Subject>/<LecturePrefix>/
 All metadata, SEO tags (Open Graph, Twitter Cards, structured data), and lecture content are embedded directly in the single HTML file — **no companion `.json` files are created**. The BitsNotes viewer reads everything from the HTML itself via `<script id="lecture-metadata">`.
 
 ## Setup
+
+Requires Python >= 3.10.
 
 ```bash
 python -m pip install -r make-transcript-notes-kit-3agent/requirements.txt
@@ -97,24 +100,36 @@ make-transcript-notes-kit-3agent/
 ├── templates/
 │   └── notes.html             ← HTML template (with {{PREREQUISITE_KNOWLEDGE}})
 ├── scripts/
+│   ├── convert_md_to_html.py  ← Section-by-section markdown to HTML converter
 │   ├── lint.py                ← HTML quality gate
 │   ├── lint_dense.py          ← Markdown gate with math-aware prose warnings
 │   ├── verify_manifest.py     ← Source-anchored semantic handoff gate
-│   ├── _plain_language.py     ← Shared word lists for lint
+│   ├── _plain_language.py     ← Shared word lists and PII policies for lint
 │   ├── section_splitter.py    ← Splits drafts; refuses partial assembly by default
 │   ├── topic_mapping_utils.py ← YAML parser + coverage search (acronym-aware)
-│   └── update_topic_mapping.py ← YAML updater (called by Agent 2)
+│   ├── update_topic_mapping.py ← YAML updater (called by Agent 2)
+│   ├── test_pipeline.py        ← Core regression and pipeline unit test suite
+│   ├── test_integration.py     ← Topic-mapping and end-to-end integration tests
+│   └── test_review_regressions.py ← Review-finding regression suite (C1-C4, H1-H8)
+├── utils/
+│   ├── clean_vtt.py           ← WebVTT cleaner with timestamp and speaker options
+│   └── pdf_text_extractor.py  ← PDF-to-text helper (requires PyMuPDF)
 └── references/
-    └── prompts.md                 ← Prompt cookbook
+    ├── analogy_bank.md         ← Reusable analogy examples
+    └── prompts.md              ← Prompt cookbook
 
 Workspace root (shared):
-├── topic_mappings/
-│   ├── Artificial Computational Intelligence.yaml
-│   ├── Data Management for Machine Learning.yaml
-│   ├── Deep Reinforcement Learning.yaml
-│   ├── Mathematical Foundations for Machine Learning.yaml
-│   ├── Natural Language Processing.yaml
-│   └── Software Engineering for Machine Learning.yaml
+├── subjects.json              ← Canonical acronym to course name registry
+└── topic_mappings/            ← 51 course catalogues tracking lecture coverage
+```
+
+## Testing
+
+The core scripts need PyYAML, PDF extraction needs PyMuPDF, and the test suite needs pytest. Python >= 3.10 is required.
+
+```bash
+python -m pip install -r make-transcript-notes-kit-3agent/requirements.txt
+python -m pytest make-transcript-notes-kit-3agent/scripts
 ```
 
 ## Token comparison
@@ -123,7 +138,7 @@ Workspace root (shared):
 |---|---|---|
 | Original toolkit (14 files) | SKILL.md + 8 guidelines + 4 other | ~12,000+ |
 | Optimized (1 file) | SKILL.md | ~5,000 |
-| **3-agent (this)** | **1 focused file per agent** | **~4,000-7,000 each, depending on phase** |
+| **3-agent (this)** | **1 focused file per agent** | **Extractor ~11-12k (46 KB), Enricher ~12k (50 KB), Formatter ~6k (26 KB)** |
 
 ## Section-by-section processing (Agents 2 & 3)
 
@@ -143,11 +158,12 @@ This confines errors to individual sections and makes quality checks targeted.
 
 `<LecturePrefix>_extraction_manifest.json` uses schema version 2. It is a
 **condensed checksum of the dense draft**, not a content store: each essential
-example, Q&A, formula, and teaching moment carries a `source_anchor` (timestamp
-or source line range) and a one-line summary, but the full detail lives in the
-prose. Misconception and vocabulary-correction items also record the trigger and
-resolution. The manifest should stay short — roughly one line per major item,
-not hundreds of lines.
+example, Q&A, formula, and teaching moment carries a short `anchor_quote` copied
+from the draft and a `source_anchor` (source line range preferred; timestamps
+only when the cleaned transcript still carries them). The full detail lives in
+the prose. Misconception and vocabulary-correction items also record the trigger
+and resolution. The manifest should stay short — roughly one line per major
+item, not hundreds of lines.
 
 Run the verifier twice:
 

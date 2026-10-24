@@ -11,13 +11,13 @@ Checks (each reported as PASS / WARN / FAIL):
   * Template hygiene: no surviving {{PLACEHOLDER}} tokens, no broken comments.
   * <meta viewport> present.
   * Metadata JSON is valid and complete (title, subject, date, sections).
-  * SEO: Open Graph tags, Twitter Card tags, description length (100–155 chars),
+  * SEO: Open Graph tags, Twitter Card tags, description length (100-155 chars),
     keywords meta, canonical URL, robots meta, structured data (JSON-LD), author meta.
   * Callout box usage: reports which supported types are used; never requires
     filler boxes merely to include all five types.
   * Math delimiters: flags double-backslash delimiters (\\( \\[) in the visible
     body, which MathJax will NOT render. Use single-backslash \( ... \) and
-    \[ ... \] (MathJax is loaded by the platform — no script tag needed).
+    \[ ... \] (MathJax is loaded by the platform - no script tag needed).
   * No leaked secrets or PII patterns.
   * Readability heuristic: math-stripped prose is reviewed with advisory WARNs.
   * Banned hand-waving phrases: "clearly", "obviously", "it can be shown",
@@ -25,9 +25,8 @@ Checks (each reported as PASS / WARN / FAIL):
   * Fancy/academic word detection: advisory WARN.
   * Flesch Reading Ease estimate: scores prose readability (WARN if hard).
   * Suspiciously long unbroken tokens flagged as overflow risk.
-  * Exam revision notes: passes when revision notes are omitted (main lecture notes only).
   * No <style> tags, no inline style="" attributes, no Google Fonts links.
-  * Leftover *[verify]* math-reconstruction markers (FAIL) — unresolved
+  * Leftover *[verify]* math-reconstruction markers (FAIL) - unresolved
     uncertainty stops shipping and requires Agent 2 or human review.
 
 Exit code is non-zero if any check FAILs.
@@ -64,12 +63,6 @@ SECRET_PATTERNS = [
     ("aws access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("api_key literal", re.compile(r"""api[_-]?key\s*[:=]\s*['\"][^'\"]+['\"]""", re.I)),
     ("bearer token", re.compile(r"Authorization\s*:\s*Bearer\s+\S+", re.I)),
-]
-
-PII_PATTERNS = [
-    ("transcript reference", re.compile(r"\b(transcript|lecture recording|audio recording|this recording)\b", re.I)),
-    ("professor/instructor mention", re.compile(r"\b(professor|instructor|lecturer)\s+[A-Z][a-z]+\b")),
-    ("university mention candidate", re.compile(r"\b(University|Institute|College)\s+of\s+[A-Z]")),
 ]
 
 NON_PROSE_TAGS = {"script", "style", "noscript", "template", "code", "pre", "svg"}
@@ -124,7 +117,13 @@ class Report:
 # HTML extraction
 # ---------------------------------------------------------------------------
 
-VOID_TAGS = {"meta", "link", "img", "br", "hr", "input", "source", "area", "base", "col", "embed", "param", "track", "wbr"}
+SVG_VOID_TAGS = {"circle", "path", "rect", "line", "polyline", "polygon", "ellipse", "stop", "use"}
+SVG_TAGS = {
+    "svg", "path", "circle", "rect", "line", "polyline", "polygon", "ellipse",
+    "text", "tspan", "g", "defs", "marker", "stop", "use", "lineargradient",
+    "radialgradient", "clippath", "mask", "foreignobject"
+}
+VOID_TAGS = {"meta", "link", "img", "br", "hr", "input", "source", "area", "base", "col", "embed", "param", "track", "wbr"} | SVG_VOID_TAGS
 CALLOUT_CLASSES = {"key-concept", "important-note", "example-box", "warning-box", "key-takeaway"}
 
 
@@ -135,7 +134,6 @@ class DocParser(HTMLParser):
         self._suppress_depth = 0
         self._prose_chunks = []
         self.classes_used = set()
-        self.exam_revision_entries = 0
         self.has_style_tag = False
         self.has_inline_style = False
         self.inline_style_tags = []
@@ -208,9 +206,10 @@ class DocParser(HTMLParser):
             self.has_style_tag = True
 
         if "style" in attrd and (attrd.get("style") or "").strip():
-            self.has_inline_style = True
-            if tag not in self.inline_style_tags:
-                self.inline_style_tags.append(tag)
+            if tag not in SVG_TAGS:
+                self.has_inline_style = True
+                if tag not in self.inline_style_tags:
+                    self.inline_style_tags.append(tag)
 
         if tag == "link":
             href = attrd.get("href", "")
@@ -235,10 +234,6 @@ class DocParser(HTMLParser):
         if cls:
             for c in cls.split():
                 self.classes_used.add(c)
-
-        # Track exam revision entries
-        if tag == "div" and "exam-revision-entry" in (attrd.get("class") or ""):
-            self.exam_revision_entries += 1
 
         if tag in NON_PROSE_TAGS:
             self._suppress_depth += 1
@@ -336,15 +331,14 @@ def check_template_hygiene(raw, report):
         if "<!--" in body:
             line = raw[:start].count("\n") + 1
             problems.append(
-                f"comment at line {line} contains nested '<!--' — will end early and leak text")
+                f"comment at line {line} contains nested '<!--' - will end early and leak text")
         pos = end + 3
         n_comments += 1
 
+    # Scan everything except HTML comments. Do NOT strip <script>/<style>:
+    # a placeholder left inside the embedded metadata JSON is still a shipped
+    # defect even though it is not visible body text.
     visible = re.sub(r"<!--.*?-->", "", raw, flags=re.DOTALL)
-    visible = re.sub(r"<script\b.*?</script>", "", visible,
-                     flags=re.DOTALL | re.IGNORECASE)
-    visible = re.sub(r"<style\b.*?</style>", "", visible,
-                     flags=re.DOTALL | re.IGNORECASE)
     leftovers = re.findall(r"\{\{[^}]{0,80}\}?\}?", visible)
     if leftovers:
         sample = "; ".join(t.strip()[:40] for t in leftovers[:5])
@@ -370,9 +364,9 @@ def check_viewport(parser, report):
 def check_seo(parser, report):
     """Validate search-engine optimisation metadata.
 
-    Checks: description length (140–155 chars), Open Graph tags, Twitter Card
-    tags, keywords meta, canonical URL, robots meta, author meta, and JSON-LD
-    structured data.
+    Checks: description length (100-155 chars, hard contract shared with the
+    Agent 3 rubric), Open Graph tags, Twitter Card tags, keywords meta,
+    canonical URL, robots meta, author meta, and JSON-LD structured data.
     """
     issues = []
     warnings = []
@@ -389,11 +383,9 @@ def check_seo(parser, report):
                 f"Description is too short ({len(clean)} chars); must be 100-155 "
                 "characters and packed with keywords for search engines.")
         elif len(clean) > 155:
-            warnings.append(
-                f"Description is {len(clean)} chars; search engines typically "
-                "truncate descriptions longer than 155 characters.")
-        else:
-            warnings.append(f"Description length ({len(clean)} chars) — good.")
+            issues.append(
+                f"Description is {len(clean)} chars; it must be 100-155 characters "
+                "(search engines truncate longer descriptions).")
 
     # --- Open Graph tags (required by Facebook, LinkedIn, etc.) ---
     og_required = {
@@ -469,6 +461,11 @@ def check_metadata(raw, parser, report):
         "datePublished": str, "targetAudience": str,
         "sections": list,
     }
+    # Schema contract shared with Agent 3: no extra/deprecated fields are
+    # shipped, even if they are harmless, because the viewer ignores them and
+    # stale keys drift out of sync with the template.
+    optional = {"prerequisites": list}
+    allowed = set(required) | set(optional)
 
     for field, ftype in required.items():
         if field not in data:
@@ -480,49 +477,21 @@ def check_metadata(raw, parser, report):
         elif ftype == list and len(data[field]) == 0:
             checks.append(f"'{field}' is an empty list")
 
+    for field, ftype in optional.items():
+        if field in data and not isinstance(data[field], ftype):
+            checks.append(f"'{field}' must be {ftype.__name__}, got {type(data[field]).__name__}")
+
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        checks.append(
+            "unknown metadata field(s): " + ", ".join(f"'{k}'" for k in unknown)
+            + ". Allowed keys: " + ", ".join(sorted(allowed)) + ".")
+
     if checks:
         report.failed("metadata", "\n".join(checks))
         return
 
-    # Validate examRevisionNotes structure if present (optional)
-    if "examRevisionNotes" in data:
-        exam = data["examRevisionNotes"]
-        if not isinstance(exam, list):
-            report.warned("metadata", "examRevisionNotes must be a list if present.")
-        else:
-            exam_ok = True
-            for i, entry in enumerate(exam):
-                echecks = []
-                if "topic" not in entry or not entry["topic"]:
-                    echecks.append("missing 'topic'")
-                if "mustKnow" not in entry or not entry["mustKnow"]:
-                    echecks.append("missing 'mustKnow'")
-                if "keyFormula" not in entry or not entry["keyFormula"]:
-                    echecks.append("missing 'keyFormula'")
-                elif r"\[" in entry["keyFormula"] and (r"\(" in entry["keyFormula"] or r"\)" in entry["keyFormula"]):
-                    echecks.append("keyFormula has nested '\\(' or '\\)' inside '\\[' block — use clean LaTeX without nested delimiters")
-                if "commonPitfall" not in entry or not entry["commonPitfall"]:
-                    echecks.append("missing 'commonPitfall'")
-                if "quickCheck" not in entry or not entry["quickCheck"]:
-                    echecks.append("missing 'quickCheck'")
-                if "connections" not in entry:
-                    echecks.append("missing 'connections'")
-                if echecks:
-                    exam_ok = False
-                    report.warned("metadata", f"examRevisionNotes entry {i} ('{entry.get('topic', 'unknown')}'): {'; '.join(echecks)}")
-            if exam_ok:
-                report.passed("metadata", f"Valid metadata JSON with {len(data['sections'])} sections, {len(exam)} exam revision entries.")
-            else:
-                report.warned("metadata", "Metadata JSON present but has issues in examRevisionNotes.")
-    else:
-        report.passed("metadata", f"Valid metadata JSON with {len(data['sections'])} sections (main lecture notes only).")
-
-    # Warn if removed fields are still present
-    removed_fields = [f for f in ("summary", "keyConcepts", "quiz", "examRevisionNotes") if f in data]
-    if removed_fields:
-        report.warned("metadata",
-                      f"Metadata contains removed field(s): {', '.join(removed_fields)}. "
-                      "These sections are no longer part of the output. Remove them.")
+    report.passed("metadata", f"Valid metadata JSON with {len(data['sections'])} sections.")
 
 
 def check_callout_boxes(parser, report):
@@ -548,14 +517,14 @@ def check_callout_boxes(parser, report):
 def check_style_separation(parser, report):
     issues = []
     if parser.has_style_tag:
-        issues.append("Found <style> tag — must rely on /lecture-notes.css only.")
+        issues.append("Found <style> tag - must rely on /lecture-notes.css only.")
     if parser.has_inline_style:
         issues.append(
             "Found inline style=\"\" attribute(s) on: "
             + ", ".join(f"<{t}>" for t in parser.inline_style_tags)
             + " - styling must come from /lecture-notes.css, not inline attributes.")
     if parser.has_google_fonts:
-        issues.append("Found Google Fonts link — must rely on platform fonts only.")
+        issues.append("Found Google Fonts link - must rely on platform fonts only.")
     if issues:
         report.failed("style separation", "\n".join(issues))
     else:
@@ -599,7 +568,7 @@ def check_math(raw, report):
     if split_hits:
         report.failed(
             "math delimiters",
-            f"Found {len(split_hits)} math delimiter(s) isolated in separate HTML tags (e.g. <{split_hits[0]}>\[</{split_hits[0]}>). "
+            f"Found {len(split_hits)} math delimiter(s) isolated in separate HTML tags (e.g. <{split_hits[0]}>\\[</{split_hits[0]}>). "
             "The math expression and its delimiters must be contained within the same HTML element for MathJax to render it."
         )
         failed = True
@@ -681,8 +650,8 @@ def check_math(raw, report):
         )
         failed = True
 
-    # 6. Syntax typos like ']. ' or '\right]. ' before capitalized words
-    syntax_typos = re.findall(r"(?:\\right\]|\])\.\s+[A-Z]", visible)
+    # 6. Syntax typos like naked ']. ' instead of '\).' or ')' before capitalized words (excluding valid LaTeX '\].' or '\right].')
+    syntax_typos = re.findall(r"(?<!\\)(?<!\\right)\]\.\s+[A-Z]", visible)
     if syntax_typos:
         report.warned(
             "math syntax",
@@ -723,11 +692,21 @@ def check_math(raw, report):
                       "No invalid math delimiters, split tags, nested delimiters, leaked tokens, or raw HTML-breaking character issues found.")
 
 
-def check_pii_and_secrets(raw, report):
+def check_pii_and_secrets(parser, report):
+    """Scan visible prose (not code/pre/svg/script) for secrets and PII.
+
+    Teaching examples may legitimately place placeholder credentials inside
+    ``<code>`` or ``<pre>`` blocks, and diagram labels live in ``<svg>`` text.
+    ``DocParser`` already suppresses those regions, so only student-visible
+    prose is scanned here. Severity comes from the shared PII policy in
+    ``_plain_language`` so both lint gates agree.
+    """
+    prose = parser.prose
+
     # Secrets
     secret_hits = []
     for label, pat in SECRET_PATTERNS:
-        for m in pat.finditer(raw):
+        for m in pat.finditer(prose):
             snippet = m.group(0)
             if len(snippet) > 60:
                 snippet = snippet[:57] + "..."
@@ -740,20 +719,29 @@ def check_pii_and_secrets(raw, report):
                 uniq.append(h)
         report.failed("secrets", "Possible secret(s) detected:\n  " + "\n  ".join(uniq))
     else:
-        report.passed("secrets", "No secret-like patterns found.")
+        report.passed("secrets", "No secret-like patterns found in visible prose.")
 
     # PII / transcript references
-    pii_hits = []
-    for label, pat in PII_PATTERNS:
-        for m in pat.finditer(raw):
-            snippet = m.group(0)
-            pii_hits.append(f"{label}: \"{snippet}\"")
-    if pii_hits:
+    pii_fails = []
+    pii_warns = []
+    for label, snippet in PL.find_pii(prose):
+        entry = f"{label}: \"{snippet}\""
+        if PL.pii_severity(label) == "FAIL":
+            pii_fails.append(entry)
+        else:
+            pii_warns.append(entry)
+
+    if pii_fails:
         report.failed("PII / anonymization",
                       "Possible PII or source-file references found (notes must stand alone "
                       "without person/institute names while preserving anonymous Q&A):\n  "
-                      + "\n  ".join(pii_hits))
-    else:
+                      + "\n  ".join(pii_fails))
+    if pii_warns:
+        report.warned("PII / anonymization candidates",
+                      "Possible institution/author mention(s) - verify these are legitimate "
+                      "academic citations, not leaked lecturer details:\n  "
+                      + "\n  ".join(pii_warns))
+    if not pii_fails and not pii_warns:
         report.passed("PII / anonymization",
                       "No obvious PII or transcript references detected.")
 
@@ -763,7 +751,8 @@ _WORD = re.compile(r"\S+")
 
 
 def _prose_for_readability(prose):
-    """Remove mathematical regions before applying language heuristics."""
+    """Remove math regions and resolved verify markers before heuristics."""
+    prose = PL.strip_verify_markers(prose)
     clean = re.sub(
         r"\\begin\{([A-Za-z*]+)\}.*?\\end\{\1\}",
         " ",
@@ -833,13 +822,13 @@ def check_readability(parser, report):
 
 def check_handwaving(parser, report):
     """Detect banned hand-waving phrases/words in the prose (WARN)."""
-    prose = parser.prose
+    prose = PL.strip_verify_markers(parser.prose)
     hits = PL.find_handwaving(prose)
     if hits:
         detail = "; ".join(f"'{p}' ({c}x)" for p, c in hits[:8])
         report.warned("hand-waving",
                       f"Banned hand-waving found: {detail}. "
-                      "These are discouraged in easy-language notes — "
+                      "These are discouraged in easy-language notes - "
                       "consider replacing each with the algebra/logic it hides.")
     else:
         report.passed("hand-waving", "No banned hand-waving phrases detected.")
@@ -853,11 +842,11 @@ def check_fancy_words(parser, report):
         report.passed("fancy words", "No fancy-word offenders detected.")
         return
     total = sum(c for _, _, c in hits)
-    detail = "; ".join(f"'{w}'→'{s}' ({c}x)" for w, s, c in hits[:6])
+    detail = "; ".join(f"'{w}'->'{s}' ({c}x)" for w, s, c in hits[:6])
     if total >= 10:
         report.warned("fancy words",
                       f"{total} fancy-word hit(s): {detail}. "
-                      "Too many academic words — consider plain alternatives.")
+                      "Too many academic words - consider plain alternatives.")
     else:
         report.warned("fancy words",
                       f"{total} fancy-word hit(s): {detail}. "
@@ -873,7 +862,7 @@ def check_flesch(parser, report):
                       f"Too few words ({n_words}) for a reliable score.")
     elif score >= 60:
         report.passed("Flesch reading ease",
-                      f"Score {score}/100 (≥60 = plain English, ~grade 9).")
+                      f"Score {score}/100 (>=60 = plain English, ~grade 9).")
     elif score >= 45:
         report.warned("Flesch reading ease",
                       f"Score {score}/100 (45-59 = fairly hard, ~grade 10-12). "
@@ -902,17 +891,10 @@ def check_long_tokens(parser, report):
                       f"{len(risky)} long unbroken token(s) may cause overflow:\n" + preview)
 
 
-def check_exam_revision(parser, report):
-    if parser.exam_revision_entries == 0:
-        report.passed("exam revision", "No exam revision entries (main lecture notes only).")
-    else:
-        report.passed("exam revision", f"{parser.exam_revision_entries} exam revision entries present.")
-
-
 def check_content_structure(parser, report):
     checks = []
     if not parser.has_chapter_title:
-        checks.append("No h1 tag found — use h1.chapter-title for chapter headings.")
+        checks.append("No h1 tag found - use h1.chapter-title for chapter headings.")
     if not parser.has_metadata_script:
         checks.append("No lecture-metadata script tag.")
 
@@ -936,7 +918,7 @@ def check_verify_markers(raw, report):
     Agent 2 must resolve every one (confirm/correct/fill) or escalate it
     inside a :::warning-box callout and remove the raw marker token.
     A surviving *[verify]* token in the shipped HTML means a math
-    reconstruction was never reconciled — a real correctness risk.
+    reconstruction was never reconciled - a real correctness risk.
 
     Scripts/styles/comments are stripped so JSON-escaped text in the
     metadata script does not trip the check.
@@ -994,7 +976,7 @@ def check_intermediate_metadata(raw, report):
         hits.append(
             f"Found {len(heading_matches)} intermediate metadata heading(s) in the "
             f"visible body (e.g. 'Extraction Checklist', 'Quality self-check'). "
-            f"These are Agent 1/Agent 2 internal artifacts — strip them before shipping."
+            f"These are Agent 1/Agent 2 internal artifacts - strip them before shipping."
         )
 
     # Check for extraction checklist pattern: a section followed by many [x] items
@@ -1004,7 +986,7 @@ def check_intermediate_metadata(raw, report):
         hits.append(
             f"Found {len(checkbox_hits)} '[x]' checkbox markers in the visible body. "
             f"This looks like a leaked extraction checklist. "
-            f"Remove the entire checklist section — it is intermediate process data, "
+            f"Remove the entire checklist section - it is intermediate process data, "
             f"not educational content."
         )
 
@@ -1016,15 +998,58 @@ def check_intermediate_metadata(raw, report):
 
 
 # -- Pipeline jargon patterns (student-facing guardrail) --
-_PIPELINE_JARGON_PATTERNS = [
-    ("'Enriched' in title/heading/body",
+
+# "Agent 1/2/3" is ordinary vocabulary in multi-agent RL lectures, so the
+# identifier only counts as pipeline jargon when a pipeline word appears in
+# the same sentence. The same principle keeps "Feature Extractor" (a real ML
+# component) from being flagged as an agent role label.
+_PIPELINE_CONTEXT = (
+    r"(?:pipeline|dense\s+draft|draft|enrich\w*|handoff|skill|manifest|"
+    r"prompt|phase|json|html\s+conversion|markdown\s+conversion)"
+)
+
+_AGENT_ID_JARGON = re.compile(
+    r"\bAgent\s*[123]\b[^.\n]{0,80}\b" + _PIPELINE_CONTEXT + r"\b"
+    r"|\b" + _PIPELINE_CONTEXT + r"\b[^.\n]{0,80}\bAgent\s*[123]\b",
+    re.IGNORECASE,
+)
+
+_AGENT_ROLE_JARGON = re.compile(
+    r"\bAgent\s*[123]?\s*(?:Extractor|Enricher|Formatter)\b"
+    # Bare role labels ("Extractor output") are jargon, but common technical
+    # compounds such as "feature extractor output" or "entity extractor
+    # output" are ordinary lecture vocabulary.
+    r"|\b(?<!feature\s)(?<!entity\s)(?<!keyword\s)(?<!keyphrase\s)"
+    r"(?<!relation\s)(?<!information\s)(?<!text\s)(?<!data\s)(?<!token\s)"
+    r"(?:Extractor|Enricher|Formatter)[ \t]+"
+    r"(?:phase|step|output|prompt|skill|agent)\b",
+    re.IGNORECASE,
+)
+
+_TITLE_JARGON_PATTERNS = [
+    ("'Enriched' in title/heading",
      re.compile(r"\bEnriched\b", re.IGNORECASE)),
     ("'Dense Draft' reference",
      re.compile(r"\bDense\s+Draft\b", re.IGNORECASE)),
-    ("Agent name/phase label",
-     re.compile(r"\b(?:Agent\s*[123]|Extractor|Enricher|Formatter)\b", re.IGNORECASE)),
+    ("Agent phase label",
+     _AGENT_ID_JARGON),
+    ("Agent role label",
+     _AGENT_ROLE_JARGON),
     ("'enriched by' or 'created by agent'",
      re.compile(r"(?:enriched\s+by|created\s+by\s+agent|based\s+on\s+agent)", re.IGNORECASE)),
+]
+
+_BODY_JARGON_PATTERNS = [
+    ("'Enriched Notes/Draft' phrase in body",
+     re.compile(r"\bEnriched\s+(?:Notes?|Draft|Version|Document|Lecture)\b", re.IGNORECASE)),
+    ("'Dense Draft' reference",
+     re.compile(r"\bDense\s+Draft\b", re.IGNORECASE)),
+    ("Pipeline agent identifier (e.g. Agent 1 output)",
+     _AGENT_ID_JARGON),
+    ("Pipeline agent role label",
+     _AGENT_ROLE_JARGON),
+    ("'enriched by' or 'created by agent'",
+     re.compile(r"(?:enriched\s+by|created\s+by\s+agent|based\s+on\s+agent|enrichment\s+phase)", re.IGNORECASE)),
     ("Callout legend (CSS class names)",
      re.compile(r"(?:key-concept|important-note|example-box|warning-box|key-takeaway)\s*=\s*")),
     ("Enrichment source attribution",
@@ -1035,9 +1060,9 @@ _PIPELINE_JARGON_PATTERNS = [
 def check_pipeline_jargon(raw, parser, report):
     """Detect pipeline-internal language that should never be visible to students.
 
-    Checks both the <title> tag and the visible body text for words like
-    'Enriched', agent names, callout legends, and enrichment source
-    attribution. Any hit is a FAIL.
+    Checks <title>, headings, and metadata title for pipeline labels like 'Enriched',
+    agent names, and checks the visible body for pipeline references, callout legends,
+    and enrichment attributions.
     """
     # Extract visible text: strip scripts, styles, comments
     visible = re.sub(r"<!--.*?-->", "", raw, flags=re.DOTALL)
@@ -1046,19 +1071,30 @@ def check_pipeline_jargon(raw, parser, report):
     visible = re.sub(r"<style\b.*?</style>", "", visible,
                      flags=re.DOTALL | re.IGNORECASE)
 
-    # Also check <title> tag content specifically
+    # 1. Check <title> tag
     title_match = re.search(r"<title[^>]*>(.*?)</title>", raw,
                             re.DOTALL | re.IGNORECASE)
     title_text = title_match.group(1).strip() if title_match else ""
 
     hits = []
 
-    for desc, pattern in _PIPELINE_JARGON_PATTERNS:
-        # Check title
+    for desc, pattern in _TITLE_JARGON_PATTERNS:
         if title_text and pattern.search(title_text):
             hits.append(f"{desc} found in <title> tag: '{title_text[:80]}'")
-        # Check visible body
-        body_matches = pattern.findall(visible)
+
+    # 2. Check headings <h1>, <h2>, <h3>
+    headings = re.findall(r"<h[1-3][^>]*>(.*?)</h[1-3]>", visible, re.IGNORECASE | re.DOTALL)
+    for heading in headings:
+        clean_heading = re.sub(r"<[^>]+>", "", heading).strip()
+        for desc, pattern in _TITLE_JARGON_PATTERNS:
+            if pattern.search(clean_heading):
+                hits.append(f"{desc} found in heading: '{clean_heading[:80]}'")
+
+    # 3. Check visible body with targeted body patterns (prose only: markup and
+    #    diagram text must not create false proximity matches).
+    body_text = parser.prose
+    for desc, pattern in _BODY_JARGON_PATTERNS:
+        body_matches = pattern.findall(body_text)
         if body_matches:
             sample = body_matches[0] if isinstance(body_matches[0], str) else str(body_matches[0])
             hits.append(
@@ -1066,7 +1102,7 @@ def check_pipeline_jargon(raw, parser, report):
                 f"e.g. '{sample[:60]}'). Pipeline-internal language must not be "
                 f"visible to students.")
 
-    # Also check metadata title for jargon
+    # 4. Check metadata title for jargon
     meta_match = re.search(
         r'<script[^>]*id\s*=\s*"lecture-metadata"[^>]*>\s*(.*?)\s*</script>',
         raw, re.DOTALL)
@@ -1074,7 +1110,7 @@ def check_pipeline_jargon(raw, parser, report):
         try:
             meta_data = json.loads(meta_match.group(1))
             meta_title = meta_data.get("title", "")
-            for desc, pattern in _PIPELINE_JARGON_PATTERNS:
+            for desc, pattern in _TITLE_JARGON_PATTERNS:
                 if pattern.search(meta_title):
                     hits.append(
                         f"{desc} found in metadata title: '{meta_title[:80]}'. "
@@ -1092,8 +1128,14 @@ def check_pipeline_jargon(raw, parser, report):
 
 # -- Placeholder and task patterns (student-facing guardrail) --
 _PLACEHOLDER_TASK_PATTERNS = [
-    ("TODO marker", re.compile(r"\bTODO\b", re.IGNORECASE)),
-    ("placeholder marker", re.compile(r"\bplaceholder\b", re.IGNORECASE)),
+    ("TODO marker", re.compile(r"\b(?:TODO|TBD)\b", re.IGNORECASE)),
+    # Bare "placeholder" is legitimate technical vocabulary (e.g. NLP lectures
+    # discuss "the placeholder token"). Only flag it when it describes missing
+    # page content or appears as a fill-in-the-blank marker.
+    ("placeholder marker", re.compile(
+        r"\bplaceholder\s+(?:text|content|section|paragraph|here|below|goes)\b"
+        r"|\[\s*placeholder\s*\]",
+        re.IGNORECASE)),
     ("Agent 2 task instruction", re.compile(r"\bdefine\s+[\w\s-]{2,50}\s+in\s+(?:[\w\s-]+\s+)?notes?\b", re.IGNORECASE)),
     ("bracketed placeholder", re.compile(r"\[\s*(?:insert|add|fill|define|todo|placeholder)[^\]]{0,100}\]", re.IGNORECASE)),
     ("Agent 3 delegation", re.compile(r"\b(?:task|instruction)\s+for\s+Agent\s*3\b", re.IGNORECASE)),
@@ -1104,7 +1146,7 @@ def check_placeholder_tasks(raw, parser, report):
     """Detect leftover placeholder text, TODOs, or task instructions.
 
     These are Agent 2 process instructions for Agent 3 (e.g., 'Define Logistic
-    Regression in revision notes' or 'TODO: ...') and must be resolved
+    Regression' or 'TODO: ...') and must be resolved
     content-aware by Agent 3 during HTML conversion.
     """
     # Extract visible text: strip scripts, styles, comments
@@ -1175,7 +1217,7 @@ _EMOJI_RE = re.compile(r"[\U00010000-\U0010ffff]", flags=re.UNICODE)
 
 
 def check_writing_style(parser, report):
-    """Soft writing-style check — WARN only, never FAIL.
+    """Soft writing-style check - WARN only, never FAIL.
 
     The agent prompts teach principles (clarity, active voice, conversational
     tone). This lint check catches surface-level patterns the agent missed.
@@ -1188,16 +1230,16 @@ def check_writing_style(parser, report):
       - Emojis in visible prose (educational notes should not have emojis).
       - Hashtags (#word) in visible prose.
       - Raw asterisks (*) in visible prose (likely leaked markdown).
-      - AI-chatbot clichés and corporate jargon (from _plain_language.py).
+      - AI-chatbot cliches and corporate jargon (from _plain_language.py).
     """
-    prose = parser.prose
+    prose = PL.strip_verify_markers(parser.prose)
     if not prose.strip():
         report.warned("writing style", "No visible prose extracted; cannot assess style.")
         return
 
     warnings = []
 
-    # 1. Semicolons — suggest shorter sentences
+    # 1. Semicolons - suggest shorter sentences
     semicolons = prose.count(";")
     if semicolons > 0:
         warnings.append(
@@ -1205,7 +1247,7 @@ def check_writing_style(parser, report):
             "Consider splitting into shorter sentences."
         )
 
-    # 2. Emojis — should not appear in textbook notes
+    # 2. Emojis - should not appear in textbook notes
     emoji_hits = _EMOJI_RE.findall(prose)
     if emoji_hits:
         warnings.append(
@@ -1213,7 +1255,7 @@ def check_writing_style(parser, report):
             "Educational notes should not contain emojis."
         )
 
-    # 3. Hashtags — social media artifact
+    # 3. Hashtags - social media artifact
     hashtag_hits = re.findall(r"#\w+", prose)
     if hashtag_hits:
         warnings.append(
@@ -1230,37 +1272,32 @@ def check_writing_style(parser, report):
             "These may be leaked markdown markers."
         )
 
-    # 5. AI-chatbot clichés and corporate jargon (soft signal only)
+    # 5. AI-chatbot cliches and corporate jargon (soft signal only)
     cliche_hits = PL.find_cliches_and_jargon(clean_prose)
     if cliche_hits:
         total = sum(c for _, _, c in cliche_hits)
-        detail = "; ".join(f"'{w}'→'{s}' ({c}x)" for w, s, c in cliche_hits[:6])
+        detail = "; ".join(f"'{w}'->'{s}' ({c}x)" for w, s, c in cliche_hits[:6])
         warnings.append(
-            f"{total} AI-cliché / jargon hit(s): {detail}. "
-            "Review — if the word is technically accurate in context, keep it."
+            f"{total} AI-cliche / jargon hit(s): {detail}. "
+            "Review - if the word is technically accurate in context, keep it."
         )
 
-    # Always WARN, never FAIL — the agent's judgment is the primary defense
+    # Always WARN, never FAIL - the agent's judgment is the primary defense
     if warnings:
         report.warned("writing style", "\n".join(warnings))
     else:
         report.passed("writing style",
-                      "No obvious AI-cliché or formatting issues in prose.")
+                      "No obvious AI-cliche or formatting issues in prose.")
 
 
 def check_html_formatting(raw, report):
     """Detect if the HTML code is minified or written on a single line (or very few lines).
     Well-formatted HTML must have line breaks and proper indentation.
     """
-    # Extract the textbook content and exam revision content
     main_match = re.search(r'<main[^>]*>(.*?)</main>', raw, re.DOTALL | re.IGNORECASE)
-    exam_match = re.search(r'<section\s+class\s*=\s*["\']exam-revision-section["\'][^>]*>(.*?)</section>', raw, re.DOTALL | re.IGNORECASE)
-    
     parts_to_check = []
     if main_match:
         parts_to_check.append(("main textbook content (<main>)", main_match.group(1)))
-    if exam_match:
-        parts_to_check.append(("exam revision notes (<section class=\"exam-revision-section\">)", exam_match.group(1)))
         
     failures = []
     
@@ -1311,6 +1348,41 @@ def check_html_structure(parser, report):
         report.passed("HTML tag balance and callout structure", "No unclosed tags, nested callouts, or tag imbalances found.")
 
 
+_SVG_BLOCK_RE = re.compile(r"<svg\b.*?</svg>", re.IGNORECASE | re.DOTALL)
+_ID_ATTR_RE = re.compile(r"\bid\s*=\s*[\"']([^\"']+)[\"']")
+
+
+def check_svg_ids(raw, report):
+    """Flag duplicate element IDs inside SVG figures.
+
+    Each inline figure is a separate illustration but shares one document ID
+    space. Reusing ``id="arrow"`` or ``id="flow-arrow"`` across figures makes
+    marker references resolve to the first figure only. IDs must be unique
+    (prefix them with the figure slug) or omitted when unused.
+    """
+    ids = []
+    for block in _SVG_BLOCK_RE.findall(raw):
+        ids.extend(_ID_ATTR_RE.findall(block))
+
+    counts = {}
+    for item in ids:
+        counts[item] = counts.get(item, 0) + 1
+    dupes = sorted(item for item, count in counts.items() if count > 1)
+
+    if dupes:
+        detail = ", ".join(f"'{item}' ({counts[item]}x)" for item in dupes[:8])
+        report.warned(
+            "SVG element IDs",
+            f"Duplicate SVG id attribute(s): {detail}. Prefix IDs with the "
+            "figure slug or drop unused IDs; duplicated marker references "
+            "resolve only to the first figure.")
+    elif ids:
+        report.passed("SVG element IDs",
+                      f"{len(ids)} SVG id attribute(s), all unique.")
+    else:
+        report.passed("SVG element IDs", "No SVG element IDs to check.")
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -1328,6 +1400,7 @@ def lint_file(path):
 
     report = Report()
     check_html_structure(parser, report)
+    check_svg_ids(raw, report)
     check_template_hygiene(raw, report)
 
     check_viewport(parser, report)
@@ -1336,13 +1409,12 @@ def lint_file(path):
     check_callout_boxes(parser, report)
     check_style_separation(parser, report)
     check_math(raw, report)
-    check_pii_and_secrets(raw, report)
+    check_pii_and_secrets(parser, report)
     check_readability(parser, report)
     check_handwaving(parser, report)
     check_fancy_words(parser, report)
     check_flesch(parser, report)
     check_long_tokens(parser, report)
-    check_exam_revision(parser, report)
     check_content_structure(parser, report)
     check_intermediate_metadata(raw, report)
     check_verify_markers(raw, report)

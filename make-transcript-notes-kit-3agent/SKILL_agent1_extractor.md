@@ -42,7 +42,7 @@ description: >-
 10. **Math is an audit trail, not a paraphrase** — Every reconstructed formula must keep the professor's verbal description next to it. Agent 2 will reconcile your LaTeX against the enrichment docs using that verbal description as the bridge.
 11. **Strict File Attachment Guard Rail** — Focus *only and only* on the raw `.txt` lecture transcript file attached to the prompt/context. You are strictly prohibited from reading or accessing companion documents, slides, textbooks, or other lecture files. Agent 1 operates strictly on the raw transcript. Agent 2 handles all companion documents.
 12. **Strict Script Creation Guard Rail** — You are strictly prohibited from creating or writing any script (Python, Bash, JS, etc.) inside the toolkit folder (`make-transcript-notes-kit-3agent` or its subfolders) during the process. Any intermediate or temporary scripts created in the workspace for testing or content parsing must be cleaned up and deleted before completing the task.
-13. **Formula Completeness & Manifest Ledger** — Write every formula and equation in full LaTeX. Never emit placeholder tokens (e.g. `[EQ1]`, `EQ0`, `[formula]`, or variables with trailing digits like `\pi(a|s)0`) or truncated snippets. In `<LecturePrefix>_extraction_manifest.json`, record every major extracted formula with a unique item ID (e.g. `L.T.formula.1`) and its full LaTeX expression so downstream agents can trace and verify it.
+13. **Formula Completeness & Manifest Ledger** — Write every formula and equation in full LaTeX. Never emit placeholder tokens (e.g. `[EQ1]`, `EQ0`, `[formula]`, or variables with trailing digits like `\pi(a|s)0`) or truncated snippets. In `<LecturePrefix>_extraction_manifest.json`, record every major extracted formula with a unique item ID (e.g. `<concept-id>.formula.1`) and its full LaTeX expression so downstream agents can trace and verify it.
 
 ### Retention priority (ONLY for transcripts exceeding 25,000 words)
 
@@ -164,7 +164,7 @@ Capture these FULLY:
 - Which textbook chapters to focus on
 - Which topics get more marks and why
 
-**Format as:** Annotate inline where relevant (e.g., "Exam note: expect a 4-mark numerical here") directly alongside the corresponding concept in the main notes. Do NOT create a separate study guide section, exam guidance summary, or dedicated appendix at the end — only the main lecture notes should be there.
+**Format as:** Annotate inline where relevant (e.g., "Exam note: expect a 4-mark numerical here") directly alongside the corresponding concept in the main notes.
 
 ### Dimension 7 — Professor Pedagogical Moments
 
@@ -217,7 +217,7 @@ Before writing a single paragraph, scan the transcript and enumerate the followi
 2. **Every worked example** — each computational walkthrough the transcript contains. Note the concept it belongs to.
 3. **Every formula and symbol** — list them. You will name every symbol on first use.
 4. **The math map** — for every formula/derivation in the transcript, record: (a) the transcript sentence(s) that describe it, (b) the symbols it introduces, (c) whether the professor worked it, stated it, or derived it, (d) your confidence in the reconstruction (high / medium / low). This map is your contract with the Math extraction protocol below — every entry must end up as LaTeX in the draft, with low/medium-confidence entries marked `*[verify]*`.
-5. **Every student Q&A exchange** — mark the transcript timestamps or section headers.
+5. **Every student Q&A exchange** — mark the transcript line numbers (preferred) or timestamps or section headers.
 6. **Every exam guidance mention** — note the topic and what was said.
 7. **Every named reference** — textbook, paper, tool, company, dataset mentioned.
 8. **Every teaching moment** — misconception, vocabulary correction, rejected analogy, warning, re-explanation, or terminology contrast. Record its transcript line/timestamp, the trigger, and the resolution.
@@ -256,8 +256,7 @@ Cross-reference: does every concept have a definition, at least one example, and
 
 After all concept sections, add:
 
-1. **Exam Guidance Summary** — all exam-specific information consolidated
-2. **Key Industry Applications** — all real-world connections consolidated (for quick reference)
+1. **Key Industry Applications** — all real-world connections consolidated (for quick reference)
 
 ### Step 4 — Internal verification (DO NOT include in output)
 
@@ -296,7 +295,9 @@ You MUST resolve all FAIL items flagged by the lint gate and re-run until it pas
 
 ### Step 6 — Write and verify the extraction manifest JSON (MANDATORY, but SECONDARY)
 
-**The dense draft is the deliverable; the manifest is only its checksum.** Write the full educational content in the prose draft (Step 2). Then, AFTER the draft is complete, generate a *condensed* manifest by scanning what you wrote — it exists so a later agent can detect accidental loss, NOT to carry content the prose omitted. Keep it short: one compact line per item, `source_anchor` only (drop `anchor_quote`), and no duplicated prose. Target roughly 1 line of manifest per major concept plus its items — not hundreds of lines. If a teaching moment is only in the manifest and not in the prose, that is a failure: put it in the draft.
+**The dense draft is the deliverable; the manifest is only its checksum.** Write the full educational content in the prose draft (Step 2). Then, AFTER the draft is complete, generate a *condensed* manifest by scanning what you wrote — it exists so a later agent can detect accidental loss, NOT to carry content the prose omitted. Keep each item to one compact line with a short `anchor_quote` copied verbatim from the draft plus a `source_anchor` line range where available (timestamps are acceptable only if the cleaned transcript still carries them). `anchor_quote` is the primary provenance evidence, so never drop it. Target roughly 1 line of manifest per major concept plus its items — not hundreds of lines. If a teaching moment is only in the manifest and not in the prose, that is a failure: put it in the draft.
+
+Replace every `<concept-id>` placeholder below with the real dotted concept ID (for example `5.1` or `5.1.2`). Never ship literal placeholder IDs such as `L.T` or `<concept-id>` in a real manifest.
 
 ```json
 {
@@ -304,7 +305,7 @@ You MUST resolve all FAIL items flagged by the lint gate and re-run until it pas
   "lecture_id": "ML_Lecture_6",
   "concepts": [
     {
-      "id": "L.T",
+      "id": "<concept-id>",
       "title": "Concept Name",
       "salience": "essential",
       "has_formula": true,
@@ -313,41 +314,47 @@ You MUST resolve all FAIL items flagged by the lint gate and re-run until it pas
     }
   ],
   "worked_examples": [
-    { "id": "L.T.example.1", "concept": "L.T", "salience": "essential",
+    { "id": "<concept-id>.example.1", "concept": "<concept-id>", "salience": "essential",
       "description": "One-line description of the worked computation",
-      "source_anchor": "timestamp or transcript line range" }
+      "anchor_quote": "short exact quote from the draft",
+      "source_anchor": "transcript line range (e.g. lines 210-224) or timestamp" }
   ],
   "formulas": [
-    { "id": "L.T.formula.1", "concept": "L.T", "salience": "essential",
+    { "id": "<concept-id>.formula.1", "concept": "<concept-id>", "salience": "essential",
       "description": "One-line description of the formula",
-      "source_anchor": "timestamp or transcript line range" }
+      "anchor_quote": "short exact quote from the draft",
+      "source_anchor": "transcript line range (e.g. lines 210-224) or timestamp" }
   ],
   "qna_exchanges": [
-    { "id": "L.T.qna.1", "concept": "L.T", "salience": "essential",
+    { "id": "<concept-id>.qna.1", "concept": "<concept-id>", "salience": "essential",
       "question_summary": "Summary of the student's question or doubt",
       "answer_summary": "The explanation that resolved it",
-      "source_anchor": "timestamp or transcript line range" }
+      "anchor_quote": "short exact quote from the draft",
+      "source_anchor": "transcript line range (e.g. lines 210-224) or timestamp" }
   ],
   "teaching_moments": [
-    { "id": "L.T.moment.1", "concept": "L.T", "type": "misconception_correction",
+    { "id": "<concept-id>.moment.1", "concept": "<concept-id>", "type": "misconception_correction",
       "salience": "essential",
-      "summary": "trigger → resolution (one line)",
-      "source_anchor": "timestamp or transcript line range" }
+      "summary": "trigger -> resolution (one line)",
+      "anchor_quote": "short exact quote from the draft",
+      "source_anchor": "transcript line range (e.g. lines 210-224) or timestamp" }
   ],
   "lecture_flow": [
-    { "order": 1, "concept": "L.T", "type": "concept_intro|question|correction|example|transition",
+    { "order": 1, "concept": "<concept-id>", "type": "concept_intro|question|correction|example|transition",
       "summary": "What happened and why it led to the next explanation (one line)",
-      "source_anchor": "timestamp or transcript line range" }
+      "anchor_quote": "short exact quote from the draft",
+      "keywords": ["three", "distinctive", "words"],
+      "source_anchor": "transcript line range (e.g. lines 210-224) or timestamp" }
   ],
   "exam_guidance": [
-    { "concept": "L.T", "guidance": "Consolidated guidance or notes about the exam questions" }
+    { "concept": "<concept-id>", "guidance": "Consolidated guidance or notes about the exam questions" }
   ],
   "named_references": [
-    { "type": "textbook/paper/tool/dataset", "name": "e.g. Bishop §4.3" }
+    { "type": "textbook/paper/tool/dataset", "name": "e.g. Bishop 4.3" }
   ]
 }
 ```
-Allowed teaching-moment types include `misconception_correction`, `vocabulary_correction`, `rejected_analogy`, `professor_analogy`, `warning`, `intuition`, `re_explanation`, and `terminology_contrast`. Use `essential`, `useful`, or `optional` salience. All entries must be directly derived from the source and actual extracted content — never write a manifest item whose detail lives only in the manifest.
+Allowed teaching-moment types include `misconception_correction`, `vocabulary_correction`, `rejected_analogy`, `professor_analogy`, `warning`, `intuition`, `re_explanation`, and `terminology_contrast`. Use `essential`, `useful`, or `optional` salience. For a `vocabulary_correction`, include `trigger`, `resolution`, and `preferred_term`; the correction may live in ordinary prose even when there is no Q&A block. All entries must be directly derived from the source and actual extracted content — never write a manifest item whose detail lives only in the manifest.
 
 Run the manifest verifier against the dense draft:
 ```bash

@@ -723,150 +723,231 @@
     padding: 0 5px;
   }
 
-  /* ---- multi-subject batch panel ---- */
-  .batch-panel {
+  /* ---- Per-Transcript Configuration in New Job ---- */
+  .same-subj-toggle-card {
     background: var(--surface);
-    border: 2px solid var(--line);
+    border: 1.5px solid var(--line);
     border-radius: var(--radius);
-    margin-bottom: 20px;
-    overflow: hidden;
+    padding: 10px 12px;
+    margin: 10px 0 12px 0;
+    transition: border-color 0.15s, background-color 0.15s;
   }
-  .batch-bar {
+  .same-subj-toggle-card:hover {
+    border-color: var(--line-strong);
+  }
+  .same-subj-checkbox-label {
     display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 18px;
+    align-items: flex-start;
+    gap: 10px;
     cursor: pointer;
-    list-style: none;
-    flex-wrap: wrap;
+    user-select: none;
+    margin: 0;
   }
-  .batch-bar::-webkit-details-marker { display: none; }
-  .batch-bar h2 { margin: 0; font-size: 16px; }
-  .batch-bar .chip { margin-left: auto; }
-  .batch-body { padding: 0 18px 18px; }
-  .batch-toolbar {
+  .same-subj-checkbox-label input[type="checkbox"] {
+    margin-top: 2px;
+    accent-color: var(--teal);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+  }
+  .same-subj-checkbox-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13.5px;
+    color: var(--ink);
+  }
+  .same-subj-checkbox-text strong {
+    font-weight: 600;
+  }
+  .same-subj-checkbox-text small {
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.3;
+  }
+  .multi-subj-notice {
     display: flex;
     align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 12px 0;
-    border-bottom: 2px solid var(--line);
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--paper);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius);
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin: 8px 0 14px 0;
   }
-  .batch-toolbar input[type="text"] { width: 220px; }
-  .subjects-list {
+  .multi-subj-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: var(--teal-soft);
+    color: var(--teal);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .docs-per-transcript-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--paper);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius);
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-top: 6px;
+  }
+  .per-transcript-config-wrap {
+    margin-top: 14px;
+    padding: 12px;
+    background: var(--surface);
+    border: 1.5px solid var(--line);
+    border-left: 3px solid var(--teal);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ptc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .ptc-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ptc-main-lbl {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--ink);
+    margin: 0;
+  }
+  .ptc-desc {
+    font-size: 12px;
+    line-height: 1.3;
+  }
+  .ptc-list {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    margin-top: 12px;
-    max-height: 420px;
-    overflow: auto;
-    padding-right: 4px;
+    max-height: 380px;
+    overflow-y: auto;
+    padding-right: 2px;
   }
-  .subj-row {
-    border: 2px solid var(--line);
+  .empty-ptc {
+    padding: 16px;
+    text-align: center;
+    font-size: 12.5px;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+  }
+  .ptc-item {
+    background: var(--paper);
+    border: 1px solid var(--line);
     border-radius: var(--radius);
     padding: 10px 12px;
-    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.15s;
   }
-  .subj-row.picked { border-color: var(--teal); background: var(--teal-soft); }
-  .subj-row.empty { opacity: 0.55; }
-  .subj-main {
+  .ptc-item:hover {
+    border-color: var(--line-strong);
+  }
+  .ptc-item-top {
     display: flex;
     align-items: center;
-    gap: 10px;
-    cursor: pointer;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12.5px;
+  }
+  .ptc-fname {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink);
+    font-family: var(--mono);
+    word-break: break-all;
     font-weight: 600;
   }
-  .subj-main input { width: auto; accent-color: var(--teal); }
-  .subj-abbr {
-    font-family: var(--mono);
-    font-size: 12px;
-    background: var(--ink);
-    color: var(--surface);
-    padding: 2px 7px;
-    border-radius: 4px;
+  .ptc-file-icon {
+    color: var(--teal);
+    flex-shrink: 0;
   }
-  .subj-name { font-size: 13.5px; }
-  .subj-badge {
+  .ptc-fmeta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .chip.subtle {
+    background: color-mix(in srgb, var(--line) 40%, transparent);
+    color: var(--ink-soft);
     font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 1px 8px;
-    color: var(--muted);
   }
-  .subj-badge.custom { color: var(--teal); border-color: var(--teal); }
-  .subj-meta {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin: 7px 0 0 26px;
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--muted);
-  }
-  .subj-meta b { color: var(--ink); font-weight: 600; }
-  .subj-actions { display: flex; gap: 8px; margin: 8px 0 0 26px; }
-  .subj-transcripts {
-    margin: 10px 0 0 26px;
-    border: 2px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
-    max-height: 190px;
-    overflow: auto;
-    padding: 5px;
-  }
-  .subj-transcripts label {
-    display: flex;
-    gap: 9px;
-    align-items: baseline;
-    font-size: 12.5px;
-    font-weight: 500;
-    padding: 4px 6px;
-    border-radius: var(--radius);
-    cursor: pointer;
-  }
-  .subj-transcripts label:hover { background: var(--paper); }
-  .subj-transcripts input { width: auto; accent-color: var(--teal); }
-  .subj-transcripts .tsize {
-    margin-left: auto;
-    font-family: var(--mono);
-    font-size: 10.5px;
-    color: var(--muted);
-  }
-  .profile-editor {
-    margin: 10px 0 0 26px;
-    border: 2px dashed var(--line);
-    border-radius: var(--radius);
-    padding: 12px;
+  .ptc-controls {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: 1fr 1fr;
     gap: 10px;
-    background: var(--surface);
   }
-  .profile-editor label {
+  @media (max-width: 650px) {
+    .ptc-controls {
+      grid-template-columns: 1fr;
+    }
+  }
+  .ptc-field {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 11.5px;
+  }
+  .ptc-field label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
     color: var(--muted);
     font-weight: 600;
+    margin: 0;
   }
-  .profile-editor input {
-    font-family: var(--mono);
+  .ptc-field select {
+    padding: 6px 8px;
     font-size: 12px;
-    padding: 6px 9px;
+    width: 100%;
+    background: var(--surface);
   }
-  .profile-editor .btnrow { grid-column: 1 / -1; display: flex; gap: 8px; }
-  .batch-cta {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-top: 14px;
-    flex-wrap: wrap;
+  .ptc-custom-docs input {
+    padding: 5px 8px;
+    font-size: 11.5px;
+    width: 100%;
+    font-family: var(--mono);
+    margin-top: 4px;
   }
-  .batch-cta .status-line { flex: 1; min-width: 200px; }
+  .bp-subj-tag {
+    display: inline-block;
+    padding: 1px 5px;
+    background: var(--teal-soft);
+    color: var(--teal);
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 10px;
+    margin-right: 4px;
+    font-family: var(--mono);
+  }
+  .bp-docs-tag {
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    font-family: var(--mono);
+  }
+
 
   .chips {
     display: flex;
@@ -2188,29 +2269,6 @@
     </div>
   </div>
 
-  <details class="batch-panel" id="batch-panel">
-    <summary class="batch-bar">
-      <h2>Batch &middot; many subjects</h2>
-      <span class="chip" id="batch-count">0 subjects</span>
-      <span class="muted">start a pipeline for every selected subject at once</span>
-    </summary>
-    <div class="batch-body">
-      <div class="batch-toolbar">
-        <input id="batch-filter" type="text" placeholder="Filter subjects&hellip;" aria-label="Filter subjects" spellcheck="false">
-        <button class="btn small" id="batch-all" type="button">select all</button>
-        <button class="btn small" id="batch-none" type="button">clear</button>
-        <label class="inline-check" title="Raise the job limit so the whole batch starts immediately">
-          <input type="checkbox" id="batch-raise-parallel" checked> raise parallelism to fit the batch
-        </label>
-        <span class="muted" id="batch-hint"></span>
-      </div>
-      <div class="subjects-list" id="subjects-list"></div>
-      <div class="batch-cta">
-        <button class="btn primary" id="batch-run" type="button">Run selected subjects</button>
-        <div class="status-line" id="batch-status" aria-live="polite"></div>
-      </div>
-    </div>
-  </details>
 
   <div class="workbench">
     <section class="board" aria-labelledby="board-title">
@@ -2240,7 +2298,18 @@
       <div class="ticket-body">
       <div class="fsection">
       <div class="flabel">Source</div>
-      <div>
+
+      <div class="same-subj-toggle-card">
+        <label class="same-subj-checkbox-label" for="same-subject-toggle">
+          <input type="checkbox" id="same-subject-toggle" checked>
+          <span class="same-subj-checkbox-text">
+            <strong>All transcripts belong to the same subject</strong>
+            <small>Uncheck to assign individual subjects and companion doc folders per transcript file</small>
+          </span>
+        </label>
+      </div>
+
+      <div id="single-subject-wrap">
         <div class="lbl-row">
           <label for="subject">Subject</label>
           <button type="button" id="subject-reset-auto" class="reset-auto-btn" style="display:none;">Reset to auto</button>
@@ -2260,6 +2329,11 @@
         </div>
       </div>
 
+      <div id="multi-subj-notice" class="multi-subj-notice" style="display:none;">
+        <span class="multi-subj-badge">Multi-subject</span>
+        <span>Subject and companion docs are configured individually per transcript below.</span>
+      </div>
+
       <div class="field-block">
         <div class="tlist-header">
           <label style="margin:0;">Transcript files <span class="muted">(select one or more)</span></label>
@@ -2271,6 +2345,18 @@
         </div>
         <div class="tlist" id="tlist"></div>
         <div id="tlist-empty" class="muted" style="display:none;font-size:12px;padding:8px 0;">No matching transcript files found.</div>
+      </div>
+
+      <div id="per-transcript-config-wrap" class="per-transcript-config-wrap" style="display:none;">
+        <div class="ptc-header">
+          <div class="ptc-header-left">
+            <span class="ptc-main-lbl">Per-transcript settings</span>
+            <span class="ptc-counter chip" id="ptc-counter">0 files</span>
+          </div>
+          <button type="button" class="btn small ghost" id="ptc-auto-btn" title="Reset all to auto-detected subject and companion docs">↻ Auto-detect all</button>
+        </div>
+        <div class="ptc-desc muted">Attach an individual subject and companion doc folder to each selected transcript:</div>
+        <div class="ptc-list" id="ptc-list"></div>
       </div>
 
       <div class="chips" id="phase-chips">
@@ -2367,12 +2453,19 @@
           <span class="toggle-label">⚡ Fast mode <span class="toggle-hint">(higher cost, lower latency)</span></span>
         </div>
       </div>
-      <div class="field-block">
+      <div class="field-block" id="single-docs-wrap">
         <div class="lbl-row">
           <label for="docs">Companion docs (Agent 2)</label>
           <button type="button" id="docs-reset-auto" class="reset-auto-btn" style="display:none;">Reset to auto</button>
         </div>
         <select id="docs"></select>
+      </div>
+      <div class="field-block" id="multi-docs-notice" style="display:none;">
+        <label>Companion docs (Agent 2)</label>
+        <div class="docs-per-transcript-info">
+          <span class="multi-subj-badge">Per-transcript</span>
+          <span>Companion doc folders are configured individually per transcript in Source above.</span>
+        </div>
       </div>
       </div>
 
@@ -2474,9 +2567,9 @@ const state = {
   currentSubjectInstructions: { extractor: "", enricher: "", formatter: "" },
   activeInstructionPhase: "enricher",
   subjectProfiles: {},
-  batchPicks: {},        // abbr -> { include: bool, transcripts: Set<string> }
-  batchFilter: "",
-  batchExpanded: {},
+  sameSubject: true,
+  perTranscriptConfig: {},
+  allDocsList: [],
 };
 
 const AUTH_TOKEN = new URLSearchParams(location.search).get("token") || "";
@@ -2950,6 +3043,7 @@ function validateForm() {
   const phases = selectedPhases();
   const runBtn = $("run");
   const stateEl = $("runstate");
+  const sameSubj = $("same-subject-toggle") ? $("same-subject-toggle").checked : true;
   updateRunEstimate();
   refreshBatchPreview();
 
@@ -2972,6 +3066,15 @@ function validateForm() {
   } else if (!phases.length) {
     runBtn.disabled = true;
     stateEl.textContent = "Select at least 1 agent phase";
+  } else if (!sameSubj) {
+    const entries = getMultiSubjectEntries();
+    if (!entries.length) {
+      runBtn.disabled = true;
+      stateEl.textContent = "Assign a subject for each selected transcript file";
+    } else {
+      runBtn.disabled = false;
+      stateEl.textContent = "";
+    }
   } else {
     runBtn.disabled = false;
     stateEl.textContent = "";
@@ -3007,11 +3110,22 @@ function updateRunEstimate() {
   const estEl = $("run-est");
   if (!runBtn) return;
   const est = estimateRunCost();
-  runBtn.textContent = est.n > 1 ? `Run ${est.n} pipelines` : "Run pipeline";
-  if (estEl) {
-    estEl.textContent = est.n
-      ? `~${fmtCost(est.total)} · ~${est.wallMins}m wall (${est.n} job${est.n > 1 ? "s" : ""}, ${state.maxParallel} at a time)`
-      : "";
+  const sameSubj = $("same-subject-toggle") ? $("same-subject-toggle").checked : true;
+  if (!sameSubj) {
+    const entries = getMultiSubjectEntries();
+    runBtn.textContent = est.n > 1 ? `Run ${est.n} pipelines` : "Run pipeline";
+    if (estEl) {
+      estEl.textContent = est.n
+        ? `~${fmtCost(est.total)} · ~${est.wallMins}m wall (${est.n} job${est.n > 1 ? "s" : ""} across ${entries.length} subject${entries.length > 1 ? "s" : ""}, ${state.maxParallel} at a time)`
+        : "";
+    }
+  } else {
+    runBtn.textContent = est.n > 1 ? `Run ${est.n} pipelines` : "Run pipeline";
+    if (estEl) {
+      estEl.textContent = est.n
+        ? `~${fmtCost(est.total)} · ~${est.wallMins}m wall (${est.n} job${est.n > 1 ? "s" : ""}, ${state.maxParallel} at a time)`
+        : "";
+    }
   }
 }
 
@@ -3021,11 +3135,14 @@ let previewTimer = null;
 function renderBatchPlan(el, res) {
   const jobs = res.jobs || [];
   const items = jobs.map(j =>
-    `<li title="${esc(j.transcript || "")}">${esc(j.prefix)}` +
+    `<li title="${esc(j.transcript || "")}">` +
+    (j.abbr ? `<span class="bp-subj-tag">${esc(j.abbr)}</span> ` : "") +
+    `${esc(j.prefix)}` +
+    (j.docs && j.docs !== "__none__" ? ` <span class="bp-docs-tag">· docs: ${esc(j.docs.split(/[/\\]/).pop() || j.docs)}</span>` : (j.docs === "__none__" ? ' <span class="bp-docs-tag">· no docs</span>' : "")) +
     `${j.adjusted ? ' <span class="bp-tag" title="filename did not give a unique folder — suffix added from filename">auto</span>' : ""}</li>`
   ).join("");
   const rej = (res.rejected || []).map(r =>
-    `<li class="bp-rej" title="${esc(r.transcript || "")}">${esc(r.prefix || "(no prefix)")} — ${esc(r.reason)}</li>`
+    `<li class="bp-rej" title="${esc(r.transcript || "")}">${esc(r.subject || "")} ${esc(r.prefix || "(no prefix)")} — ${esc(r.reason)}</li>`
   ).join("");
   const note = jobs.some(j => j.adjusted)
     ? `<div class="bp-note">Duplicate folders were auto-suffixed from filenames — rename the files (or run them one at a time with a manual prefix) for cleaner names.</div>`
@@ -3049,10 +3166,269 @@ function extractLectureFromMeta(meta) {
   return "";
 }
 
+function autoDetectTranscriptConfig(path) {
+  const meta = (state.transcripts || []).find(t => t.path === path) || {};
+  const guess = meta.guess || {};
+  let abbr = meta.abbr || guess.abbr || "";
+  if (!abbr && (state.subjects || []).length) {
+    const fname = (meta.name || path.split(/[/\\]/).pop() || "").toLowerCase();
+    const match = state.subjects.find(s =>
+      fname.includes(s.abbr.toLowerCase()) || fname.includes((s.subject || "").toLowerCase())
+    );
+    if (match) abbr = match.abbr;
+    else abbr = state.subjects[0].abbr;
+  }
+  let docs = "";
+  if (abbr && state.docsByAbbr && state.docsByAbbr[abbr]) {
+    docs = state.docsByAbbr[abbr].path || "";
+  }
+  return {
+    abbr,
+    docs,
+    isCustom: false,
+    customDocs: "",
+    isManualDocs: false,
+  };
+}
+
+function getMultiSubjectEntries() {
+  const boxes = checkedTranscripts();
+  const groupMap = new Map();
+  for (const b of boxes) {
+    const p = b.value;
+    let conf = state.perTranscriptConfig[p];
+    if (!conf) {
+      conf = autoDetectTranscriptConfig(p);
+      state.perTranscriptConfig[p] = conf;
+    }
+    if (!conf || !conf.abbr) continue;
+    const docsVal = conf.isCustom ? (conf.customDocs || "").trim() : (conf.docs || "");
+    const key = `${conf.abbr}:::${docsVal}`;
+    if (!groupMap.has(key)) {
+      const entry = { abbr: conf.abbr, transcripts: [] };
+      if (docsVal) entry.docs = docsVal;
+      groupMap.set(key, entry);
+    }
+    groupMap.get(key).transcripts.push(p);
+  }
+  return Array.from(groupMap.values());
+}
+
+function renderPerTranscriptConfig() {
+  const host = $("ptc-list");
+  const wrap = $("per-transcript-config-wrap");
+  if (!host || !wrap) return;
+  const boxes = checkedTranscripts();
+  const count = boxes.length;
+  const counter = $("ptc-counter");
+  if (counter) counter.textContent = `${count} file${count === 1 ? "" : "s"}`;
+
+  if (!count) {
+    host.innerHTML = `<div class="empty-ptc muted">Select transcript files in the list above to assign their subjects and companion doc folders.</div>`;
+    return;
+  }
+
+  const allDocs = state.allDocsList || [];
+  const subjects = state.subjects || [];
+
+  const html = boxes.map(b => {
+    const p = b.value;
+    const meta = (state.transcripts || []).find(t => t.path === p) || { name: p.split(/[/\\]/).pop(), bytes: 0 };
+    let conf = state.perTranscriptConfig[p];
+    if (!conf) {
+      conf = autoDetectTranscriptConfig(p);
+      state.perTranscriptConfig[p] = conf;
+    }
+    const lec = extractLectureFromMeta(meta);
+
+    const subjOptions = subjects.map(s =>
+      `<option value="${esc(s.abbr)}"${s.abbr === conf.abbr ? " selected" : ""}>${esc(s.abbr)} — ${esc(s.subject)}</option>`
+    ).join("");
+
+    const docsOptions = allDocs.map(d =>
+      `<option value="${esc(d.path)}"${!conf.isCustom && conf.docs === d.path ? " selected" : ""}>${esc(d.name)}</option>`
+    ).join("");
+
+    return `
+      <div class="ptc-item" data-path="${esc(p)}">
+        <div class="ptc-item-top">
+          <span class="ptc-fname" title="${esc(p)}">
+            <svg class="ptc-file-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>${esc(meta.name)}</span>
+          </span>
+          <div class="ptc-fmeta">
+            <span class="tsize">${fmtBytes(meta.bytes)}</span>
+            ${lec ? `<span class="chip subtle">Lecture ${esc(lec)}</span>` : ""}
+          </div>
+        </div>
+        <div class="ptc-controls">
+          <div class="ptc-field">
+            <label>Subject</label>
+            <select class="ptc-subj-select" data-path="${esc(p)}">
+              ${subjOptions}
+            </select>
+          </div>
+          <div class="ptc-field">
+            <label>Companion docs</label>
+            <select class="ptc-docs-select" data-path="${esc(p)}">
+              <option value=""${!conf.isCustom && conf.docs === "" ? " selected" : ""}>Default (subject's folder)</option>
+              <option value="__none__"${!conf.isCustom && conf.docs === "__none__" ? " selected" : ""}>None — no companion docs</option>
+              ${docsOptions}
+              <option value="__custom__"${conf.isCustom ? " selected" : ""}>+ Custom folder…</option>
+            </select>
+            <div class="ptc-custom-docs" style="${conf.isCustom ? '' : 'display:none;'}">
+              <input type="text" class="ptc-custom-input" placeholder="e.g. C:/path/to/companion_docs" spellcheck="false" data-path="${esc(p)}" value="${esc(conf.customDocs || "")}">
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  host.innerHTML = html;
+
+  host.querySelectorAll(".ptc-subj-select").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const p = sel.dataset.path;
+      const conf = state.perTranscriptConfig[p];
+      if (!conf) return;
+      conf.abbr = sel.value;
+      if (!conf.isManualDocs && !conf.isCustom) {
+        const match = state.docsByAbbr ? state.docsByAbbr[conf.abbr] : null;
+        conf.docs = match && match.path ? match.path : "";
+        const row = sel.closest(".ptc-item");
+        const docsSel = row.querySelector(".ptc-docs-select");
+        if (docsSel) docsSel.value = conf.docs;
+      }
+      refreshBatchPreview();
+      validateForm();
+    });
+  });
+
+  host.querySelectorAll(".ptc-docs-select").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const p = sel.dataset.path;
+      const conf = state.perTranscriptConfig[p];
+      if (!conf) return;
+      const row = sel.closest(".ptc-item");
+      const customWrap = row.querySelector(".ptc-custom-docs");
+      if (sel.value === "__custom__") {
+        conf.isCustom = true;
+        if (customWrap) customWrap.style.display = "";
+      } else {
+        conf.isCustom = false;
+        conf.docs = sel.value;
+        conf.isManualDocs = true;
+        if (customWrap) customWrap.style.display = "none";
+      }
+      refreshBatchPreview();
+      validateForm();
+    });
+  });
+
+  host.querySelectorAll(".ptc-custom-input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const p = inp.dataset.path;
+      const conf = state.perTranscriptConfig[p];
+      if (!conf) return;
+      conf.customDocs = inp.value;
+      refreshBatchPreview();
+      validateForm();
+    });
+  });
+}
+
+function updateSameSubjectVisibility() {
+  const toggle = $("same-subject-toggle");
+  const same = toggle ? toggle.checked : true;
+  state.sameSubject = same;
+
+  const subjWrap = $("single-subject-wrap");
+  const multiSubjNotice = $("multi-subj-notice");
+  const docsWrap = $("single-docs-wrap");
+  const multiDocsNotice = $("multi-docs-notice");
+  const ptcWrap = $("per-transcript-config-wrap");
+  const hint = $("guess-hint");
+  const moreOpts = $("more-opts");
+
+  if (subjWrap) subjWrap.style.display = same ? "" : "none";
+  if (multiSubjNotice) multiSubjNotice.style.display = same ? "none" : "flex";
+  if (docsWrap) docsWrap.style.display = same ? "" : "none";
+  if (multiDocsNotice) multiDocsNotice.style.display = same ? "none" : "block";
+  if (ptcWrap) ptcWrap.style.display = same ? "none" : "flex";
+  if (moreOpts) moreOpts.style.display = same ? "" : "none";
+
+  if (!same) {
+    renderPerTranscriptConfig();
+    refreshBatchPreview();
+    if (hint) {
+      const boxes = checkedTranscripts();
+      hint.innerHTML = boxes.length
+        ? `Configuring ${boxes.length} files across individual subjects and companion doc folders below.`
+        : "Pick one or more transcript files above.";
+    }
+  } else {
+    applyGuessFromSelection();
+  }
+  validateForm();
+}
+
 function refreshBatchPreview() {
   const el = $("batch-preview");
   if (!el) return;
   const boxes = checkedTranscripts();
+  const sameSubj = $("same-subject-toggle") ? $("same-subject-toggle").checked : true;
+
+  if (!sameSubj) {
+    if (boxes.length === 0) {
+      previewSeq++;
+      el.classList.remove("show");
+      el.innerHTML = "";
+      return;
+    }
+    const entries = getMultiSubjectEntries();
+    if (!entries.length) {
+      el.classList.remove("show");
+      el.innerHTML = "";
+      return;
+    }
+    const items = boxes.map(b => {
+      const meta = (state.transcripts || []).find(t => t.path === b.value) || {};
+      let conf = state.perTranscriptConfig[b.value];
+      if (!conf) {
+        conf = autoDetectTranscriptConfig(b.value);
+        state.perTranscriptConfig[b.value] = conf;
+      }
+      const lec = extractLectureFromMeta(meta);
+      const pfx = conf.abbr ? (lec ? `${conf.abbr}_Lecture_${lec}` : `${conf.abbr}_Lecture`) : (meta.name || b.value);
+      const docsLabel = conf.isCustom
+        ? (conf.customDocs || "custom folder")
+        : (conf.docs === "__none__"
+            ? "no docs"
+            : (conf.docs ? (conf.docs.split(/[/\\]/).pop() || conf.docs) : "auto docs"));
+      return `<li><span class="bp-subj-tag">${esc(conf.abbr || "?")}</span> ${esc(pfx)} <span class="bp-docs-tag">· docs: ${esc(docsLabel)}</span></li>`;
+    }).join("");
+    el.classList.add("show");
+    el.innerHTML = `<strong>Multi-subject batch: ${boxes.length} job${boxes.length === 1 ? "" : "s"} across ${entries.length} subject${entries.length === 1 ? "" : "s"}</strong> (max ${state.maxParallel} in parallel)<ul>${items}</ul>`;
+    clearTimeout(previewTimer);
+    const seq = ++previewSeq;
+    previewTimer = setTimeout(async () => {
+      const res = await api("/api/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          backend: $("backend") ? $("backend").value : state.backend,
+          model: $("model") ? $("model").value : state.defaultModel,
+          variant: $("variant") && !$("variant").disabled ? $("variant").value : "",
+          subjects: entries,
+        }),
+      });
+      if (seq !== previewSeq || !res || res.error) return;
+      renderBatchPlan(el, res);
+    }, 250);
+    return;
+  }
+
+  // Single-subject mode
   if (boxes.length < 2) {
     previewSeq++;
     el.classList.remove("show");
@@ -3062,7 +3438,7 @@ function refreshBatchPreview() {
   const isSubjectManual = !!$("subject").dataset.manual;
   const manualAbbr = $("subject").value;
   const items = boxes.map(b => {
-    const meta = state.transcripts.find(t => t.path === b.value) || {};
+    const meta = (state.transcripts || []).find(t => t.path === b.value) || {};
     const g = meta.guess || {};
     let prefix;
     if (isSubjectManual && manualAbbr) {
@@ -3093,254 +3469,26 @@ function checkedTranscripts() {
   return Array.from(document.querySelectorAll("#tlist input:checked"));
 }
 
-// —— multi-subject batch panel ——
-function batchPick(abbr) {
-  if (!state.batchPicks[abbr]) {
-    state.batchPicks[abbr] = { include: false, transcripts: new Set() };
-  }
-  return state.batchPicks[abbr];
-}
-
-function subjectTranscripts(abbr) {
-  return (state.transcripts || []).filter(t => t.abbr === abbr);
-}
-
-function renderSubjects() {
-  const host = $("subjects-list");
-  if (!host) return;
-  const filter = (state.batchFilter || "").trim().toLowerCase();
-  const rows = [];
-  let pickedSubjects = 0, pickedJobs = 0;
-  for (const s of state.subjects) {
-    const abbr = s.abbr;
-    const prof = state.subjectProfiles[abbr] || {};
-    const tlist = subjectTranscripts(abbr);
-    const pick = batchPick(abbr);
-    if (pick.include) {
-      pickedSubjects++;
-      pickedJobs += pick.transcripts.size;
-    }
-    if (filter &&
-        !(`${abbr} ${s.subject}`.toLowerCase().includes(filter))) {
-      continue;
-    }
-    const outRel = prof.output_template || "{subject}/{prefix}";
-    const outHint = `${prof.output_root || "outputs"}/${outRel}`;
-    const docsHint = prof.docs_resolved || prof.docs_dir || "—";
-    const badge = prof.explicit
-      ? `<span class="subj-badge custom">custom</span>`
-      : `<span class="subj-badge">default</span>`;
-    const emptyCls = tlist.length ? "" : " empty";
-    const rowsHtml = `
-      <div class="subj-row${pick.include ? " picked" : ""}${emptyCls}" data-abbr="${esc(abbr)}">
-        <label class="subj-main">
-          <input type="checkbox" class="subj-pick" value="${esc(abbr)}"${pick.include ? " checked" : ""}${tlist.length ? "" : " disabled"}>
-          <span class="subj-abbr">${esc(abbr)}</span>
-          <span class="subj-name">${esc(s.subject)}</span>
-          ${badge}
-        </label>
-        <div class="subj-meta">
-          <span title="companion docs folder"><b>docs</b> ${esc(docsHint)}</span>
-          <span title="output folder"><b>out</b> ${esc(outHint)}</span>
-          <span title="prefix template"><b>prefix</b> ${esc(prof.prefix_template || "{abbr}_Lecture_{lecture}")}</span>
-          <span><b>files</b> ${tlist.length}</span>
-        </div>
-        <div class="subj-actions">
-          <button class="btn small ghost subj-expand" type="button">transcripts</button>
-          <button class="btn small ghost subj-profile" type="button">profile</button>
-        </div>
-        <div class="subj-transcripts"${state.batchExpanded[abbr] ? "" : " hidden"}>
-          ${tlist.map(t => `<label><input type="checkbox" class="subj-t" value="${esc(t.path)}"${pick.transcripts.has(t.path) ? " checked" : ""}><span>${esc(t.name)}</span><span class="tsize">${fmtBytes(t.bytes)}</span></label>`).join("") || `<div class="muted" style="padding:8px;font-size:12px;">No transcripts found for this subject — set its transcripts folder in the profile.</div>`}
-        </div>
-        <div class="profile-editor" hidden></div>
-      </div>`;
-    rows.push(rowsHtml);
-  }
-  host.innerHTML = rows.join("");
-
-  host.querySelectorAll(".subj-pick").forEach(inp => {
-    inp.addEventListener("change", () => {
-      const abbr = inp.value;
-      const pick = batchPick(abbr);
-      pick.include = inp.checked;
-      if (inp.checked) {
-        // Checking a subject queues all of its transcripts by default.
-        subjectTranscripts(abbr).forEach(t => pick.transcripts.add(t.path));
-      }
-      renderSubjects();
-      updateBatchEstimate();
-    });
-  });
-  host.querySelectorAll(".subj-t").forEach(inp => {
-    inp.addEventListener("change", () => {
-      const row = inp.closest(".subj-row");
-      const pick = batchPick(row.dataset.abbr);
-      if (inp.checked) pick.transcripts.add(inp.value);
-      else pick.transcripts.delete(inp.value);
-      updateBatchEstimate();
-    });
-  });
-  host.querySelectorAll(".subj-expand").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const row = btn.closest(".subj-row");
-      const abbr = row.dataset.abbr;
-      const box = row.querySelector(".subj-transcripts");
-      state.batchExpanded[abbr] = !state.batchExpanded[abbr];
-      box.hidden = !state.batchExpanded[abbr];
-    });
-  });
-  host.querySelectorAll(".subj-profile").forEach(btn => {
-    btn.addEventListener("click", () => openProfileEditor(btn.closest(".subj-row")));
-  });
-
-  $("batch-count").textContent =
-    `${pickedSubjects} subject${pickedSubjects === 1 ? "" : "s"} · ${pickedJobs} job${pickedJobs === 1 ? "" : "s"}`;
-  updateBatchEstimate();
-}
-
-function updateBatchEstimate() {
-  const hint = $("batch-hint");
-  if (!hint) return;
-  let subjects = 0, jobs = 0;
-  for (const s of state.subjects) {
-    const pick = state.batchPicks[s.abbr];
-    if (pick && pick.include) { subjects++; jobs += pick.transcripts.size; }
-  }
-  const cap = state.maxParallel || 2;
-  hint.textContent = subjects
-    ? `${subjects} subject${subjects === 1 ? "" : "s"} · ${jobs} job${jobs === 1 ? "" : "s"} · ${cap} in parallel`
-    : "pick one or more subjects to run";
-  const run = $("batch-run");
-  if (run) run.disabled = subjects === 0 || jobs === 0;
-}
-
-function openProfileEditor(row) {
-  const abbr = row.dataset.abbr;
-  const prof = state.subjectProfiles[abbr] || {};
-  const editor = row.querySelector(".profile-editor");
-  if (!editor) return;
-  if (!editor.hidden) { editor.hidden = true; return; }
-  const field = (key, label, value, placeholder) => `
-    <label>${esc(label)}
-      <input data-f="${key}" value="${esc(value || "")}" placeholder="${esc(placeholder || "")}" spellcheck="false">
-    </label>`;
-  editor.innerHTML =
-    field("transcripts_dir", "Transcripts folder", prof.transcripts_dir, "transcript files/QC") +
-    field("docs_dir", "Companion docs folder", prof.docs_dir, "companion_docs/QC") +
-    field("output_root", "Output root", prof.output_root, "outputs") +
-    field("output_template", "Output path template", prof.output_template, "{subject}/{prefix}") +
-    field("prefix_template", "Prefix template", prof.prefix_template, "{abbr}_Lecture_{lecture}") +
-    field("topic_mapping", "Topic mapping YAML", prof.topic_mapping, "topic_mappings/<Subject>.yaml") +
-    `<div class="btnrow">
-       <button class="btn small primary" id="pf-save-${esc(abbr)}" type="button">Save profile</button>
-       <button class="btn small" id="pf-reset-${esc(abbr)}" type="button">Reset to default</button>
-       <span class="muted" id="pf-msg-${esc(abbr)}" style="font-size:11px;"></span>
-     </div>`;
-  editor.hidden = false;
-  const saveBtn = editor.querySelector(`#pf-save-${CSS.escape(abbr)}`);
-  const resetBtn = editor.querySelector(`#pf-reset-${esc(abbr)}`);
-  const msg = editor.querySelector(`#pf-msg-${esc(abbr)}`);
-  saveBtn.addEventListener("click", async () => {
-    const fields = {};
-    editor.querySelectorAll("input[data-f]").forEach(i => {
-      fields[i.dataset.f] = i.value.trim();
-    });
-    msg.textContent = "saving…";
-    const res = await api("/api/profiles", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ abbr, fields }),
-    });
-    if (res.error) { msg.textContent = res.error; return; }
-    msg.textContent = "saved";
-    await refreshConfig();
-  });
-  resetBtn.addEventListener("click", async () => {
-    msg.textContent = "resetting…";
-    const res = await api("/api/profiles?action=delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ abbr }),
-    });
-    if (res.error) { msg.textContent = res.error; return; }
-    msg.textContent = "reset";
-    await refreshConfig();
-  });
-}
-
-async function runBatch() {
-  const entries = [];
-  for (const s of state.subjects) {
-    const pick = state.batchPicks[s.abbr];
-    if (!pick || !pick.include) continue;
-    const transcripts = Array.from(pick.transcripts);
-    if (!transcripts.length) continue;
-    entries.push({ abbr: s.abbr, transcripts });
-  }
-  if (!entries.length) {
-    $("batch-status").innerHTML = `<span class="error">Pick at least one subject with transcripts.</span>`;
-    return;
-  }
-  const phases = selectedPhases();
-  if (!phases.length) {
-    $("batch-status").innerHTML = `<span class="error">Select at least one agent phase.</span>`;
-    return;
-  }
-  const totalJobs = entries.reduce((n, e) => n + e.transcripts.length, 0);
-  const btn = $("batch-run");
-  btn.disabled = true;
-  $("batch-status").innerHTML = `<span class="muted">starting ${totalJobs} job(s) across ${entries.length} subject(s)…</span>`;
-
-  if ($("batch-raise-parallel")?.checked) {
-    const boost = Math.min(Math.max(totalJobs, state.maxParallel || 2), 64);
-    const pr = await api("/api/parallel", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        max_parallel: boost,
-        // Share the pool so one subject cannot starve the others.
-        max_parallel_per_subject: Math.max(1, Math.ceil(boost / Math.min(entries.length, 4))),
-      }),
-    });
-    if (!pr.error) {
-      state.maxParallel = pr.max_parallel;
-      const inp = $("parallel");
-      if (inp) inp.value = pr.max_parallel;
-    }
-  }
-
-  const body = {
-    phases,
-    backend: $("backend").value || state.backend || "opencode",
-    model: $("model").value || state.defaultModel,
-    variant: $("variant").disabled ? "" : ($("variant").value || ""),
-    subjects: entries,
-  };
-  const res = await api("/api/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  btn.disabled = false;
-  if (res.error) {
-    $("batch-status").innerHTML = `<span class="error">${esc(res.error)}</span>`;
-    return;
-  }
-  const started = (res.jobs || []).length;
-  const rejected = res.rejected || [];
-  let msg = `Started ${started} run(s) across ${entries.length} subject(s).`;
-  if (rejected.length) {
-    msg += ` Rejected ${rejected.length}: ` +
-      rejected.map(r => `${r.subject || r.prefix || "?"} (${r.reason})`).join("; ");
-  }
-  $("batch-status").innerHTML = `<span class="${rejected.length ? "warn" : "ok"}">${esc(msg)}</span>`;
-  refreshHistory();
-}
 
 function applyGuessFromSelection() {
   if (state.applyingGuess) return;
   const boxes = checkedTranscripts();
   const hint = $("guess-hint");
+  const sameSubj = $("same-subject-toggle") ? $("same-subject-toggle").checked : true;
+
+  if (!sameSubj) {
+    renderPerTranscriptConfig();
+    refreshBatchPreview();
+    validateForm();
+    if (hint) {
+      hint.innerHTML = boxes.length
+        ? `Configuring ${boxes.length} files across individual subjects and companion doc folders below.`
+        : "";
+    }
+    refreshArtifacts();
+    return;
+  }
+
   validateForm();
   if (!boxes.length) {
     hint.textContent = "";
@@ -3526,11 +3674,33 @@ $("tall").addEventListener("click", () => {
     if (c) c.checked = true;
   });
   applyGuessFromSelection();
+  if (!state.sameSubject) renderPerTranscriptConfig();
 });
 $("tnone").addEventListener("click", () => {
   document.querySelectorAll("#tlist input").forEach(c => c.checked = false);
   applyGuessFromSelection();
+  if (!state.sameSubject) renderPerTranscriptConfig();
 });
+
+const sameSubjToggle = $("same-subject-toggle");
+if (sameSubjToggle) {
+  sameSubjToggle.addEventListener("change", updateSameSubjectVisibility);
+}
+
+const ptcAutoBtn = $("ptc-auto-btn");
+if (ptcAutoBtn) {
+  ptcAutoBtn.addEventListener("click", () => {
+    const boxes = checkedTranscripts();
+    for (const b of boxes) {
+      delete state.perTranscriptConfig[b.value];
+      state.perTranscriptConfig[b.value] = autoDetectTranscriptConfig(b.value);
+    }
+    renderPerTranscriptConfig();
+    refreshBatchPreview();
+    validateForm();
+    setStatus(`Auto-detected subjects and companion doc folders for ${boxes.length} file(s).`, "ok");
+  });
+}
 
 const tfilterInput = $("tfilter");
 if (tfilterInput) {
@@ -3621,46 +3791,11 @@ $("addsubj-save").addEventListener("click", async () => {
   }
 });
 
-// —— batch panel wiring ——
-(function () {
-  const filter = $("batch-filter");
-  if (filter) {
-    filter.addEventListener("input", () => {
-      state.batchFilter = filter.value;
-      renderSubjects();
-    });
-  }
-  const all = $("batch-all");
-  if (all) {
-    all.addEventListener("click", () => {
-      for (const s of state.subjects) {
-        const pick = batchPick(s.abbr);
-        const own = subjectTranscripts(s.abbr);
-        if (!own.length) { pick.include = false; continue; }
-        pick.include = true;
-        own.forEach(t => pick.transcripts.add(t.path));
-      }
-      renderSubjects();
-    });
-  }
-  const none = $("batch-none");
-  if (none) {
-    none.addEventListener("click", () => {
-      for (const s of state.subjects) {
-        const pick = batchPick(s.abbr);
-        pick.include = false;
-        pick.transcripts.clear();
-      }
-      renderSubjects();
-    });
-  }
-  const run = $("batch-run");
-  if (run) run.addEventListener("click", () => runBatch());
-})();
 
 async function startJobs({ resume = false, retry = false, phases = null,
                            abbr = null, prefix = null, lectureNum = null,
                            transcripts = null } = {}) {
+  const isSameSubject = $("same-subject-toggle") ? $("same-subject-toggle").checked : true;
   abbr = abbr || $("subject").value;
   prefix = prefix != null ? prefix : $("prefix").value.trim();
   lectureNum = lectureNum != null ? lectureNum : ($("lecture").value.trim() || prefixToLecture(prefix));
@@ -3670,6 +3805,72 @@ async function startJobs({ resume = false, retry = false, phases = null,
     return setStatus("Choose at least one transcript file.", "error");
   if (!resume && !retry && !phases.length)
     return setStatus("Select at least one agent phase.", "error");
+
+  if (!resume && !retry && !isSameSubject) {
+    const entries = getMultiSubjectEntries();
+    if (!entries.length)
+      return setStatus("Assign a subject for each selected transcript file.", "error");
+    state.starting = true;
+    $("run").disabled = true;
+    $("runstate").textContent = `starting ${transcripts.length} run(s) across ${entries.length} subject(s)…`;
+
+    const runAll = $("parallel-all") && $("parallel-all").checked;
+    if (runAll && transcripts.length > state.maxParallel) {
+      const boost = Math.min(transcripts.length, 64);
+      const pr = await api("/api/parallel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          max_parallel: boost,
+          max_parallel_per_subject: Math.max(1, Math.ceil(boost / Math.min(entries.length, 4))),
+        }),
+      });
+      if (!pr.error) {
+        state.maxParallel = pr.max_parallel;
+        const inp = $("parallel");
+        if (inp) inp.value = pr.max_parallel;
+      }
+    }
+
+    const body = {
+      phases,
+      backend: $("backend").value || state.backend || "opencode",
+      model: $("model").value || state.defaultModel,
+      variant: $("variant").disabled ? "" : ($("variant").value || ""),
+      subjects: entries,
+    };
+    if (body.backend === "cursor" && $("cursor-fast-block").classList.contains("visible")) {
+      body.fast = $("cursor-fast").checked;
+    }
+    let res;
+    try {
+      res = await api("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } finally {
+      state.starting = false;
+      $("run").disabled = false;
+      $("runstate").textContent = "";
+      validateForm();
+    }
+    if (res.error) return setStatus(res.error, "error");
+    const adjustedN = (res.jobs || []).filter(j => j.adjusted).length;
+    const started = (res.jobs || []).map(j =>
+      `${j.prefix}${j.adjusted ? "*" : ""} [${(j.phases||[]).join(",")}]`).join(", ");
+    setStatus(`Started ${(res.jobs||[]).length} run(s) across ${entries.length} subject(s): ${started}` +
+              (adjustedN ? ` (${adjustedN} duplicate folder${adjustedN === 1 ? "" : "s"} auto-suffixed*)` : ""),
+              "ok");
+    if (res.rejected && res.rejected.length) {
+      setStatus(`Started ${(res.jobs||[]).length} · rejected ${res.rejected.length}: ` +
+                res.rejected.map(r => `${r.subject || r.prefix || "?"} (${r.reason})`).join("; "), "warn");
+    }
+    refreshHistory();
+    refreshArtifacts();
+    return;
+  }
+
   state.starting = true;
   $("run").disabled = true;
   $("runstate").textContent = resume ? "resuming…" : retry ? "retrying…" :
@@ -4693,6 +4894,7 @@ async function refreshConfig({ refreshModels = false } = {}) {
       extraDocs.push({ name: `${abbr} · ${p}`, path: p });
     }
   }
+  state.allDocsList = (cfg.docs || []).concat(extraDocs);
   docsSel.innerHTML =
     `<option value="">Default (subject's folder)</option>` +
     `<option value="__none__">None — no companion docs</option>` +
@@ -4710,10 +4912,13 @@ async function refreshConfig({ refreshModels = false } = {}) {
   tlist.innerHTML = cfg.transcripts.map(t =>
     `<label><input type="checkbox" value="${esc(t.path)}"${checked.has(t.path)?" checked":""}><span>${esc(t.name)}</span>${t.abbr ? `<span class="tsubj">${esc(t.abbr)}</span>` : ""}<span class="tsize">${fmtBytes(t.bytes)}</span></label>`).join("");
   tlist.querySelectorAll("input").forEach(inp => {
-    inp.addEventListener("change", applyGuessFromSelection);
+    inp.addEventListener("change", () => {
+      applyGuessFromSelection();
+      if (!state.sameSubject) renderPerTranscriptConfig();
+    });
   });
+  if (!state.sameSubject) renderPerTranscriptConfig();
   validateForm();
-  renderSubjects();
 }
 
 function handleEvent(ev) {

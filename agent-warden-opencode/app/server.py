@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 import urllib.parse
-from collections import deque
+from collections import deque, defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -818,6 +818,7 @@ class Handler(BaseHTTPRequestHandler):
         jobs: list[dict] = []
         rejected: list[dict] = []
         shared = {k: v for k, v in body.items() if k != "subjects"}
+        taken_by_subj: dict[str, set[str]] = defaultdict(set)
         for entry in entries:
             if not isinstance(entry, dict):
                 rejected.append({"subject": "", "reason": "invalid subject entry"})
@@ -826,17 +827,22 @@ class Handler(BaseHTTPRequestHandler):
             merged.update({k: v for k, v in entry.items() if v is not None})
             abbr = str(merged.get("abbr") or merged.get("subject") or "").strip().upper()
             merged["abbr"] = abbr
-            result = self._plan_subject_jobs(merged, start)
+            result = self._plan_subject_jobs(merged, start, taken_prefixes=taken_by_subj[abbr])
             if result.get("error"):
                 rejected.append({"subject": abbr, "reason": result["error"]})
                 continue
+            for j in result.get("jobs") or []:
+                pfx = (j.get("prefix") or "").lower()
+                if pfx:
+                    taken_by_subj[abbr].add(pfx)
             jobs.extend(result.get("jobs") or [])
             rejected.extend(result.get("rejected") or [])
         return {"ok": bool(jobs), "jobs": jobs, "rejected": rejected,
                 "max_parallel": get_max_parallel(),
                 "subjects": len(entries)}
 
-    def _plan_subject_jobs(self, body: dict, start: bool) -> dict:
+    def _plan_subject_jobs(self, body: dict, start: bool,
+                           taken_prefixes: set[str] | None = None) -> dict:
         """Plan the jobs for a single subject."""
         abbr = str(body.get("abbr") or body.get("subject") or "").strip().upper()
         subjects = config.all_subjects()
@@ -900,8 +906,9 @@ class Handler(BaseHTTPRequestHandler):
                 t, body, transcripts, subjects, prof=prof)
             idents.append((t, prefix, lecture_num))
         resolved = _resolve_batch_prefixes(
-            [(Path(t).stem, p) for t, p, _ in idents])
-        for (t, prefix, lecture_num), (_, adjusted) in zip(idents, resolved):
+            [(Path(t).stem, p) for t, p, _ in idents],
+            taken=taken_prefixes)
+        for (t, _, lecture_num), (prefix, adjusted) in zip(idents, resolved):
             if not prefix:
                 return {"ok": False,
                         "error": "prefix required (e.g. NLP_Lecture_9)",
@@ -980,8 +987,8 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["last_error"] = None
             self._launch_job(spec, run_id, run)
             jobs.append({"run_id": run_id, **{k: spec[k] for k in
-                        ("subject", "prefix", "lecture_num", "phases",
-                         "backend", "model", "variant", "adjusted")}})
+                        ("subject", "abbr", "prefix", "lecture_num", "phases",
+                         "backend", "model", "variant", "adjusted", "docs") if k in spec}})
         return {"ok": bool(jobs), "jobs": jobs, "rejected": rejected,
                 "max_parallel": get_max_parallel()}
 
@@ -1321,7 +1328,7 @@ def _disambiguated_prefix(base: str, stem: str,
 
 
 def _resolve_batch_prefixes(derived: list[tuple[str, str]],
-                           ) -> list[tuple[str, bool]]:
+                           taken: set[str] | None = None) -> list[tuple[str, bool]]:
     """Map (stem, prefix) pairs to (unique_prefix, adjusted).
 
     Windows output folders are case-insensitive, so collisions are
@@ -1329,15 +1336,17 @@ def _resolve_batch_prefixes(derived: list[tuple[str, str]],
     prefix instead of silently overwriting an earlier job's artifacts.
     """
     out: list[tuple[str, bool]] = []
-    taken: set[str] = set()
+    taken_set: set[str] = set(taken) if taken is not None else set()
     for stem, prefix in derived:
         adjusted = False
-        if prefix.lower() in taken:
-            uniq = _disambiguated_prefix(prefix, stem, taken)
+        if prefix.lower() in taken_set:
+            uniq = _disambiguated_prefix(prefix, stem, taken_set)
             if uniq:
                 prefix, adjusted = uniq, True
-        taken.add(prefix.lower())
+        taken_set.add(prefix.lower())
         out.append((prefix, adjusted))
+    if taken is not None:
+        taken.update(taken_set)
     return out
 
 
